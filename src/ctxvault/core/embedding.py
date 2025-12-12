@@ -8,7 +8,7 @@ def get_model():
         MODEL = SentenceTransformer("all-MiniLM-L6-v2")
     return MODEL
 
-def embed_list(chunks: list[str]):
+def embed_list(chunks: list[str])-> list[list[float]]:
     embeddings = get_model().encode(sentences=chunks)
     print(embeddings.shape)
     return embeddings
