@@ -200,3 +200,5 @@ pip-selfcheck.json
 # Ignore all local history of files
 .history
 .ionide
+
+data/
