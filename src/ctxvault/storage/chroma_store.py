@@ -17,3 +17,6 @@ def query(query_embedding: list[float],  n_results: int = 5):
         n_results=n_results
     )
     return results
+
+def delete_document(ids: list[str]):
+    collection.delete(ids=ids)
