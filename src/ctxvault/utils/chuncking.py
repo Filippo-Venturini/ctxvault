@@ -1,5 +1,5 @@
 
-def chunking(text:str, chunk_size: int = 700, overlap: int = 20)->list[str]:
+def chunking(text:str, chunk_size: int = 50, overlap: int = 20)->list[str]:
     text_splitted = text.split(" ")
     chunks = [
         " ".join(text_splitted[i:i+chunk_size]) 

@@ -11,7 +11,7 @@ def add_document(ids: list[str], embeddings: list[list[float]], metadatas, chunk
         documents=chunks
     )
 
-def query(query_embedding: list[float],  n_results: int = 5):
+def query(query_embedding: list[float],  n_results: int = 5)-> dict:
     results = collection.query(
         query_embeddings=query_embedding,
         n_results=n_results
