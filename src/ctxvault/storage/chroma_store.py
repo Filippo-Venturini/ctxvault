@@ -1,21 +1,16 @@
 from chromadb import PersistentClient
 from pathlib import Path
+from ctxvault.utils.config import get_db_path
 
 _chroma_client = None
 _collection = None
 
-def init_db(path: str = "./data/chroma"):
-    global _chroma_client, _collection, _db_path
-    
-    _db_path = Path(path)
-    _db_path.mkdir(parents=True, exist_ok=True)
-    
-    _chroma_client = PersistentClient(path=str(_db_path))
-    _collection = _chroma_client.get_or_create_collection(name="ctxvault")
-
 def get_collection():
+    global _chroma_client, _collection
     if _collection is None:
-        init_db()
+        path = get_db_path()
+        _chroma_client = PersistentClient(path=path)
+        _collection = _chroma_client.get_or_create_collection("ctxvault")
     return _collection
 
 def add_document(ids: list[str], embeddings: list[list[float]], metadatas: list[dict], chunks: list[str]):
