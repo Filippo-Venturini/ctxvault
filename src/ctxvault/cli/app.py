@@ -38,8 +38,27 @@ def index(path: str = "."):
     typer.secho(f"Skipped: {skipped}", fg=typer.colors.YELLOW, bold=True)
 
 @app.command()
-def query(text: str):
-    typer.echo(f"Query: {text}")
+def query(text: str = ""):
+    result = vault.query(text=text)
+    if not result.results:
+        typer.secho("No results found.", fg=typer.colors.YELLOW)
+        return
+
+    for doc in result.results:
+        typer.secho(
+            f"{doc.source}  (score: {doc.score:.2f})",
+            fg=typer.colors.GREEN,
+            bold=True
+        )
+
+        for chunk in doc.chunks:
+            typer.echo(
+                f"  ├─ chunk #{chunk.chunk_index} ({chunk.score:.2f})"
+            )
+            preview = chunk.text.strip().replace("\n", " ")
+            typer.echo(f"  │  {preview[:200]}")
+
+        typer.echo()
 
 @app.command()
 def delete(path: str):
