@@ -71,3 +71,17 @@ def delete_file(file_path: Path)-> None:
         raise FileOutsideVault("The file to delete is already outside the Context Vault.")
     
     indexer.delete_file(file_path=str(file_path))
+
+def reindex_file(file_path: Path)-> None:
+    vault_config = load_config()
+    if file_path.suffix not in SUPPORTED_EXT:
+        raise UnsupportedFileTypeError("File type not supported.")
+    if vault_config is None:
+        raise VaultNotInitializedError("Context Vault not initialized in this path. Execute 'ctxvault init' first.")
+    
+    vault_path = Path(vault_config["vault_path"])
+
+    if not file_path.resolve().is_relative_to(vault_path):
+        raise FileOutsideVault("The file to reindex is outside the Context Vault.")
+
+    indexer.reindex_file(file_path=str(file_path))

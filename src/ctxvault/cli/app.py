@@ -34,7 +34,7 @@ def index(path: str = "."):
             )
             skipped += 1
 
-    typer.secho(f"\nIndexed: {indexed}", fg=typer.colors.GREEN, bold=True)
+    typer.secho(f"Indexed: {indexed}", fg=typer.colors.GREEN, bold=True)
     typer.secho(f"Skipped: {skipped}", fg=typer.colors.YELLOW, bold=True)
 
 @app.command()
@@ -76,7 +76,26 @@ def delete(path: str = "."):
             )
             skipped += 1
 
-    typer.secho(f"\Deleted: {deleted}", fg=typer.colors.RED, bold=True)
+    typer.secho(f"Deleted: {deleted}", fg=typer.colors.RED, bold=True)
+    typer.secho(f"Skipped: {skipped}", fg=typer.colors.YELLOW, bold=True)
+
+@app.command()
+def reindex(path: str = "."):
+    reindexed = skipped = 0
+    base = Path(path)
+    for file in vault.iter_files(base):
+        try:
+            vault.reindex_file(file_path=file)
+            typer.secho(f"Reindexed: {file}", fg=typer.colors.GREEN)
+            reindexed += 1
+        except Exception as e:
+            typer.secho(
+                f"Skipped: {file} ({e})",
+                fg=typer.colors.YELLOW
+            )
+            skipped += 1
+
+    typer.secho(f"Reindexed: {reindexed}", fg=typer.colors.GREEN, bold=True)
     typer.secho(f"Skipped: {skipped}", fg=typer.colors.YELLOW, bold=True)
 
 @app.command()
