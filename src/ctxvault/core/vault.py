@@ -28,6 +28,19 @@ def iter_files(path: Path):
             if p.is_file()
         )
 
+def index_files(base_path: Path)-> tuple[list[str], list[str]]:
+    indexed_files = []
+    skipped_files = []
+
+    for file in iter_files(path=base_path):
+        try:
+            index_file(file_path=file)
+            indexed_files.append(file)
+        except Exception as e:
+            skipped_files.append(f"{file} ({e})")
+
+    return indexed_files, skipped_files
+
 def index_file(file_path:Path)-> None:
     vault_config = load_config()
     if file_path.suffix not in SUPPORTED_EXT:

@@ -20,22 +20,17 @@ def init(path: str = "."):
 
 @app.command()
 def index(path: str = "."):
-    indexed = skipped = 0
     base = Path(path)
-    for file in vault.iter_files(base):
-        try:
-            vault.index_file(file_path=file)
-            typer.secho(f"Indexed: {file}", fg=typer.colors.GREEN)
-            indexed += 1
-        except Exception as e:
-            typer.secho(
-                f"Skipped: {file} ({e})",
-                fg=typer.colors.YELLOW
-            )
-            skipped += 1
+    indexed_files, skipped_files = vault.index_files(base_path=base)
 
-    typer.secho(f"Indexed: {indexed}", fg=typer.colors.GREEN, bold=True)
-    typer.secho(f"Skipped: {skipped}", fg=typer.colors.YELLOW, bold=True)
+    for file in indexed_files:
+        typer.secho(f"Indexed: {file}", fg=typer.colors.GREEN)
+
+    for file in skipped_files:
+        typer.secho(f"Skipped: {file}", fg=typer.colors.YELLOW)
+
+    typer.secho(f"Indexed: {len(indexed_files)}", fg=typer.colors.GREEN, bold=True)
+    typer.secho(f"Skipped: {len(skipped_files)}", fg=typer.colors.YELLOW, bold=True)
 
 @app.command()
 def query(text: str = ""):
