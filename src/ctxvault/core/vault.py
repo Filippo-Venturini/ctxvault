@@ -74,8 +74,24 @@ def query(text: str)-> QueryResult:
     
     return QueryResult(query=text, results=chunks_match)
 
+def delete_files(base_path: Path)-> tuple[list[str], list[str]]:
+    deleted_files = []
+    skipped_files = []
+
+    for file in iter_files(path=base_path):
+        try:
+            delete_file(file_path=file)
+            deleted_files.append(str(file))
+        except Exception as e:
+            skipped_files.append(f"{str(file)} ({e})")
+
+    return deleted_files, skipped_files
+
 def delete_file(file_path: Path)-> None:
     vault_config = load_config()
+
+    if file_path.suffix not in SUPPORTED_EXT:
+        raise UnsupportedFileTypeError("File already out of the Context Vault because its type is not supported.")
 
     if vault_config is None:
         raise VaultNotInitializedError("Context Vault not initialized in this path. Execute 'ctxvault init' first.")

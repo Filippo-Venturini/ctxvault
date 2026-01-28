@@ -1,7 +1,7 @@
 from pathlib import Path
-from ctxvault.api.schemas import IndexRequest, IndexResponse, InitRequest, InitResponse, QueryRequest, QueryResponse
+from ctxvault.api.schemas import DeleteResponse, IndexRequest, IndexResponse, InitRequest, InitResponse, QueryRequest, QueryResponse
 from ctxvault.core.exceptions import VaultAlreadyExistsError
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, Query
 from ctxvault.core import vault
 
 app = FastAPI()
@@ -16,7 +16,7 @@ async def init(init_request: InitRequest)-> InitResponse:
     except VaultAlreadyExistsError as e:
         raise HTTPException(status_code=400, detail=f"Vault already initialized at {e.existing_path}")
 
-@ctxvault_router.post("/index")
+@ctxvault_router.put("/index")
 async def index(index_request: IndexRequest):
     indexed_files, skipped_files = vault.index_files(base_path=Path(index_request.file_path))
 
@@ -36,10 +36,12 @@ async def query(query_request: QueryRequest)-> QueryResponse:
     return QueryResponse(results=result.results)
 
 @ctxvault_router.delete("/delete")
-async def delete():
-    return None
+async def delete(file_path: str = Query(...)):
+    deleted_files, skipped_files = vault.delete_files(base_path=Path(file_path))
+    
+    return DeleteResponse(deleted_files=deleted_files, skipped_files=skipped_files)
 
-@ctxvault_router.patch("/reindex")
+@ctxvault_router.put("/reindex")
 async def reindex():
     return None
 

@@ -20,8 +20,7 @@ def init(path: str = "."):
 
 @app.command()
 def index(path: str = "."):
-    base = Path(path)
-    indexed_files, skipped_files = vault.index_files(base_path=base)
+    indexed_files, skipped_files = vault.index_files(base_path=Path(path))
 
     for file in indexed_files:
         typer.secho(f"Indexed: {file}", fg=typer.colors.GREEN)
@@ -57,22 +56,16 @@ def query(text: str = ""):
 
 @app.command()
 def delete(path: str = "."):
-    deleted = skipped = 0
-    base = Path(path)
-    for file in vault.iter_files(base):
-        try:
-            vault.delete_file(file_path=file)
-            typer.secho(f"Deleted: {file}", fg=typer.colors.RED)
-            deleted += 1
-        except Exception as e:
-            typer.secho(
-                f"Skipped: {file} ({e})",
-                fg=typer.colors.YELLOW
-            )
-            skipped += 1
+    deleted_files, skipped_files = vault.delete_files(base_path=Path(path))
 
-    typer.secho(f"Deleted: {deleted}", fg=typer.colors.RED, bold=True)
-    typer.secho(f"Skipped: {skipped}", fg=typer.colors.YELLOW, bold=True)
+    for file in deleted_files:
+        typer.secho(f"Deleted: {file}", fg=typer.colors.RED)
+
+    for file in skipped_files:
+        typer.secho(f"Skipped: {file}", fg=typer.colors.YELLOW)
+
+    typer.secho(f"Deleted: {len(deleted_files)}", fg=typer.colors.RED, bold=True)
+    typer.secho(f"Skipped: {len(skipped_files)}", fg=typer.colors.YELLOW, bold=True)
 
 @app.command()
 def reindex(path: str = "."):

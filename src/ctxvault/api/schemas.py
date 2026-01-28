@@ -20,3 +20,7 @@ class QueryRequest(BaseModel):
 
 class QueryResponse(BaseModel):
     results: list[ChunkMatch]
+
+class DeleteResponse(BaseModel):
+    deleted_files: list[str]
+    skipped_files: list[str]
