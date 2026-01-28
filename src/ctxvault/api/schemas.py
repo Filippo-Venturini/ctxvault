@@ -1,3 +1,4 @@
+from ctxvault.models.documents import DocumentInfo
 from ctxvault.models.query_result import ChunkMatch
 from pydantic import BaseModel
 
@@ -31,3 +32,6 @@ class ReindexRequest(BaseModel):
 class ReindexResponse(BaseModel):
     reindexed_files: list[str]
     skipped_files: list[str]
+
+class ListResponse(BaseModel):
+    documents: list[DocumentInfo]

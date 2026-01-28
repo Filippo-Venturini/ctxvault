@@ -1,5 +1,5 @@
 from pathlib import Path
-from ctxvault.api.schemas import DeleteResponse, IndexRequest, IndexResponse, InitRequest, InitResponse, QueryRequest, QueryResponse, ReindexRequest, ReindexResponse
+from ctxvault.api.schemas import DeleteResponse, IndexRequest, IndexResponse, InitRequest, InitResponse, ListResponse, QueryRequest, QueryResponse, ReindexRequest, ReindexResponse
 from ctxvault.core.exceptions import VaultAlreadyExistsError
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from ctxvault.core import vault
@@ -36,18 +36,19 @@ async def query(query_request: QueryRequest)-> QueryResponse:
     return QueryResponse(results=result.results)
 
 @ctxvault_router.delete("/delete")
-async def delete(file_path: str = Query(...)):
+async def delete(file_path: str = Query(...))-> DeleteResponse:
     deleted_files, skipped_files = vault.delete_files(base_path=Path(file_path))
 
     return DeleteResponse(deleted_files=deleted_files, skipped_files=skipped_files)
 
 @ctxvault_router.put("/reindex")
-async def reindex(reindex_request: ReindexRequest):
+async def reindex(reindex_request: ReindexRequest)-> ReindexResponse:
     reindexed_files, skipped_files = vault.index_files(base_path=Path(reindex_request.file_path))
 
     return ReindexResponse(reindexed_files=reindexed_files, skipped_files=skipped_files)
 
 
 @ctxvault_router.get("/list")
-async def list():
-    return None
+async def list()-> ListResponse:
+    documents = vault.list_documents()
+    return ListResponse(documents=documents)
