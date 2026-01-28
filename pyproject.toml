@@ -3,8 +3,8 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ctxvault"
-version = "0.1.0"
+name = "CtxVault"
+version = "0.1.1"
 description = "ctxvault is a local-first knowledge vault that indexes your documents, generates embeddings, and enables fast semantic search via CLI or API. Designed for personal knowledge bases, RAG pipelines, and AI agents."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -58,6 +58,8 @@ dependencies = [
     "python-docx>=1.0.0",
     "markdown>=3.0.0",
     "strip-tags>=0.5.0",
+    "build>=1.0.0",
+    "twine>=5.0.0"
 ]
 
 [project.optional-dependencies]
