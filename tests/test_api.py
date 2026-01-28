@@ -193,23 +193,17 @@ class TestListEndpoint:
 
 
 class TestEndToEndFlow:
-    @pytest.mark.usefixtures("mock_chroma")
-    def test_full_workflow(self, mock_vault_not_initialized, tmp_path):
-        init_response = client.post(
-            "/ctxvault/init",
-            json={"vault_path": str(mock_vault_not_initialized.parent)}
-        )
-        assert init_response.status_code == 200
+    def test_full_workflow(self, mock_vault_config, temp_docs):
         
-        docs = mock_vault_not_initialized / "docs"
-        docs.mkdir()
-        (docs / "test.txt").write_text("test content")
+        list_response = client.get("/ctxvault/list")
+        assert list_response.status_code == 200
         
         index_response = client.put(
             "/ctxvault/index",
-            json={"file_path": str(docs)}
+            json={"file_path": str(temp_docs)}
         )
         assert index_response.status_code == 200
+        assert "indexed_files" in index_response.json()
         
         list_response = client.get("/ctxvault/list")
         assert list_response.status_code == 200
@@ -219,8 +213,16 @@ class TestEndToEndFlow:
             json={"query": "test"}
         )
         assert query_response.status_code == 200
+        assert "results" in query_response.json()
+        
+        reindex_response = client.put(
+            "/ctxvault/reindex",
+            json={"file_path": str(temp_docs)}
+        )
+        assert reindex_response.status_code == 200
         
         delete_response = client.delete(
-            f"/ctxvault/delete?file_path={docs}"
+            f"/ctxvault/delete?file_path={temp_docs}"
         )
         assert delete_response.status_code == 200
+        assert "deleted_files" in delete_response.json()
