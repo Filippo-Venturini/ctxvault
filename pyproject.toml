@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "CtxVault"
-version = "0.1.1"
-description = "ctxvault is a local-first knowledge vault that indexes your documents, generates embeddings, and enables fast semantic search via CLI or API. Designed for personal knowledge bases, RAG pipelines, and AI agents."
+name = "ctxvault"
+version = "0.1.4"
+description = "CtxVault is a local-first knowledge vault that indexes your documents, generates embeddings, and enables fast semantic search via CLI or API. Designed for personal knowledge bases, RAG pipelines, and AI agents."
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
@@ -81,8 +81,11 @@ Repository = "https://github.com/Filippo-Venturini/ctx-vault"
 Issues = "https://github.com/Filippo-Venturini/ctx-vault/issues"
 
 [tool.setuptools]
-packages = ["ctxvault"]
 package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["ctxvault*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
