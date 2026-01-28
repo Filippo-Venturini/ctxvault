@@ -39,21 +39,21 @@ def query(text: str = ""):
         typer.secho("No results found.", fg=typer.colors.YELLOW)
         return
 
-    for doc in result.results:
-        typer.secho(
-            f"{doc.source}  (score: {doc.score:.2f})",
-            fg=typer.colors.GREEN,
-            bold=True
-        )
+    typer.secho(f"\n Found {len(result.results)} chunks", fg=typer.colors.GREEN, bold=True)
+    typer.echo("─" * 80)
+    
+    for idx, chunk in enumerate(result.results, 1):
+        typer.secho(f"\n[{idx}] ", fg=typer.colors.CYAN, bold=True, nl=False)
+        typer.secho(f"score: {chunk.score:.3f}", fg=typer.colors.MAGENTA)
+        typer.secho(f"    ▸ {chunk.source} ", fg=typer.colors.BLUE, nl=False)
+        typer.echo(f"(chunk {chunk.chunk_index})")
 
-        for chunk in doc.chunks:
-            typer.echo(
-                f"  ├─ chunk #{chunk.chunk_index} ({chunk.score:.2f})"
-            )
-            preview = chunk.text.strip().replace("\n", " ")
-            typer.echo(f"  │  {preview[:200]}")
-
-        typer.echo()
+        preview = chunk.text.strip().replace("\n", " ")
+        if len(preview) > 200:
+            preview = preview[:200] + "..."
+        typer.echo(f"    {preview}")
+    
+    typer.echo("\n" + "─" * 80)
 
 @app.command()
 def delete(path: str = "."):

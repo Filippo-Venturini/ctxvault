@@ -1,5 +1,5 @@
 from pathlib import Path
-from ctxvault.api.schemas import IndexRequest, IndexResponse, InitRequest, InitResponse
+from ctxvault.api.schemas import IndexRequest, IndexResponse, InitRequest, InitResponse, QueryRequest, QueryResponse
 from ctxvault.core.exceptions import VaultAlreadyExistsError
 from fastapi import APIRouter, FastAPI, HTTPException
 from ctxvault.core import vault
@@ -22,9 +22,18 @@ async def index(index_request: IndexRequest):
 
     return IndexResponse(indexed_files=indexed_files, skipped_files=skipped_files)
 
-@ctxvault_router.get("/query")
-async def query():
-    return None
+@ctxvault_router.post("/query")
+async def query(query_request: QueryRequest)-> QueryResponse:
+
+    if query_request.query == None:
+        raise HTTPException(status_code=400, detail="Empty query.")
+
+    result = vault.query(text=query_request.query)
+
+    if not result.results:
+        raise HTTPException(status_code=404, detail="No results found.")
+
+    return QueryResponse(results=result.results)
 
 @ctxvault_router.delete("/delete")
 async def delete():

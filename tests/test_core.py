@@ -20,7 +20,7 @@ def test_index_file_calls_indexer(temp_docs):
 def test_query_returns_result():
     result = vault.query("test query")
     assert len(result.results) == 1
-    assert hasattr(result.results[0], "chunks")
+    assert hasattr(result, "results")
 
 def test_delete_file_does_not_fail(temp_docs):
     file_path = temp_docs / "file1.txt"

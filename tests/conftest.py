@@ -11,7 +11,7 @@ def mock_chroma(monkeypatch):
     mock_collection.delete = MagicMock()
     mock_collection.query = MagicMock(return_value={
         "documents": [["mock_doc"]], 
-        "metadatas": [[{"chunk_id": "1", "chunk_index": 0}]], 
+        "metadatas": [[{"chunk_id": "1", "chunk_index": 0, "doc_id": "1", "source": "mock_doc"}]], 
         "distances": [[0.99]]
     })
     mock_collection.get = MagicMock(return_value={

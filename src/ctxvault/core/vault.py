@@ -1,6 +1,6 @@
 from pathlib import Path
 from ctxvault.models.documents import DocumentInfo
-from ctxvault.models.query_result import ChunkMatch, DocumentMatch, QueryResult
+from ctxvault.models.query_result import ChunkMatch, QueryResult
 from ctxvault.utils.config import load_config, save_config
 from ctxvault.core.exceptions import FileOutsideVault, UnsupportedFileTypeError, VaultAlreadyExistsError, VaultNotInitializedError
 from ctxvault.utils.text_extraction import SUPPORTED_EXT
@@ -35,9 +35,9 @@ def index_files(base_path: Path)-> tuple[list[str], list[str]]:
     for file in iter_files(path=base_path):
         try:
             index_file(file_path=file)
-            indexed_files.append(file)
+            indexed_files.append(str(file))
         except Exception as e:
-            skipped_files.append(f"{file} ({e})")
+            skipped_files.append(f"{str(file)} ({e})")
 
     return indexed_files, skipped_files
 
@@ -62,16 +62,17 @@ def query(text: str)-> QueryResult:
     distances = result_dict["distances"][0]
 
     chunks_match = []
-    docs_match = []
     for doc, metadata, distance in zip(documents, metadatas, distances):
         chunks_match.append(ChunkMatch(
             chunk_id=metadata["chunk_id"],
             chunk_index=metadata["chunk_index"],
             text=doc,
-            score=distance
+            score=distance,
+            doc_id=metadata["doc_id"],
+            source=metadata["source"]
         ))
-    docs_match.append(DocumentMatch(doc_id="", source="", filetype="", score=0.0, chunks=chunks_match))
-    return QueryResult(query=text, results=docs_match)
+    
+    return QueryResult(query=text, results=chunks_match)
 
 def delete_file(file_path: Path)-> None:
     vault_config = load_config()

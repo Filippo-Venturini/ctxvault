@@ -1,3 +1,4 @@
+from ctxvault.models.query_result import ChunkMatch
 from pydantic import BaseModel
 
 class InitRequest(BaseModel):
@@ -13,3 +14,9 @@ class IndexRequest(BaseModel):
 class IndexResponse(BaseModel):
     indexed_files: list[str]
     skipped_files: list[str]
+
+class QueryRequest(BaseModel):
+    query: str
+
+class QueryResponse(BaseModel):
+    results: list[ChunkMatch]
