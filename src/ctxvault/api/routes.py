@@ -25,7 +25,7 @@ async def index(index_request: IndexRequest):
 @ctxvault_router.post("/query")
 async def query(query_request: QueryRequest)-> QueryResponse:
 
-    if query_request.query == None:
+    if not query_request.query.strip():
         raise HTTPException(status_code=400, detail="Empty query.")
 
     result = vault.query(text=query_request.query)
@@ -46,7 +46,6 @@ async def reindex(reindex_request: ReindexRequest)-> ReindexResponse:
     reindexed_files, skipped_files = vault.index_files(base_path=Path(reindex_request.file_path))
 
     return ReindexResponse(reindexed_files=reindexed_files, skipped_files=skipped_files)
-
 
 @ctxvault_router.get("/list")
 async def list()-> ListResponse:
