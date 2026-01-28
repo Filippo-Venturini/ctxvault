@@ -24,3 +24,10 @@ class QueryResponse(BaseModel):
 class DeleteResponse(BaseModel):
     deleted_files: list[str]
     skipped_files: list[str]
+
+class ReindexRequest(BaseModel):
+    file_path: str
+
+class ReindexResponse(BaseModel):
+    reindexed_files: list[str]
+    skipped_files: list[str]

@@ -103,6 +103,19 @@ def delete_file(file_path: Path)-> None:
     
     indexer.delete_file(file_path=str(file_path))
 
+def reindex_files(base_path: Path)-> tuple[list[str], list[str]]:
+    reindexed_files = []
+    skipped_files = []
+
+    for file in iter_files(path=base_path):
+        try:
+            reindex_file(file_path=file)
+            reindexed_files.append(str(file))
+        except Exception as e:
+            skipped_files.append(f"{str(file)} ({e})")
+
+    return reindexed_files, skipped_files
+
 def reindex_file(file_path: Path)-> None:
     vault_config = load_config()
     if file_path.suffix not in SUPPORTED_EXT:

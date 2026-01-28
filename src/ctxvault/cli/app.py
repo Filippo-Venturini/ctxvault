@@ -69,22 +69,16 @@ def delete(path: str = "."):
 
 @app.command()
 def reindex(path: str = "."):
-    reindexed = skipped = 0
-    base = Path(path)
-    for file in vault.iter_files(base):
-        try:
-            vault.reindex_file(file_path=file)
-            typer.secho(f"Reindexed: {file}", fg=typer.colors.GREEN)
-            reindexed += 1
-        except Exception as e:
-            typer.secho(
-                f"Skipped: {file} ({e})",
-                fg=typer.colors.YELLOW
-            )
-            skipped += 1
+    reindexed_files, skipped_files = vault.reindex_files(base_path=Path(path))
 
-    typer.secho(f"Reindexed: {reindexed}", fg=typer.colors.GREEN, bold=True)
-    typer.secho(f"Skipped: {skipped}", fg=typer.colors.YELLOW, bold=True)
+    for file in reindexed_files:
+        typer.secho(f"Reindexed: {file}", fg=typer.colors.GREEN)
+
+    for file in skipped_files:
+        typer.secho(f"Skipped: {file}", fg=typer.colors.YELLOW)
+
+    typer.secho(f"Reindexed: {len(reindexed_files)}", fg=typer.colors.GREEN, bold=True)
+    typer.secho(f"Skipped: {len(skipped_files)}", fg=typer.colors.YELLOW, bold=True)
 
 @app.command()
 def sync():
