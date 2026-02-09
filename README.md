@@ -1,38 +1,60 @@
 # CtxVault
 
-Local semantic search vault for LLMs.
+**Local semantic search vault for LLMs.**
 
-CtxVault lets you index documents locally, generate embeddings, and query them with semantic search.  
-Designed as a lightweight RAG backend for agents, scripts, and LLM workflows.
+CtxVault lets you index documents locally, generate embeddings, and query them with semantic search.
+It acts as a lightweight **RAG backend** for agents, scripts, and APIs.
+
+Designed to be:
+
+* simple
+* local-first
+* plug & play
+* automation friendly
+
+---
 
 ## Why CtxVault
 
-- 100% local (no cloud, no data sharing)
-- simple CLI
-- works offline
-- persistent vector store (Chroma)
-- file-based workflow
-- agent/API ready (future)
+* 100% local (no cloud, no telemetry)
+* simple CLI
+* works offline
+* persistent vector store (Chroma)
+* file-based workflow (drag & drop files)
+* usable as both CLI tool and API server
+* ideal as a RAG memory layer for agents
 
-Ideal for:
-- personal knowledge bases
-- private documents
-- local RAG pipelines
-- AI agents needing contextual memory
+### Ideal for
+
+* personal knowledge bases
+* private/company documents
+* local RAG pipelines
+* AI agents memory
+* developer tools & automation scripts
 
 ---
 
-## Install
+# Installation
 
-Python 3.10+
+Python **3.10+**
+
+### From PyPI (recommended)
 
 ```bash
+pip install ctxvault
+```
+
+### From source (dev mode)
+
+```bash
+git clone https://github.com/Filippo-Venturini/ctxvault
+cd ctxvault
 pip install -e .
-````
+```
 
 ---
 
-## Quickstart
+# Quickstart (CLI)
 
 Initialize a vault:
 
@@ -40,7 +62,7 @@ Initialize a vault:
 ctxvault init ./my-vault
 ```
 
-Index files or folders:
+Add documents:
 
 ```bash
 ctxvault index ./my-vault/docs
@@ -52,9 +74,15 @@ Query:
 ctxvault query "what is project Orion?"
 ```
 
+List indexed documents:
+
+```bash
+ctxvault list
+```
+
 ---
 
-## CLI Commands
+# CLI Commands
 
 ### init
 
@@ -68,7 +96,7 @@ ctxvault init <path>
 
 ### index
 
-Index a file or directory.
+Index a file or directory recursively.
 
 ```bash
 ctxvault index <path>
@@ -78,11 +106,13 @@ ctxvault index <path>
 
 ### query
 
-Semantic search inside the vault.
+Semantic search.
 
 ```bash
 ctxvault query "<text>"
 ```
+
+Returns the most relevant chunks.
 
 ---
 
@@ -98,7 +128,7 @@ ctxvault delete <path>
 
 ### reindex
 
-Reindex a document after changes.
+Re-index a modified file.
 
 ```bash
 ctxvault reindex <path>
@@ -108,7 +138,7 @@ ctxvault reindex <path>
 
 ### list
 
-List indexed documents.
+Show all indexed documents with metadata.
 
 ```bash
 ctxvault list
@@ -116,22 +146,128 @@ ctxvault list
 
 ---
 
-## Privacy
+# API Server (FastAPI)
 
-All processing happens locally.
-No data is sent to external services.
+CtxVault can also run as an HTTP service for agents or external tools.
+
+## Start the server
+
+From your environment:
+
+```bash
+uvicorn ctxvault.api.main:app --reload
+```
+
+Server will start at:
+
+```
+http://127.0.0.1:8000
+```
 
 ---
 
-## Roadmap
+## Interactive docs (recommended)
+
+FastAPI automatically provides Swagger UI:
+
+```
+http://127.0.0.1:8000/docs
+```
+
+Use this to explore and test endpoints interactively.
+
+This is preferred over manually documenting every request.
+
+---
+
+## Available endpoints
+
+Base path: `/ctxvault`
+
+| Method | Endpoint   | Description       |
+| ------ | ---------- | ----------------- |
+| POST   | `/init`    | initialize vault  |
+| PUT    | `/index`   | index file/folder |
+| POST   | `/query`   | semantic search   |
+| GET    | `/list`    | list indexed docs |
+| DELETE | `/delete`  | delete file       |
+| PUT    | `/reindex` | reindex file      |
+
+---
+
+## Example (curl)
+
+### Query
+
+```bash
+curl -X POST http://127.0.0.1:8000/ctxvault/query \
+  -H "Content-Type: application/json" \
+  -d '{"query":"what is project Orion?"}'
+```
+
+---
+
+# CLI vs API – when to use what?
+
+### Use CLI when
+
+* working locally
+* indexing manually
+* debugging
+* scripting
+* personal usage
+
+### Use API when
+
+* integrating with agents
+* LangGraph / LangChain workflows
+* backend services
+* automation pipelines
+* multi-process access
+
+Both share the same core engine.
+
+---
+
+# Examples
+
+Real integrations are available in:
+
+```
+examples/
+```
+
+Planned:
+
+* agent integration
+* LangGraph workflow
+* notebook demo
+* API usage scripts
+
+---
+
+# Privacy
+
+All processing happens locally.
+
+* no cloud
+* no telemetry
+* no external calls
+* your documents never leave your machine
+
+---
+
+# Roadmap
 
 * [x] CLI MVP
-* [ ] FastAPI server
-* [ ] sync and file watcher
+* [x] FastAPI server
+* [ ] sync / file watcher
 * [ ] multi-vault support
 
 ---
 
-## License
+# License
 
 MIT
+
+---
