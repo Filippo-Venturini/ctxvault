@@ -1,6 +1,6 @@
 from pathlib import Path
-from ctxvault.api.schemas import DeleteResponse, IndexRequest, IndexResponse, InitRequest, InitResponse, ListResponse, QueryRequest, QueryResponse, ReindexRequest, ReindexResponse
-from ctxvault.core.exceptions import VaultAlreadyExistsError
+from ctxvault.api.schemas import DeleteResponse, IndexRequest, IndexResponse, InitRequest, InitResponse, ListResponse, QueryRequest, QueryResponse, ReindexRequest, ReindexResponse, WriteRequest, WriteResponse
+from ctxvault.core.exceptions import FileAlreadyExistError, FileOutsideVaultError, FileTypeNotPresentError, UnsupportedFileTypeError, VaultAlreadyExistsError, VaultNotInitializedError
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from ctxvault.core import vault
 
@@ -51,3 +51,15 @@ async def reindex(reindex_request: ReindexRequest)-> ReindexResponse:
 async def list()-> ListResponse:
     documents = vault.list_documents()
     return ListResponse(documents=documents)
+
+@ctxvault_router.post("/write")
+async def write(write_request: WriteRequest)-> WriteResponse:
+    try:
+        vault.write_file(file_path=Path(write_request.file_path), content=write_request.content, overwrite=write_request.overwrite)
+        return WriteResponse(file_path=write_request.file_path)
+    except (VaultNotInitializedError, FileOutsideVaultError, UnsupportedFileTypeError, FileTypeNotPresentError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileAlreadyExistError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

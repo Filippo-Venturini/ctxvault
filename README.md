@@ -192,6 +192,7 @@ Base path: `/ctxvault`
 | GET    | `/list`    | list indexed docs |
 | DELETE | `/delete`  | delete file       |
 | PUT    | `/reindex` | reindex file      |
+| POST   | `/write`   | write & index file|      |
 
 ---
 

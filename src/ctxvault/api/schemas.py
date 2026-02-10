@@ -35,3 +35,11 @@ class ReindexResponse(BaseModel):
 
 class ListResponse(BaseModel):
     documents: list[DocumentInfo]
+
+class WriteRequest(BaseModel):
+    file_path: str
+    content: str
+    overwrite: bool
+
+class WriteResponse(BaseModel):
+    file_path: str

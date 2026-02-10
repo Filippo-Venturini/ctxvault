@@ -16,7 +16,7 @@ def get_collection():
 
 def add_document(ids: list[str], embeddings: list[list[float]], metadatas: list[dict], chunks: list[str]):
     collection = get_collection()
-    collection.add(
+    collection.upsert(
         ids=ids, 
         embeddings=embeddings, 
         metadatas=metadatas, 

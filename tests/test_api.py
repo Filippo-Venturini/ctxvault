@@ -226,3 +226,101 @@ class TestEndToEndFlow:
         )
         assert delete_response.status_code == 200
         assert "deleted_files" in delete_response.json()
+
+
+class TestWriteEndpoint:
+
+    @pytest.mark.usefixtures("mock_vault_config")
+    def test_write_success_new_file(self, mock_vault_config):
+        file_path = mock_vault_config / "test.md"
+        content = "Hello world"
+
+        response = client.post("/ctxvault/write", json={
+            "file_path": str(file_path),
+            "content": content,
+            "overwrite": True
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["file_path"] == str(file_path)
+        assert file_path.exists()
+        assert file_path.read_text(encoding="utf-8") == content
+
+    @pytest.mark.usefixtures("mock_vault_config")
+    def test_write_success_overwrite(self, mock_vault_config):
+        file_path = mock_vault_config / "test.md"
+        file_path.write_text("Old content", encoding="utf-8")
+        content = "New content"
+
+        response = client.post("/ctxvault/write", json={
+            "file_path": str(file_path),
+            "content": content,
+            "overwrite": True
+        })
+
+        assert response.status_code == 200
+        assert file_path.read_text(encoding="utf-8") == content
+
+    @pytest.mark.usefixtures("mock_vault_config")
+    def test_write_fail_no_overwrite(self, mock_vault_config):
+        file_path = mock_vault_config / "test.md"
+        file_path.write_text("Existing content", encoding="utf-8")
+
+        response = client.post("/ctxvault/write", json={
+            "file_path": str(file_path),
+            "content": "New content",
+            "overwrite": False
+        })
+
+        assert response.status_code == 409
+        assert "already exist" in response.json()["detail"]
+
+    @pytest.mark.usefixtures("mock_vault_config")
+    def test_write_fail_unsupported_extension(self, tmp_path):
+        file_path = tmp_path / "test.exe"
+        content = "Should fail"
+
+        response = client.post("/ctxvault/write", json={
+            "file_path": str(file_path),
+            "content": content,
+            "overwrite": True
+        })
+
+        assert response.status_code == 400
+        assert "File type not supported" in response.json()["detail"]
+
+    @pytest.mark.usefixtures("mock_vault_config")
+    def test_write_fail_missing_extension(self, tmp_path):
+        file_path = tmp_path / "test"  
+        content = "No ext"
+
+        response = client.post("/ctxvault/write", json={
+            "file_path": str(file_path),
+            "content": content,
+            "overwrite": True
+        })
+
+        assert response.status_code == 400
+        assert "File type not present" in response.json()["detail"]
+
+    @pytest.mark.usefixtures("mock_vault_config")
+    def test_write_fail_file_outside_vault(self, tmp_path):
+
+        vault_root = Path("/tmp/ctxvault")  
+        file_path = tmp_path / "outside.md"
+        content = "Hello"
+
+        response = client.post("/ctxvault/write", json={
+            "file_path": str(file_path),
+            "content": content,
+            "overwrite": True
+        })
+
+        assert response.status_code == 400
+        assert "must have a path inside the Context Vault" in response.json()["detail"]
+
+    @pytest.mark.usefixtures("mock_vault_config")
+    def test_write_missing_field(self, tmp_path):
+        response = client.post("/ctxvault/write", json={})
+        assert response.status_code == 422 

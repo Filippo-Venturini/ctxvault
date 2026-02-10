@@ -2,6 +2,10 @@ class UnsupportedFileTypeError(Exception):
     """Raised when a file type is not supported by the extractor."""
     pass
 
+class FileTypeNotPresentError(Exception):
+    """Raised when a file type is not present in the file path."""
+    pass
+
 class ExtractionError(Exception):
     """Raised when text extraction fails for reasons other than file type."""
     pass
@@ -16,6 +20,10 @@ class VaultNotInitializedError(Exception):
     """Raised when a Context Vault is not initialized at that path."""
     pass
 
-class FileOutsideVault(Exception):
-    """Raised when try to index a file outside the Context Vault"""
+class FileOutsideVaultError(Exception):
+    """Raised when try to index a file outside the Context Vault."""
+    pass
+
+class FileAlreadyExistError(Exception):
+    """Raised when try to write a file that already exist in the Context Vault without the overwrite flag."""
     pass

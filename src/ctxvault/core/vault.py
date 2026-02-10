@@ -2,10 +2,11 @@ from pathlib import Path
 from ctxvault.models.documents import DocumentInfo
 from ctxvault.models.query_result import ChunkMatch, QueryResult
 from ctxvault.utils.config import load_config, save_config
-from ctxvault.core.exceptions import FileOutsideVault, UnsupportedFileTypeError, VaultAlreadyExistsError, VaultNotInitializedError
+from ctxvault.core.exceptions import FileAlreadyExistError, FileOutsideVaultError, FileTypeNotPresentError, UnsupportedFileTypeError, VaultAlreadyExistsError, VaultNotInitializedError
 from ctxvault.utils.text_extraction import SUPPORTED_EXT
 from ctxvault.core import indexer
 from ctxvault.core import querying
+from sympy import content
 
 def init_vault(path: str)-> tuple[str, str]:
     existing_config = load_config()
@@ -51,7 +52,7 @@ def index_file(file_path:Path)-> None:
     vault_path = Path(vault_config["vault_path"])
 
     if not file_path.resolve().is_relative_to(vault_path):
-        raise FileOutsideVault("The file to index is outside the Context Vault.")
+        raise FileOutsideVaultError("The file to index is outside the Context Vault.")
 
     indexer.index_file(file_path=str(file_path))
 
@@ -99,7 +100,7 @@ def delete_file(file_path: Path)-> None:
     vault_path = Path(vault_config["vault_path"])
 
     if not file_path.resolve().is_relative_to(vault_path):
-        raise FileOutsideVault("The file to delete is already outside the Context Vault.")
+        raise FileOutsideVaultError("The file to delete is already outside the Context Vault.")
     
     indexer.delete_file(file_path=str(file_path))
 
@@ -126,9 +127,34 @@ def reindex_file(file_path: Path)-> None:
     vault_path = Path(vault_config["vault_path"])
 
     if not file_path.resolve().is_relative_to(vault_path):
-        raise FileOutsideVault("The file to reindex is outside the Context Vault.")
+        raise FileOutsideVaultError("The file to reindex is outside the Context Vault.")
 
     indexer.reindex_file(file_path=str(file_path))
 
 def list_documents()-> list[DocumentInfo]:
     return querying.list_documents()
+
+def write_file(file_path: Path, content: str, overwrite: bool = True):
+    vault_config = load_config()
+
+    if not file_path.suffix:
+        raise FileTypeNotPresentError("File type not present in the file path.")
+
+    if file_path.suffix not in SUPPORTED_EXT:
+        raise UnsupportedFileTypeError("File type not supported.")
+    if vault_config is None:
+        raise VaultNotInitializedError("Context Vault not initialized in this path. Execute 'ctxvault init' first.")
+    
+    vault_path = Path(vault_config["vault_path"])
+    abs_path = (vault_path / file_path).resolve()
+
+    if not abs_path.is_relative_to(vault_path):
+        raise FileOutsideVaultError("The file to write must have a path inside the Context Vault.")
+
+    if abs_path.exists() and not overwrite:
+        raise FileAlreadyExistError("File already exist in the Context Vault. Use overwrite flag to overwrite it.")
+    
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    abs_path.write_text(content, encoding="utf-8")
+
+    index_file(file_path=abs_path)
