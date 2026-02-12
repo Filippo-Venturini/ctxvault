@@ -23,11 +23,12 @@ def add_document(ids: list[str], embeddings: list[list[float]], metadatas: list[
         documents=chunks
     )
 
-def query(query_embedding: list[float],  n_results: int = 5)-> dict:
+def query(query_embedding: list[float],  n_results: int = 5, filters: dict | None = None)-> dict:
     collection = get_collection()
     results = collection.query(
         query_embeddings=query_embedding,
-        n_results=n_results
+        n_results=n_results,
+        where=filters
     )
     return results
 

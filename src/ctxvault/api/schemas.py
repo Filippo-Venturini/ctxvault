@@ -18,6 +18,7 @@ class IndexResponse(BaseModel):
 
 class QueryRequest(BaseModel):
     query: str
+    filters: dict | None = None
 
 class QueryResponse(BaseModel):
     results: list[ChunkMatch]
@@ -36,10 +37,16 @@ class ReindexResponse(BaseModel):
 class ListResponse(BaseModel):
     documents: list[DocumentInfo]
 
+class AgentMetadata(BaseModel):
+    generated_by: str
+    artifact_type: str
+    topic: str
+
 class WriteRequest(BaseModel):
     file_path: str
     content: str
     overwrite: bool
+    agent_metadata: AgentMetadata | None = None
 
 class WriteResponse(BaseModel):
     file_path: str

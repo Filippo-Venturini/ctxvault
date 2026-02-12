@@ -7,6 +7,9 @@ class ChunkMatch(BaseModel):
     score: float
     doc_id: str
     source: str
+    generated_by: str | None = None
+    artifact_type: str | None = None
+    topic: str | None = None
 
 class QueryResult(BaseModel):
     query: str

@@ -42,7 +42,7 @@ def index_files(base_path: Path)-> tuple[list[str], list[str]]:
 
     return indexed_files, skipped_files
 
-def index_file(file_path:Path)-> None:
+def index_file(file_path:Path, agent_metadata: dict | None = None)-> None:
     vault_config = load_config()
     if file_path.suffix not in SUPPORTED_EXT:
         raise UnsupportedFileTypeError("File type not supported.")
@@ -54,10 +54,10 @@ def index_file(file_path:Path)-> None:
     if not file_path.resolve().is_relative_to(vault_path):
         raise FileOutsideVaultError("The file to index is outside the Context Vault.")
 
-    indexer.index_file(file_path=str(file_path))
+    indexer.index_file(file_path=str(file_path), agent_metadata=agent_metadata)
 
-def query(text: str)-> QueryResult:
-    result_dict = querying.query(query_txt=text)
+def query(text: str, filters: dict | None = None)-> QueryResult:
+    result_dict = querying.query(query_txt=text, filters=filters)
     documents = result_dict["documents"][0]
     metadatas = result_dict["metadatas"][0]
     distances = result_dict["distances"][0]
@@ -70,7 +70,10 @@ def query(text: str)-> QueryResult:
             text=doc,
             score=distance,
             doc_id=metadata["doc_id"],
-            source=metadata["source"]
+            source=metadata["source"],
+            generated_by=metadata.get("generated_by"),
+            artifact_type=metadata.get("artifact_type"),
+            topic=metadata.get("topic")
         ))
     
     return QueryResult(query=text, results=chunks_match)
@@ -134,7 +137,7 @@ def reindex_file(file_path: Path)-> None:
 def list_documents()-> list[DocumentInfo]:
     return querying.list_documents()
 
-def write_file(file_path: Path, content: str, overwrite: bool = True):
+def write_file(file_path: Path, content: str, overwrite: bool = True, agent_metadata: dict | None = None)-> None:
     vault_config = load_config()
 
     if not file_path.suffix:
@@ -157,4 +160,4 @@ def write_file(file_path: Path, content: str, overwrite: bool = True):
     abs_path.parent.mkdir(parents=True, exist_ok=True)
     abs_path.write_text(content, encoding="utf-8")
 
-    index_file(file_path=abs_path)
+    index_file(file_path=abs_path, agent_metadata=agent_metadata)

@@ -28,7 +28,7 @@ async def query(query_request: QueryRequest)-> QueryResponse:
     if not query_request.query.strip():
         raise HTTPException(status_code=400, detail="Empty query.")
 
-    result = vault.query(text=query_request.query)
+    result = vault.query(text=query_request.query, filters=query_request.filters)
 
     if not result.results:
         raise HTTPException(status_code=404, detail="No results found.")
@@ -55,7 +55,7 @@ async def list()-> ListResponse:
 @ctxvault_router.post("/write")
 async def write(write_request: WriteRequest)-> WriteResponse:
     try:
-        vault.write_file(file_path=Path(write_request.file_path), content=write_request.content, overwrite=write_request.overwrite)
+        vault.write_file(file_path=Path(write_request.file_path), content=write_request.content, overwrite=write_request.overwrite, agent_metadata=write_request.agent_metadata.model_dump() if write_request.agent_metadata else None)
         return WriteResponse(file_path=write_request.file_path)
     except (VaultNotInitializedError, FileOutsideVaultError, UnsupportedFileTypeError, FileTypeNotPresentError) as e:
         raise HTTPException(status_code=400, detail=str(e))
