@@ -100,7 +100,7 @@ class TestQueryEndpoint:
         
         mock_result = MagicMock()
         mock_result.results = []
-        monkeypatch.setattr(vault, "query", lambda text: mock_result)
+        monkeypatch.setattr(vault, "query", lambda text, filters=None: mock_result)
         
         response = client.post(
             "/ctxvault/query",

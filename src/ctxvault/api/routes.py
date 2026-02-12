@@ -55,7 +55,7 @@ async def list()-> ListResponse:
 @ctxvault_router.post("/write")
 async def write(write_request: WriteRequest)-> WriteResponse:
     try:
-        vault.write_file(file_path=Path(write_request.file_path), content=write_request.content, overwrite=write_request.overwrite, agent_metadata=write_request.agent_metadata.model_dump() if write_request.agent_metadata else None)
+        vault.write_file(file_path=Path(write_request.file_path), content=write_request.content, overwrite=write_request.overwrite, agent_metadata=write_request.agent_metadata.model_du() if write_request.agent_metadata else None)
         return WriteResponse(file_path=write_request.file_path)
     except (VaultNotInitializedError, FileOutsideVaultError, UnsupportedFileTypeError, FileTypeNotPresentError) as e:
         raise HTTPException(status_code=400, detail=str(e))
