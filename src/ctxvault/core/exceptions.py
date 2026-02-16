@@ -20,6 +20,10 @@ class VaultNotInitializedError(Exception):
     """Raised when a Context Vault is not initialized at that path."""
     pass
 
+class VaultNotFoundError(Exception):
+    """Raised when trying to operate with a Vault that doesn't exist"""
+    pass
+
 class FileOutsideVaultError(Exception):
     """Raised when try to index a file outside the Context Vault."""
     pass

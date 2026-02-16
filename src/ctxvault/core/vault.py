@@ -1,55 +1,56 @@
 from pathlib import Path
 from ctxvault.models.documents import DocumentInfo
 from ctxvault.models.query_result import ChunkMatch, QueryResult
-from ctxvault.utils.config import load_config, save_config
-from ctxvault.core.exceptions import FileAlreadyExistError, FileOutsideVaultError, FileTypeNotPresentError, UnsupportedFileTypeError, VaultAlreadyExistsError, VaultNotInitializedError
+from ctxvault.utils.config import create_vault, get_active_vault_config, set_active_vault
+from ctxvault.core.exceptions import FileAlreadyExistError, FileOutsideVaultError, FileTypeNotPresentError, UnsupportedFileTypeError
 from ctxvault.utils.text_extraction import SUPPORTED_EXT
 from ctxvault.core import indexer
 from ctxvault.core import querying
-from sympy import content
 
-def init_vault(path: str)-> tuple[str, str]:
-    existing_config = load_config()
-    if existing_config is not None:
-        raise VaultAlreadyExistsError(existing_path=existing_config["vault_path"])
-
-    vault_path = Path(path).resolve()
-    db_path = vault_path / "chroma"
-    vault_path.mkdir(parents=True, exist_ok=True)
-    db_path.mkdir(parents=True, exist_ok=True)
-    config_path = save_config(vault_path=str(vault_path), db_path=str(db_path))
+def init_vault(name: str, path: str)-> tuple[str, str]:
+    vault_path, config_path = create_vault(name=name, vault_path=path)
     return str(vault_path), config_path
 
-def iter_files(path: Path):
+def use_vault(name: str)-> tuple[str, str]:
+    set_active_vault(name=name)
+    active_vault_config = get_active_vault_config()
+    
+    return active_vault_config["vault_path"], active_vault_config["db_path"]
+
+def iter_files(path: Path, vault_path: Path, exclude_dirs: list[Path] | None = None):
     if path.is_file():
-        yield path
-    else:
-        yield from (
-            p for p in path.rglob("*")
-            if p.is_file()
-        )
+        if not any(path.resolve().is_relative_to(excl) for excl in exclude_dirs):
+            yield path
+        return
+    for p in path.rglob("*"):
+        if not p.is_file():
+            continue
+
+        if any(p.resolve().is_relative_to(excl) for excl in exclude_dirs):
+            continue
+
+        yield p
 
 def index_files(base_path: Path)-> tuple[list[str], list[str]]:
+    vault_config = get_active_vault_config()
+    vault_path = Path(vault_config["vault_path"])
+    db_path = Path(vault_config["db_path"])
+    
     indexed_files = []
     skipped_files = []
 
-    for file in iter_files(path=base_path):
+    for file in iter_files(path=base_path, vault_path=vault_path, exclude_dirs=[db_path]):
         try:
-            index_file(file_path=file)
+            index_file(file_path=file, vault_path=vault_path)
             indexed_files.append(str(file))
         except Exception as e:
             skipped_files.append(f"{str(file)} ({e})")
 
     return indexed_files, skipped_files
 
-def index_file(file_path:Path, agent_metadata: dict | None = None)-> None:
-    vault_config = load_config()
+def index_file(file_path:Path, vault_path: Path, agent_metadata: dict | None = None)-> None:
     if file_path.suffix not in SUPPORTED_EXT:
         raise UnsupportedFileTypeError("File type not supported.")
-    if vault_config is None:
-        raise VaultNotInitializedError("Context Vault not initialized in this path. Execute 'ctxvault init' first.")
-    
-    vault_path = Path(vault_config["vault_path"])
 
     if not file_path.resolve().is_relative_to(vault_path):
         raise FileOutsideVaultError("The file to index is outside the Context Vault.")
@@ -92,13 +93,10 @@ def delete_files(base_path: Path)-> tuple[list[str], list[str]]:
     return deleted_files, skipped_files
 
 def delete_file(file_path: Path)-> None:
-    vault_config = load_config()
+    vault_config = get_active_vault_config()
 
     if file_path.suffix not in SUPPORTED_EXT:
         raise UnsupportedFileTypeError("File already out of the Context Vault because its type is not supported.")
-
-    if vault_config is None:
-        raise VaultNotInitializedError("Context Vault not initialized in this path. Execute 'ctxvault init' first.")
     
     vault_path = Path(vault_config["vault_path"])
 
@@ -121,11 +119,9 @@ def reindex_files(base_path: Path)-> tuple[list[str], list[str]]:
     return reindexed_files, skipped_files
 
 def reindex_file(file_path: Path)-> None:
-    vault_config = load_config()
+    vault_config = get_active_vault_config()
     if file_path.suffix not in SUPPORTED_EXT:
         raise UnsupportedFileTypeError("File type not supported.")
-    if vault_config is None:
-        raise VaultNotInitializedError("Context Vault not initialized in this path. Execute 'ctxvault init' first.")
     
     vault_path = Path(vault_config["vault_path"])
 
@@ -138,15 +134,13 @@ def list_documents()-> list[DocumentInfo]:
     return querying.list_documents()
 
 def write_file(file_path: Path, content: str, overwrite: bool = True, agent_metadata: dict | None = None)-> None:
-    vault_config = load_config()
+    vault_config = get_active_vault_config()
 
     if not file_path.suffix:
         raise FileTypeNotPresentError("File type not present in the file path.")
 
     if file_path.suffix not in SUPPORTED_EXT:
         raise UnsupportedFileTypeError("File type not supported.")
-    if vault_config is None:
-        raise VaultNotInitializedError("Context Vault not initialized in this path. Execute 'ctxvault init' first.")
     
     vault_path = Path(vault_config["vault_path"])
     abs_path = (vault_path / file_path).resolve()

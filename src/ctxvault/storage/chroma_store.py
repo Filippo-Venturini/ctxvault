@@ -1,7 +1,7 @@
 from chromadb import PersistentClient
 from pathlib import Path
 from ctxvault.models.documents import DocumentInfo
-from ctxvault.utils.config import get_db_path
+from ctxvault.utils.config import get_active_vault_config
 
 _chroma_client = None
 _collection = None
@@ -9,7 +9,7 @@ _collection = None
 def get_collection():
     global _chroma_client, _collection
     if _collection is None:
-        path = get_db_path()
+        path = get_active_vault_config()["db_path"]
         _chroma_client = PersistentClient(path=path)
         _collection = _chroma_client.get_or_create_collection("ctxvault")
     return _collection

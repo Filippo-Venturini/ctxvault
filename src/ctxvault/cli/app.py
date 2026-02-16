@@ -1,21 +1,33 @@
 from pathlib import Path
 import typer
 from ctxvault.core import vault
-from ctxvault.core.exceptions import VaultAlreadyExistsError
+from ctxvault.core.exceptions import VaultAlreadyExistsError, VaultNotFoundError
 
 app = typer.Typer()
 
 @app.command()
-def init(path: str = "."):
+def init(name: str = "vault", path: str = "."):
     try:
-        typer.echo(f"Initializing Context Vault at: {path} ...")
-        vault_path, config_path = vault.init_vault(path=path)
+        typer.echo(f"Initializing Context Vault {name} at: {path} ...")
+        vault_path, config_path = vault.init_vault(name=name, path=path)
         typer.secho("Context Vault initialized succesfully!", fg=typer.colors.GREEN, bold=True)
         typer.echo(f"Context Vault path: {vault_path}")
         typer.echo(f"Config file path: {config_path}")
     except VaultAlreadyExistsError as e:
         typer.secho("Warning: Context Vault already initialized in this path!", fg=typer.colors.YELLOW, bold=True)
         typer.echo(f"Existing vault path: {e.existing_path}")
+        raise typer.Exit(1)
+    
+@app.command()
+def use(name: str = "vault"):
+    try:
+        typer.echo(f"Switching active vault to {name} ...")
+        vault_path, db_path = vault.use_vault(name=name)
+        typer.secho(f"Context Vault {name} is now active", fg=typer.colors.GREEN, bold=True)
+        typer.echo(f"Context Vault path: {vault_path}")
+        typer.echo(f"Database file path: {db_path}")
+    except VaultNotFoundError as e:
+        typer.secho(f"Warning: Context Vault named {name} doesn't exist!", fg=typer.colors.YELLOW, bold=True)
         raise typer.Exit(1)
 
 @app.command()
