@@ -1,7 +1,7 @@
 from pathlib import Path
 from ctxvault.models.documents import DocumentInfo
 from ctxvault.models.query_result import ChunkMatch, QueryResult
-from ctxvault.utils.config import create_vault, get_active_vault_config, set_active_vault, get_vaults
+from ctxvault.utils.config import create_vault, get_active_vault_config, get_vault_config, set_active_vault, get_vaults
 from ctxvault.utils.config import get_active_vault_name as _get_active_vault_name
 from ctxvault.core.exceptions import FileAlreadyExistError, FileOutsideVaultError, FileTypeNotPresentError, UnsupportedFileTypeError
 from ctxvault.utils.text_extraction import SUPPORTED_EXT
@@ -18,7 +18,7 @@ def use_vault(name: str)-> tuple[str, str]:
 
     return active_vault_config["vault_path"], active_vault_config["db_path"]
 
-def iter_files(path: Path, vault_path: Path, exclude_dirs: list[Path] | None = None):
+def iter_files(path: Path, exclude_dirs: list[Path] | None = None):
     if path.is_file():
         if not any(path.resolve().is_relative_to(excl) for excl in exclude_dirs):
             yield path
@@ -32,34 +32,43 @@ def iter_files(path: Path, vault_path: Path, exclude_dirs: list[Path] | None = N
 
         yield p
 
-def index_files(base_path: Path)-> tuple[list[str], list[str]]:
-    vault_config = get_active_vault_config()
+def index_files(base_path: Path, vault_name: str | None = None)-> tuple[list[str], list[str]]:
+    if vault_name:
+        vault_config = get_vault_config(vault_name)
+    else:
+        vault_config = get_active_vault_config()
+
     vault_path = Path(vault_config["vault_path"])
     db_path = Path(vault_config["db_path"])
     
     indexed_files = []
     skipped_files = []
 
-    for file in iter_files(path=base_path, vault_path=vault_path, exclude_dirs=[db_path]):
+    for file in iter_files(path=base_path, exclude_dirs=[db_path]):
         try:
-            index_file(file_path=file, vault_path=vault_path)
+            index_file(file_path=file, vault_config=vault_config)
             indexed_files.append(str(file))
         except Exception as e:
             skipped_files.append(f"{str(file)} ({e})")
 
     return indexed_files, skipped_files
 
-def index_file(file_path:Path, vault_path: Path, agent_metadata: dict | None = None)-> None:
+def index_file(file_path:Path, vault_config: dict, agent_metadata: dict | None = None)-> None:
     if file_path.suffix not in SUPPORTED_EXT:
         raise UnsupportedFileTypeError("File type not supported.")
 
-    if not file_path.resolve().is_relative_to(vault_path):
+    if not file_path.resolve().is_relative_to(Path(vault_config["vault_path"])):
         raise FileOutsideVaultError("The file to index is outside the active Context Vault.")
 
-    indexer.index_file(file_path=str(file_path), agent_metadata=agent_metadata)
+    indexer.index_file(file_path=str(file_path), config=vault_config, agent_metadata=agent_metadata)
 
-def query(text: str, filters: dict | None = None)-> QueryResult:
-    result_dict = querying.query(query_txt=text, filters=filters)
+def query(text: str, vault_name: str | None = None, filters: dict | None = None)-> QueryResult:
+    if vault_name:
+        vault_config = get_vault_config(vault_name)
+    else:
+        vault_config = get_active_vault_config()
+
+    result_dict = querying.query(query_txt=text, config=vault_config, filters=filters)
     documents = result_dict["documents"][0]
     metadatas = result_dict["metadatas"][0]
     distances = result_dict["distances"][0]
@@ -80,21 +89,25 @@ def query(text: str, filters: dict | None = None)-> QueryResult:
     
     return QueryResult(query=text, results=chunks_match)
 
-def delete_files(base_path: Path)-> tuple[list[str], list[str]]:
+def delete_files(base_path: Path, vault_name: str | None = None)-> tuple[list[str], list[str]]:
+    if vault_name:
+        vault_config = get_vault_config(vault_name)
+    else:
+        vault_config = get_active_vault_config()
+
     deleted_files = []
     skipped_files = []
 
     for file in iter_files(path=base_path):
         try:
-            delete_file(file_path=file)
+            delete_file(file_path=file, vault_config=vault_config)
             deleted_files.append(str(file))
         except Exception as e:
             skipped_files.append(f"{str(file)} ({e})")
 
     return deleted_files, skipped_files
 
-def delete_file(file_path: Path)-> None:
-    vault_config = get_active_vault_config()
+def delete_file(file_path: Path, vault_config: dict)-> None:
 
     if file_path.suffix not in SUPPORTED_EXT:
         raise UnsupportedFileTypeError("File already out of the Context Vault because its type is not supported.")
@@ -104,23 +117,28 @@ def delete_file(file_path: Path)-> None:
     if not file_path.resolve().is_relative_to(vault_path):
         raise FileOutsideVaultError("The file to delete is already outside the Context Vault.")
     
-    indexer.delete_file(file_path=str(file_path))
+    indexer.delete_file(file_path=str(file_path), config=vault_config)
 
-def reindex_files(base_path: Path)-> tuple[list[str], list[str]]:
+def reindex_files(base_path: Path, vault_name: str | None = None)-> tuple[list[str], list[str]]:
+
+    if vault_name:
+        vault_config = get_vault_config(vault_name)
+    else:
+        vault_config = get_active_vault_config()
+
     reindexed_files = []
     skipped_files = []
 
     for file in iter_files(path=base_path):
         try:
-            reindex_file(file_path=file)
+            reindex_file(file_path=file, vault_config=vault_config)
             reindexed_files.append(str(file))
         except Exception as e:
             skipped_files.append(f"{str(file)} ({e})")
 
     return reindexed_files, skipped_files
 
-def reindex_file(file_path: Path)-> None:
-    vault_config = get_active_vault_config()
+def reindex_file(file_path: Path, vault_config: dict)-> None:
     if file_path.suffix not in SUPPORTED_EXT:
         raise UnsupportedFileTypeError("File type not supported.")
     
@@ -129,10 +147,14 @@ def reindex_file(file_path: Path)-> None:
     if not file_path.resolve().is_relative_to(vault_path):
         raise FileOutsideVaultError("The file to reindex is outside the Context Vault.")
 
-    indexer.reindex_file(file_path=str(file_path))
+    indexer.reindex_file(file_path=str(file_path), config=vault_config)
 
-def list_documents()-> list[DocumentInfo]:
-    return querying.list_documents()
+def list_documents(vault_name: str | None = None)-> list[DocumentInfo]:
+    if vault_name:
+        vault_config = get_vault_config(vault_name)
+    else:
+        vault_config = get_active_vault_config()
+    return querying.list_documents(config=vault_config)
 
 def list_vaults()-> list[str]:
     return get_vaults()
@@ -140,8 +162,12 @@ def list_vaults()-> list[str]:
 def get_active_vault_name()-> str:
     return _get_active_vault_name()
 
-def write_file(file_path: Path, content: str, overwrite: bool = True, agent_metadata: dict | None = None)-> None:
-    vault_config = get_active_vault_config()
+def write_file(file_path: Path, content: str, overwrite: bool = True, vault_name: str | None = None, agent_metadata: dict | None = None)-> None:
+
+    if vault_name:
+        vault_config = get_vault_config(vault_name)
+    else:
+        vault_config = get_active_vault_config()
 
     if not file_path.suffix:
         raise FileTypeNotPresentError("File type not present in the file path.")

@@ -28,11 +28,11 @@ def build_documents_from_metadatas(metadatas)-> list[DocumentInfo]:
         for doc_id, (source, filetype, count) in acc.items()
     ]
 
-def query(query_txt: str, filters: dict | None = None)-> dict:
+def query(query_txt: str, config: dict, filters: dict | None = None)-> dict:
     query_embedding = embed_list(chunks=[query_txt])
-    return chroma_store.query(query_embedding=query_embedding, filters=filters)
+    return chroma_store.query(query_embedding=query_embedding, config=config, filters=filters)
 
-def list_documents()-> list[DocumentInfo]:
-    metadatas = chroma_store.get_all_metadatas()
+def list_documents(config: dict)-> list[DocumentInfo]:
+    metadatas = chroma_store.get_all_metadatas(config=config)
     return build_documents_from_metadatas(metadatas=metadatas)
     

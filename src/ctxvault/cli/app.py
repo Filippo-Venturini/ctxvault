@@ -31,8 +31,8 @@ def use(name: str = typer.Argument("vault")):
         raise typer.Exit(1)
 
 @app.command()
-def index(path: str = typer.Argument(".")):
-    indexed_files, skipped_files = vault.index_files(base_path=Path(path))
+def index(path: str = typer.Argument("."), name: str = None):
+    indexed_files, skipped_files = vault.index_files(base_path=Path(path), vault_name=name)
 
     for file in indexed_files:
         typer.secho(f"Indexed: {file}", fg=typer.colors.GREEN)
@@ -44,8 +44,8 @@ def index(path: str = typer.Argument(".")):
     typer.secho(f"Skipped: {len(skipped_files)}", fg=typer.colors.YELLOW, bold=True)
 
 @app.command()
-def query(text: str = typer.Argument("")):
-    result = vault.query(text=text)
+def query(text: str = typer.Argument(""), name: str = None):
+    result = vault.query(text=text, vault_name=name)
     if not result.results:
         typer.secho("No results found.", fg=typer.colors.YELLOW)
         return
@@ -67,8 +67,8 @@ def query(text: str = typer.Argument("")):
     typer.echo("\n" + "─" * 80)
 
 @app.command()
-def delete(path: str = typer.Argument(".")):
-    deleted_files, skipped_files = vault.delete_files(base_path=Path(path))
+def delete(path: str = typer.Argument("."), name: str = None):
+    deleted_files, skipped_files = vault.delete_files(base_path=Path(path), vault_name=name)
 
     for file in deleted_files:
         typer.secho(f"Deleted: {file}", fg=typer.colors.RED)
@@ -80,8 +80,8 @@ def delete(path: str = typer.Argument(".")):
     typer.secho(f"Skipped: {len(skipped_files)}", fg=typer.colors.YELLOW, bold=True)
 
 @app.command()
-def reindex(path: str = typer.Argument(".")):
-    reindexed_files, skipped_files = vault.reindex_files(base_path=Path(path))
+def reindex(path: str = typer.Argument("."), name: str = None):
+    reindexed_files, skipped_files = vault.reindex_files(base_path=Path(path), vault_name=name)
 
     for file in reindexed_files:
         typer.secho(f"Reindexed: {file}", fg=typer.colors.GREEN)
@@ -110,8 +110,8 @@ def vaults():
             typer.echo(f"  {v}")
 
 @app.command()
-def docs():
-    documents = vault.list_documents()
+def docs(name: str = None):
+    documents = vault.list_documents(vault_name=name)
 
     typer.secho(f"\nFound {len(documents)} documents\n", fg=typer.colors.GREEN, bold=True)
 
