@@ -6,7 +6,7 @@ from ctxvault.core.exceptions import VaultAlreadyExistsError, VaultNotFoundError
 app = typer.Typer()
 
 @app.command()
-def init(name: str = "vault", path: str = "."):
+def init(name: str = typer.Argument("vault"), path: str = typer.Argument(".")):
     try:
         typer.echo(f"Initializing Context Vault {name} at: {path} ...")
         vault_path, config_path = vault.init_vault(name=name, path=path)
@@ -19,7 +19,7 @@ def init(name: str = "vault", path: str = "."):
         raise typer.Exit(1)
     
 @app.command()
-def use(name: str = "vault"):
+def use(name: str = typer.Argument("vault")):
     try:
         typer.echo(f"Switching active vault to {name} ...")
         vault_path, db_path = vault.use_vault(name=name)
@@ -31,7 +31,7 @@ def use(name: str = "vault"):
         raise typer.Exit(1)
 
 @app.command()
-def index(path: str = "."):
+def index(path: str = typer.Argument(".")):
     indexed_files, skipped_files = vault.index_files(base_path=Path(path))
 
     for file in indexed_files:
@@ -44,7 +44,7 @@ def index(path: str = "."):
     typer.secho(f"Skipped: {len(skipped_files)}", fg=typer.colors.YELLOW, bold=True)
 
 @app.command()
-def query(text: str = ""):
+def query(text: str = typer.Argument("")):
     result = vault.query(text=text)
     if not result.results:
         typer.secho("No results found.", fg=typer.colors.YELLOW)
@@ -67,7 +67,7 @@ def query(text: str = ""):
     typer.echo("\n" + "─" * 80)
 
 @app.command()
-def delete(path: str = "."):
+def delete(path: str = typer.Argument(".")):
     deleted_files, skipped_files = vault.delete_files(base_path=Path(path))
 
     for file in deleted_files:
@@ -80,7 +80,7 @@ def delete(path: str = "."):
     typer.secho(f"Skipped: {len(skipped_files)}", fg=typer.colors.YELLOW, bold=True)
 
 @app.command()
-def reindex(path: str = "."):
+def reindex(path: str = typer.Argument(".")):
     reindexed_files, skipped_files = vault.reindex_files(base_path=Path(path))
 
     for file in reindexed_files:
@@ -97,7 +97,20 @@ def sync():
     typer.echo(f"Synchronizing vault")
 
 @app.command()
-def list():
+def vaults():
+    vaults = vault.list_vaults()
+    typer.secho(f"\nFound {len(vaults)} vaults\n", fg=typer.colors.GREEN, bold=True)
+
+    active = vault.get_active_vault_name()
+
+    for v in vaults:
+        if v == active:
+            typer.secho(f"* {v}", fg=typer.colors.CYAN, bold=True)
+        else:
+            typer.echo(f"  {v}")
+
+@app.command()
+def docs():
     documents = vault.list_documents()
 
     typer.secho(f"\nFound {len(documents)} documents\n", fg=typer.colors.GREEN, bold=True)
@@ -105,6 +118,13 @@ def list():
     for i in range(len(documents)):
         typer.echo(f"{i+1}. {documents[i].source} ({documents[i].chunks_count} chunks)")
 
+@app.callback()
+def main_callback():
+    try:
+        active = vault.get_active_vault_name()
+        typer.secho(f"[vault: {active}] \n", fg=typer.colors.CYAN, nl=False)
+    except:
+        pass
 
 def main():
     app()

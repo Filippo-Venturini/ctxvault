@@ -1,7 +1,8 @@
 from pathlib import Path
 from ctxvault.models.documents import DocumentInfo
 from ctxvault.models.query_result import ChunkMatch, QueryResult
-from ctxvault.utils.config import create_vault, get_active_vault_config, set_active_vault
+from ctxvault.utils.config import create_vault, get_active_vault_config, set_active_vault, get_vaults
+from ctxvault.utils.config import get_active_vault_name as _get_active_vault_name
 from ctxvault.core.exceptions import FileAlreadyExistError, FileOutsideVaultError, FileTypeNotPresentError, UnsupportedFileTypeError
 from ctxvault.utils.text_extraction import SUPPORTED_EXT
 from ctxvault.core import indexer
@@ -14,7 +15,7 @@ def init_vault(name: str, path: str)-> tuple[str, str]:
 def use_vault(name: str)-> tuple[str, str]:
     set_active_vault(name=name)
     active_vault_config = get_active_vault_config()
-    
+
     return active_vault_config["vault_path"], active_vault_config["db_path"]
 
 def iter_files(path: Path, vault_path: Path, exclude_dirs: list[Path] | None = None):
@@ -53,7 +54,7 @@ def index_file(file_path:Path, vault_path: Path, agent_metadata: dict | None = N
         raise UnsupportedFileTypeError("File type not supported.")
 
     if not file_path.resolve().is_relative_to(vault_path):
-        raise FileOutsideVaultError("The file to index is outside the Context Vault.")
+        raise FileOutsideVaultError("The file to index is outside the active Context Vault.")
 
     indexer.index_file(file_path=str(file_path), agent_metadata=agent_metadata)
 
@@ -132,6 +133,12 @@ def reindex_file(file_path: Path)-> None:
 
 def list_documents()-> list[DocumentInfo]:
     return querying.list_documents()
+
+def list_vaults()-> list[str]:
+    return get_vaults()
+
+def get_active_vault_name()-> str:
+    return _get_active_vault_name()
 
 def write_file(file_path: Path, content: str, overwrite: bool = True, agent_metadata: dict | None = None)-> None:
     vault_config = get_active_vault_config()

@@ -68,7 +68,7 @@ def create_vault(name: str, vault_path: str) -> tuple[str, str]:
 
     return str(vault_path), str(CONFIG_FILE)
 
-def list_vaults() -> list[str]:
+def get_vaults() -> list[str]:
     return [f.stem for f in VAULTS_DIR.glob("*.json")]
 
 def set_active_vault(name: str) -> None:
@@ -77,6 +77,13 @@ def set_active_vault(name: str) -> None:
     config = _load_global_config()
     config["active_vault"] = name
     _save_global_config(config)
+
+def get_active_vault_name() -> str:
+    config = _load_global_config()
+    name = config.get("active_vault")
+    if not name:
+        raise VaultNotInitializedError("No active vault. Initialize one first.")
+    return name
 
 def get_active_vault_config() -> dict:
     config = _load_global_config()
