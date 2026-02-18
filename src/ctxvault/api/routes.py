@@ -1,5 +1,5 @@
 from pathlib import Path
-from ctxvault.api.schemas import DeleteResponse, IndexRequest, IndexResponse, InitRequest, InitResponse, ListResponse, QueryRequest, QueryResponse, ReindexRequest, ReindexResponse, WriteRequest, WriteResponse
+from ctxvault.api.schemas import DeleteRequest, DeleteResponse, IndexRequest, IndexResponse, InitRequest, InitResponse, ListRequest, ListResponse, QueryRequest, QueryResponse, ReindexRequest, ReindexResponse, WriteRequest, WriteResponse
 from ctxvault.core.exceptions import FileAlreadyExistError, FileOutsideVaultError, FileTypeNotPresentError, UnsupportedFileTypeError, VaultAlreadyExistsError, VaultNotInitializedError
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from ctxvault.core import vault
@@ -8,17 +8,19 @@ app = FastAPI()
 
 ctxvault_router = APIRouter(prefix="/ctxvault", tags=["CtxVault"])
 
+#TODO: add catch for VaultNotFoundError
+
 @ctxvault_router.post("/init")
 async def init(init_request: InitRequest)-> InitResponse:
     try:
-        vault_path, config_path = vault.init_vault(path=init_request.vault_path)
+        vault_path, config_path = vault.init_vault(name=init_request.vault_name)
         return InitResponse(vault_path=vault_path, config_path=config_path)
     except VaultAlreadyExistsError as e:
         raise HTTPException(status_code=400, detail=f"Vault already initialized at {e.existing_path}")
 
 @ctxvault_router.put("/index")
 async def index(index_request: IndexRequest):
-    indexed_files, skipped_files = vault.index_files(base_path=Path(index_request.file_path))
+    indexed_files, skipped_files = vault.index_files(vault_name=index_request.vault_name, base_path=index_request.file_path)
 
     return IndexResponse(indexed_files=indexed_files, skipped_files=skipped_files)
 
@@ -28,7 +30,7 @@ async def query(query_request: QueryRequest)-> QueryResponse:
     if not query_request.query.strip():
         raise HTTPException(status_code=400, detail="Empty query.")
 
-    result = vault.query(text=query_request.query, filters=query_request.filters)
+    result = vault.query(vault_name=query_request.vault_name,text=query_request.query, filters=query_request.filters)
 
     if not result.results:
         raise HTTPException(status_code=404, detail="No results found.")
@@ -36,20 +38,20 @@ async def query(query_request: QueryRequest)-> QueryResponse:
     return QueryResponse(results=result.results)
 
 @ctxvault_router.delete("/delete")
-async def delete(file_path: str = Query(...))-> DeleteResponse:
-    deleted_files, skipped_files = vault.delete_files(base_path=Path(file_path))
+async def delete(delete_request: DeleteRequest)-> DeleteResponse:
+    deleted_files, skipped_files = vault.delete_files(vault_name=delete_request.vault_name, path=delete_request.file_path)
 
     return DeleteResponse(deleted_files=deleted_files, skipped_files=skipped_files)
 
 @ctxvault_router.put("/reindex")
 async def reindex(reindex_request: ReindexRequest)-> ReindexResponse:
-    reindexed_files, skipped_files = vault.index_files(base_path=Path(reindex_request.file_path))
+    reindexed_files, skipped_files = vault.index_files(vault_name=reindex_request.vault_name, base_path=reindex_request.file_path)
 
     return ReindexResponse(reindexed_files=reindexed_files, skipped_files=skipped_files)
 
 @ctxvault_router.get("/list")
-async def list()-> ListResponse:
-    documents = vault.list_documents()
+async def list(listRequest: ListRequest)-> ListResponse:
+    documents = vault.list_documents(vault_name=listRequest.vault_name)
     return ListResponse(documents=documents)
 
 @ctxvault_router.post("/write")
