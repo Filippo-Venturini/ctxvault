@@ -49,7 +49,6 @@ def start_server():
         stderr=subprocess.DEVNULL,
     )
 
-    # wait until ready
     for _ in range(20):
         try:
             requests.get(API_URL, timeout=0.5)
@@ -112,11 +111,11 @@ def create_chain():
     prompt = ChatPromptTemplate.from_template(
         """Answer using ONLY this context:
 
-{context}
+        {context}
 
-Question: {question}
-"""
-    )
+        Question: {question}
+        """
+        )
 
     def format_docs(docs):
         return "\n\n".join(d.page_content for d in docs)
