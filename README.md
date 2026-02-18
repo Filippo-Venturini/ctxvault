@@ -7,6 +7,10 @@
   <img alt="Logo" src="logo_white_final.svg">
 </picture>
 
+**Semantic knowledge vault for AI agents and RAG pipelines**
+
+*Local-first semantic memory you control. No cloud, no complexity.*
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyPI version](https://img.shields.io/pypi/v/ctxvault.svg)](https://pypi.org/project/ctxvault/)
 ![Python](https://img.shields.io/pypi/pyversions/ctxvault)
@@ -16,37 +20,32 @@
 
 # CtxVault
 
-**Local semantic search vault for LLMs.**
+CtxVault is a **local semantic search engine** for LLM applications.
 
-CtxVault lets you index documents locally, generate embeddings, and query them with semantic search.
-It acts as a lightweight **RAG backend** for agents, scripts, and APIs.
+Index documents, generate embeddings, and query with semantic search — all on your machine.
 
-Designed to be:
+**Built for:**
+- **Personal RAG** - your private knowledge base with semantic search
+- **Multi-agent systems** - shared memory layer across agents
+- **Isolated contexts** - separate vaults for different knowledge domains
 
-* simple
-* local-first
-* plug & play
-* automation friendly
+Works as CLI tool or API server. Zero cloud dependencies.
 
 ---
 
 ## Why CtxVault
 
-* 100% local (no cloud, no telemetry)
-* simple CLI
-* works offline
-* persistent vector store (Chroma)
-* file-based workflow (drag & drop files)
-* usable as both CLI tool and API server
-* ideal as a RAG memory layer for agents
+**Local-first**
+Runs entirely offline with no external dependencies. Your knowledge base stays on your machine, and you control where the retrieved context goes.
 
-### Ideal for
+**Multi-vault architecture**
+Run isolated vaults for different contexts - personal notes, company docs, or agent-specific knowledge.
 
-* personal knowledge bases
-* private/company documents
-* local RAG pipelines
-* AI agents memory
-* developer tools & automation scripts
+**Agent-ready**
+Built-in API server for seamless integration with LangChain, LangGraph, and custom agent workflows.
+
+**Developer-first**
+Simple CLI for manual work, HTTP API for automation. Works offline, no setup complexity.
 
 ---
 
