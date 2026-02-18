@@ -1,3 +1,19 @@
+<div align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="logo_white_final.svg" width="200" height="200">
+  
+  <source media="(prefers-color-scheme: light)" srcset="logo_black.svg" width="200" height="200">
+  
+  <img alt="Logo" src="logo_white_final.svg">
+</picture>
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![PyPI version](https://img.shields.io/pypi/v/ctxvault.svg)](https://pypi.org/project/ctxvault/)
+![Python](https://img.shields.io/pypi/pyversions/ctxvault)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/ctxvault)
+
+</div>
+
 # CtxVault
 
 **Local semantic search vault for LLMs.**
