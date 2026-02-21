@@ -90,6 +90,9 @@ ctxvault query my-vault "transformer architecture"
 
 # 5. List indexed documents
 ctxvault list my-vault
+
+# 6. List all your vaults
+ctxvault vaults
 ```
 
 ### API Usage
