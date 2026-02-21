@@ -62,6 +62,7 @@ pip install ctxvault
 ```bash
 git clone https://github.com/Filippo-Venturini/ctxvault
 cd ctxvault
+python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e .
 ```
 
@@ -69,19 +70,26 @@ pip install -e .
 
 ## Quick Start
 
+Both CLI and API follow the same workflow: create a vault → add documents → index → query. Choose CLI for manual use, API for programmatic integration.
+
 ### CLI Usage
+
 ```bash
-# Initialize a vault
+# 1. Initialize a vault
 ctxvault init my-vault
 
-# Index documents
-ctxvault index my-vault/docs
+# 2. Add your documents to the vault folder
+# Default location: ~/.ctxvault/vaults/my-vault/
+# Drop your .txt, .md, .pdf or .docx files there
 
-# Query semantically
-ctxvault query "transformer architecture"
+# 3. Index documents
+ctxvault index my-vault
 
-# List indexed documents
-ctxvault list
+# 4. Query semantically
+ctxvault query my-vault "transformer architecture"
+
+# 5. List indexed documents
+ctxvault list my-vault
 ```
 
 ### API Usage
@@ -91,20 +99,7 @@ Start the server:
 uvicorn ctxvault.api.app:app
 ```
 
-Query programmatically:
-```python
-import requests
-
-response = requests.post("http://127.0.0.1:8000/ctxvault/query", json={
-    "vault_name": "my-vault",
-    "query": "transformer architecture",
-    "top_k": 5
-})
-
-results = response.json()["results"]
-```
-
-Full API documentation at `http://127.0.0.1:8000/docs` (Swagger UI).
+Then interact programmatically — see the full API workflow in [API Reference](#api-reference) or explore the interactive docs at `http://127.0.0.1:8000/docs`.
 
 ---
 
@@ -112,11 +107,11 @@ Full API documentation at `http://127.0.0.1:8000/docs` (Swagger UI).
 
 Production-ready examples in [`/examples`](examples/):
 
-**[01-simple-rag](examples/01-simple-rag/)** - Personal research assistant with semantic search over multi-format documents (PDF, MD, TXT, DOCX)
+**[01-simple-rag](examples/01-simple-rag/README.md)** - Personal research assistant with semantic search over multi-format documents (PDF, MD, TXT, DOCX)
 
-**[02-multi-agent-isolation](examples/02-multi-agent-isolation/)** - Privacy-aware multi-agent system with isolated knowledge vaults per agent
+**[02-multi-agent-isolation](examples/02-multi-agent-isolation/README.md)** - Privacy-aware multi-agent system with isolated knowledge vaults per agent
 
-**[03-persistent-memory](examples/03-persistent-memory/)** - Agent with long-term memory that persists and recalls semantically across sessions
+**[03-persistent-memory](examples/03-persistent-memory/README.md)** - Agent with long-term memory that persists and recalls semantically across sessions
 
 Each example includes setup instructions, code, and detailed README.
 
@@ -253,19 +248,13 @@ ctxvault vaults
 - Custom paths: Use `--path` flag during `init` to create vault at custom location
 - All other commands use vault name (path lookup via config.json)
 
-**Vault management:**
-- Default location: `~/.ctxvault/vaults/<vault-name>/`
-- Vault registry: `~/.ctxvault/config.json` tracks all vault names and their paths
-- Custom paths: Use `--vault-path` flag during `init` to create vault at custom location
-- All other commands use vault name (path lookup via config.json)
-
 **Multi-vault support:**
 ```bash
 # Work with specific vault
-ctxvault --vault research query "topic"
+ctxvault research query "topic"
 
 # Default vault location: ~/.ctxvault/vaults/
-# Override with --vault-path for custom locations
+# Override with --path for custom locations
 ```
 
 ---
@@ -284,30 +273,6 @@ ctxvault --vault research query "topic"
 | `/delete` | DELETE | Remove document from vault |
 | `/reindex` | PUT | Re-index entire vault or specific path |
 | `/vaults` | GET | List all the initialized vaults |
-
-**Example: Query**
-```bash
-curl -X POST http://127.0.0.1:8000/ctxvault/query \
-  -H "Content-Type: application/json" \
-  -d '{
-    "vault_name": "research",
-    "query": "transformer architecture",
-    "top_k": 5
-  }'
-```
-
-**Response:**
-```json
-{
-  "results": [
-    {
-      "text": "Transformers use self-attention mechanisms...",
-      "source": "attention_paper.pdf",
-      "score": 0.89
-    }
-  ]
-}
-```
 
 **Interactive documentation:** Start the server and visit `http://127.0.0.1:8000/docs`
 
@@ -397,6 +362,7 @@ Contributions welcome! Please check the [issues](https://github.com/Filippo-Vent
 ```bash
 git clone https://github.com/Filippo-Venturini/ctxvault
 cd ctxvault
+python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 pytest
 ```
@@ -407,7 +373,7 @@ pytest
 
 If you use CtxVault in your research or project, please cite:
 ```bibtex
-@software{ctxvault2025,
+@software{ctxvault2026,
   author = {Filippo Venturini},
   title = {CtxVault: Local Semantic Knowledge Vault for AI Agents},
   year = {2026},

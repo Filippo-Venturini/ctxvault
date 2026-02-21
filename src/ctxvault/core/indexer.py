@@ -1,11 +1,11 @@
-from ctxvault.utils.text_extraction import extract_text
-from ctxvault.core.identifiers import get_doc_id
-from ctxvault.utils.chuncking import chunking
-from ctxvault.core.embedding import embed_list
-from ctxvault.storage.chroma_store import add_document, delete_document
-from ctxvault.utils.metadata_builder import build_chunks_metadatas
-
 def index_file(file_path: str, config: dict, agent_metadata: dict | None = None)-> dict:
+    from ctxvault.utils.text_extraction import extract_text
+    from ctxvault.core.identifiers import get_doc_id
+    from ctxvault.utils.chuncking import chunking
+    from ctxvault.core.embedding import embed_list
+    from ctxvault.storage.chroma_store import add_document
+    from ctxvault.utils.metadata_builder import build_chunks_metadatas
+
     text, file_type = extract_text(path=file_path)
     doc_id = get_doc_id(path=file_path)
 
@@ -18,6 +18,9 @@ def index_file(file_path: str, config: dict, agent_metadata: dict | None = None)
     add_document(ids=chunk_ids, embeddings=embeddings, metadatas=metadatas, chunks=chunks, config=config)
 
 def delete_file(file_path: str, config: dict)-> None:
+    from ctxvault.core.identifiers import get_doc_id
+    from ctxvault.storage.chroma_store import delete_document
+
     doc_id = get_doc_id(path=file_path)
     delete_document(doc_id=doc_id, config=config)
 

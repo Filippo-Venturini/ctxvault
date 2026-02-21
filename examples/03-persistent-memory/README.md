@@ -31,6 +31,7 @@ This is **temporal semantic memory** - not possible with conversation state alon
 
 ### 1. Install dependencies
 ```bash
+python -m venv .venv-example-03 && source .venv-example-03/bin/activate  # Windows: .venv-example-03\Scripts\activate
 pip install -r requirements.txt
 ```
 

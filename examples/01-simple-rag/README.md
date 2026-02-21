@@ -33,6 +33,7 @@ This is exactly what CtxVault + LangChain enables.
 
 ### 1. Install dependencies
 ```bash
+python -m venv .venv-example-01 && source .venv-example-01/bin/activate  # Windows: .venv-example-01\Scripts\activate
 pip install -r requirements.txt
 ```
 

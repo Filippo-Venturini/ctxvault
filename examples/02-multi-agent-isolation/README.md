@@ -28,6 +28,7 @@ Traditional multi-agent systems share a single knowledge base. This creates:
 
 ### 1. Install dependencies
 ```bash
+python -m venv .venv-example-02 && source .venv-example-02/bin/activate  # Windows: .venv-example-02\Scripts\activate
 pip install -r requirements.txt
 ```
 

@@ -4,8 +4,6 @@ from ctxvault.models.query_result import ChunkMatch, QueryResult
 from ctxvault.utils.config import create_vault, get_vault_config, get_vaults
 from ctxvault.core.exceptions import FileAlreadyExistError, FileOutsideVaultError, FileTypeNotPresentError, PathOutsideVaultError, UnsupportedFileTypeError
 from ctxvault.utils.text_extraction import SUPPORTED_EXT
-from ctxvault.core import indexer
-from ctxvault.core import querying
 
 def _get_base_path(path: str, vault_path: Path)-> Path:
     if not path:
@@ -61,6 +59,8 @@ def index_files(vault_name: str, path: str | None = None)-> tuple[list[str], lis
     return indexed_files, skipped_files
 
 def index_file(file_path:Path, vault_config: dict, agent_metadata: dict | None = None)-> None:
+    from ctxvault.core import indexer
+
     if file_path.suffix not in SUPPORTED_EXT:
         raise UnsupportedFileTypeError("File type not supported.")
 
@@ -70,6 +70,8 @@ def index_file(file_path:Path, vault_config: dict, agent_metadata: dict | None =
     indexer.index_file(file_path=str(file_path), config=vault_config, agent_metadata=agent_metadata)
 
 def query(text: str, vault_name: str, filters: dict | None = None)-> QueryResult:
+    from ctxvault.core import querying
+
     vault_config = get_vault_config(vault_name)
 
     result_dict = querying.query(query_txt=text, config=vault_config, filters=filters)
@@ -113,6 +115,7 @@ def delete_files(vault_name: str, path: str | None = None)-> tuple[list[str], li
     return deleted_files, skipped_files
 
 def delete_file(file_path: Path, vault_config: dict)-> None:
+    from ctxvault.core import indexer
 
     if file_path.suffix not in SUPPORTED_EXT:
         raise UnsupportedFileTypeError("File already out of the Context Vault because its type is not supported.")
@@ -144,6 +147,8 @@ def reindex_files(vault_name: str, path: str | None = None)-> tuple[list[str], l
     return reindexed_files, skipped_files
 
 def reindex_file(file_path: Path, vault_config: dict)-> None:
+    from ctxvault.core import indexer
+
     if file_path.suffix not in SUPPORTED_EXT:
         raise UnsupportedFileTypeError("File type not supported.")
     
@@ -155,6 +160,8 @@ def reindex_file(file_path: Path, vault_config: dict)-> None:
     indexer.reindex_file(file_path=str(file_path), config=vault_config)
 
 def list_documents(vault_name: str)-> list[DocumentInfo]:
+    from ctxvault.core import querying
+
     vault_config = get_vault_config(vault_name)
 
     return querying.list_documents(config=vault_config)
