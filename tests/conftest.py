@@ -27,13 +27,35 @@ def mock_chroma(monkeypatch):
         }
     )
     mock_collection.get = MagicMock(
-        return_value={
-            "metadatas": [{
-                "doc_id": "1",
-                "source": "mock_doc",
-                "filetype": "txt",
-            }]
-        }
+        side_effect=lambda where=None, include=None: (
+            {
+                "metadatas": [
+                    {
+                        "doc_id": "1",
+                        "chunk_index": 0,
+                        "source": "mock_doc",
+                        "filetype": "txt",
+                        "indexed_at": "2026-01-01T00:00:00+00:00",
+                    },
+                    {
+                        "doc_id": "1",
+                        "chunk_index": 1,
+                        "source": "mock_doc",
+                        "filetype": "txt",
+                        "indexed_at": "2026-01-01T00:00:00+00:00",
+                    },
+                ],
+                "documents": ["alpha ", "beta"],
+            }
+            if where and where.get("doc_id") == "1"
+            else {
+                "metadatas": [{
+                    "doc_id": "1",
+                    "source": "mock_doc",
+                    "filetype": "txt",
+                }]
+            }
+        )
     )
 
     mock_client = MagicMock()

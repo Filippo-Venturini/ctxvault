@@ -1,6 +1,9 @@
+from datetime import datetime, timezone
+
 from ctxvault.core.identifiers import get_chunk_id
 
 def build_chunks_metadatas(doc_id: str, chunks_size: int, source: str, filetype: str, agent_metadata: dict | None = None)-> tuple[list[str], list[dict]]:
+    indexed_at = datetime.now(timezone.utc).isoformat()
     chunk_ids = []
     metadatas = []
 
@@ -14,6 +17,7 @@ def build_chunks_metadatas(doc_id: str, chunks_size: int, source: str, filetype:
                 "chunk_index": i,
                 "source": source,
                 "filetype": filetype,
+                "indexed_at": indexed_at,
             })
         if agent_metadata:
             metadatas[-1].update(agent_metadata)
