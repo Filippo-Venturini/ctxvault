@@ -128,8 +128,8 @@ class TestDocContentEndpoint:
         data = response.json()
         assert data["vault_name"] == "test_vault"
         assert data["document"]["doc_id"] == "1"
-        assert data["document"]["content"] == "alpha beta"
-        assert data["document"]["content_hash"]
+        assert data["document"]["content"] == "alpha\n\nbeta"
+        assert data["document"]["reconstructed_text_hash"]
         assert data["document"]["warning"]
 
     def test_doc_content_not_found(self, mock_vault_config):

@@ -151,7 +151,29 @@ def vaults():
             _print_vault(v)
 
 @app.command()
-def docs(name: str = typer.Argument("my-vault")):
+def docs(
+    name: str = typer.Argument("my-vault"),
+    export: str | None = typer.Option(None, "--export", help="Document id to export (requires --output)"),
+    show: str | None = typer.Option(None, "--show", help="Document id to display reconstructed text for"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Write exported content to this file"),
+    json_output: bool = typer.Option(False, "--json", help="Print metadata and content as JSON"),
+):
+    if export and show:
+        typer.secho("Error: --export and --show are mutually exclusive.", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+    if export:
+        if not output:
+            typer.secho("Error: --export requires --output.", fg=typer.colors.RED, bold=True)
+            raise typer.Exit(1)
+        _doc_content_command(name, export, output=output, json_output=json_output)
+        return
+    if show:
+        _doc_content_command(name, show, output=output, json_output=json_output)
+        return
+    if output or json_output:
+        typer.secho("Error: --output and --json require --export or --show.", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+
     try:
         documents = vault_router.list_documents(vault_name=name)
 
@@ -179,7 +201,7 @@ def _render_doc_content(doc, *, json_output: bool = False):
     typer.secho(f"Document ID: {doc.doc_id}", fg=typer.colors.CYAN, bold=True)
     typer.secho(f"Source: {doc.source}", fg=typer.colors.BLUE)
     typer.secho(
-        f"Type: {doc.filetype} · Chunks: {doc.chunks_count} · Hash: {doc.content_hash}",
+        f"Type: {doc.filetype} · Chunks: {doc.chunks_count} · Hash: {doc.reconstructed_text_hash}",
         fg=typer.colors.BRIGHT_BLACK,
     )
     if doc.indexed_at:
@@ -208,25 +230,6 @@ def _doc_content_command(
     except Exception as e:
         typer.secho(f"Error retrieving document content: {e}", fg=typer.colors.RED, bold=True)
         raise typer.Exit(1)
-
-@app.command("doc-content")
-def doc_content(
-    name: str = typer.Argument("my-vault"),
-    doc_id: str = typer.Argument(..., help="Document id from `ctxvault docs`"),
-    output: Path | None = typer.Option(None, "--output", "-o", help="Write content to a file"),
-    json_output: bool = typer.Option(False, "--json", help="Print metadata and content as JSON"),
-):
-    """Show text reconstructed from indexed semantic chunks."""
-    _doc_content_command(name, doc_id, output=output, json_output=json_output)
-
-@app.command("doc-export")
-def doc_export(
-    name: str = typer.Argument("my-vault"),
-    doc_id: str = typer.Argument(..., help="Document id from `ctxvault docs`"),
-    output: Path = typer.Argument(..., help="Destination file path"),
-):
-    """Export indexed document text to a file."""
-    _doc_content_command(name, doc_id, output=output)
 
 @app.command()
 def attach(vault_name: str = typer.Argument("my-vault"), agent_name: str = typer.Argument(...)):

@@ -45,7 +45,7 @@ def mock_chroma(monkeypatch):
                         "indexed_at": "2026-01-01T00:00:00+00:00",
                     },
                 ],
-                "documents": ["alpha ", "beta"],
+                "documents": ["alpha", "beta"],
             }
             if where and where.get("doc_id") == "1"
             else {

@@ -62,7 +62,7 @@ def get_document_content(doc_id: str, config: dict) -> DocumentContent:
 
     pairs.sort(key=lambda item: item[0].get("chunk_index", 0))
     first_metadata = pairs[0][0]
-    content = "".join(text for _, text in pairs)
+    content = "\n\n".join(text for _, text in pairs)
     chunks_count = len(pairs)
 
     return DocumentContent(
@@ -71,8 +71,8 @@ def get_document_content(doc_id: str, config: dict) -> DocumentContent:
         filetype=first_metadata.get("filetype", ""),
         chunks_count=chunks_count,
         content=content,
-        content_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        reconstructed_text_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(),
         indexed_at=first_metadata.get("indexed_at"),
         reconstructed=True,
-        warning=_RECONSTRUCTION_WARNING if chunks_count > 0 else None,
+        warning=_RECONSTRUCTION_WARNING if chunks_count > 1 else None,
     )

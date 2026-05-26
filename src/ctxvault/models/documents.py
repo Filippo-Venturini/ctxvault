@@ -1,5 +1,5 @@
 from typing import Union
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class BaseDocumentInfo(BaseModel):
     source: str      
@@ -13,7 +13,9 @@ class DocumentContent(BaseDocumentInfo):
     doc_id: str
     chunks_count: int
     content: str
-    content_hash: str
+    reconstructed_text_hash: str = Field(
+        description="SHA-256 of reconstructed chunk text, not the original source file."
+    )
     indexed_at: str | None = None
     reconstructed: bool = True
     warning: str | None = None

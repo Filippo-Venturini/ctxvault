@@ -37,7 +37,7 @@ def test_list_documents_has_doc_info_fields(mock_vault_config):
 def test_get_document_content_reconstructs_chunks(mock_vault_config):
     doc = vault_router.get_document_content(vault_name="test_vault", doc_id="1")
     assert doc.doc_id == "1"
-    assert doc.content == "alpha beta"
+    assert doc.content == "alpha\n\nbeta"
     assert doc.chunks_count == 2
     assert doc.reconstructed is True
     assert doc.warning
