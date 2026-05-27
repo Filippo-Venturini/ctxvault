@@ -126,6 +126,28 @@ async def docs(vault_name: str, request: Request)-> ListDocsResponse:
     except VaultAccessDeniedError as e:
         raise HTTPException(status_code=403, detail=str(e))
 
+@ctxvault_router.get(
+    "/docs/{doc_id}/content",
+    summary="Retrieve indexed document text",
+    description="Return text reconstructed from stored semantic chunks for recovery and diff workflows.",
+)
+async def doc_content(doc_id: str, vault_name: str, request: Request) -> DocContentResponse:
+    try:
+        check_vault_access(vault_name=vault_name, request=request)
+
+        document = vault_router.get_document_content(vault_name=vault_name, doc_id=doc_id)
+        return DocContentResponse(vault_name=vault_name, document=document)
+    except DocumentNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except VaultNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except UnsupportedVaultOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except MissingAgentNameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except VaultAccessDeniedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
 @ctxvault_router.post(
     "/docs/write",
     summary="Write and index a document to a semantic vault",

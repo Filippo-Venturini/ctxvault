@@ -34,6 +34,19 @@ def test_list_documents_has_doc_info_fields(mock_vault_config):
         assert hasattr(doc, "doc_id")
         assert hasattr(doc, "source")
 
+def test_get_document_content_reconstructs_chunks(mock_vault_config):
+    doc = vault_router.get_document_content(vault_name="test_vault", doc_id="1")
+    assert doc.doc_id == "1"
+    assert doc.content == "alpha\n\nbeta"
+    assert doc.chunks_count == 2
+    assert doc.reconstructed is True
+    assert doc.warning
+
+def test_get_document_content_missing_raises(mock_vault_config):
+    from ctxvault.core.exceptions import DocumentNotFoundError
+    with pytest.raises(DocumentNotFoundError):
+        vault_router.get_document_content(vault_name="test_vault", doc_id="missing")
+
 def test_write_doc_creates_and_indexes(mock_vault_config):
     vault_router.write_doc(vault_name="test_vault", file_path="notes/test.txt", content="hello world")
     assert (mock_vault_config / "notes" / "test.txt").exists()

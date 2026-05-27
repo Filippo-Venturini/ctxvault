@@ -118,6 +118,35 @@ class TestListDocsEndpoint:
         assert response.status_code == 400
 
 
+class TestDocContentEndpoint:
+    def test_doc_content_success(self, mock_vault_config):
+        response = client.get(
+            "/ctxvault/docs/1/content",
+            params={"vault_name": "test_vault"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["vault_name"] == "test_vault"
+        assert data["document"]["doc_id"] == "1"
+        assert data["document"]["content"] == "alpha\n\nbeta"
+        assert data["document"]["reconstructed_text_hash"]
+        assert data["document"]["warning"]
+
+    def test_doc_content_not_found(self, mock_vault_config):
+        response = client.get(
+            "/ctxvault/docs/missing/content",
+            params={"vault_name": "test_vault"},
+        )
+        assert response.status_code == 404
+
+    def test_doc_content_on_skill_vault_returns_400(self, mock_skill_vault_config):
+        response = client.get(
+            "/ctxvault/docs/1/content",
+            params={"vault_name": "test_skill_vault"},
+        )
+        assert response.status_code == 400
+
+
 class TestListSkillsEndpoint:
     def test_list_skills_success(self, mock_skill_vault_config, temp_skills):
         client.put("/ctxvault/index", json={"vault_name": "test_skill_vault"})

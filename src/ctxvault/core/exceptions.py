@@ -59,3 +59,7 @@ class SkillNotFoundError(Exception):
 class MissingAgentNameError(Exception):
     """Raised when agents try to access a restricted vault without providing an agent name."""
     pass
+
+class DocumentNotFoundError(Exception):
+    """Raised when a document id is not present in the semantic store."""
+    pass

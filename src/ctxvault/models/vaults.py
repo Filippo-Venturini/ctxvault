@@ -18,6 +18,7 @@ class VaultOperation(str, Enum):
     WRITE_DOC = "write_doc"
     WRITE_SKILL = "write_skill"
     LIST_DOCUMENTS = "list_documents"
+    READ_DOC_CONTENT = "read_doc_content"
     LIST_SKILLS = "list_skills"
     READ_SKILL = "read_skill"
 

@@ -61,6 +61,20 @@ def test_cli_docs_semantic(mock_vault_config):
     assert result.exit_code == 0
     assert "Found" in result.stdout
 
+@pytest.mark.usefixtures("mock_chroma")
+def test_cli_docs_show_semantic(mock_vault_config):
+    result = runner.invoke(app, ["docs", "test_vault", "--show", "1"])
+    assert result.exit_code == 0
+    assert "alpha\n\nbeta" in result.stdout
+    assert "Warning:" in result.stdout
+
+@pytest.mark.usefixtures("mock_chroma")
+def test_cli_docs_export_semantic(mock_vault_config, tmp_path):
+    out = tmp_path / "recovered.txt"
+    result = runner.invoke(app, ["docs", "test_vault", "--export", "1", "--output", str(out)])
+    assert result.exit_code == 0
+    assert out.read_text(encoding="utf-8") == "alpha\n\nbeta"
+
 # ── Skill vault operations ───────────────────────────────────────────────────
 
 def test_cli_index_skill_vault(mock_skill_vault_config, temp_skills):

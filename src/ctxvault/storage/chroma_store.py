@@ -44,3 +44,10 @@ def get_all_metadatas(config: dict):
     collection = get_collection(config=config)
     results = collection.get(include=["metadatas"])
     return results["metadatas"]
+
+def get_document_records(doc_id: str, config: dict) -> dict:
+    collection = get_collection(config=config)
+    return collection.get(
+        where={"doc_id": doc_id},
+        include=["documents", "metadatas"],
+    )

@@ -151,9 +151,30 @@ def vaults():
             _print_vault(v)
 
 @app.command()
-def docs(name: str = typer.Argument("my-vault")):
-    try:
+def docs(
+    name: str = typer.Argument("my-vault"),
+    export: str | None = typer.Option(None, "--export", help="Document id to export (requires --output)"),
+    show: str | None = typer.Option(None, "--show", help="Document id to display reconstructed text for"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Write exported content to this file"),
+    json_output: bool = typer.Option(False, "--json", help="Print metadata and content as JSON"),
+):
+    if export and show:
+        typer.secho("Error: --export and --show are mutually exclusive.", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+    if export:
+        if not output:
+            typer.secho("Error: --export requires --output.", fg=typer.colors.RED, bold=True)
+            raise typer.Exit(1)
+        _doc_content_command(name, export, output=output, json_output=json_output)
+        return
+    if show:
+        _doc_content_command(name, show, output=output, json_output=json_output)
+        return
+    if output or json_output:
+        typer.secho("Error: --output and --json require --export or --show.", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
 
+    try:
         documents = vault_router.list_documents(vault_name=name)
 
         typer.secho(f"\nFound {len(documents)} documents in '{name}'\n", fg=typer.colors.GREEN, bold=True)
@@ -170,6 +191,44 @@ def docs(name: str = typer.Argument("my-vault")):
 
     except Exception as e:
         typer.secho(f"Error during document listing: {e}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+
+def _render_doc_content(doc, *, json_output: bool = False):
+    if json_output:
+        typer.echo(doc.model_dump_json(indent=2))
+        return
+
+    typer.secho(f"Document ID: {doc.doc_id}", fg=typer.colors.CYAN, bold=True)
+    typer.secho(f"Source: {doc.source}", fg=typer.colors.BLUE)
+    typer.secho(
+        f"Type: {doc.filetype} · Chunks: {doc.chunks_count} · Hash: {doc.reconstructed_text_hash}",
+        fg=typer.colors.BRIGHT_BLACK,
+    )
+    if doc.indexed_at:
+        typer.secho(f"Indexed at: {doc.indexed_at}", fg=typer.colors.BRIGHT_BLACK)
+    if doc.warning:
+        typer.secho(f"Warning: {doc.warning}", fg=typer.colors.YELLOW)
+    typer.echo("─" * 80)
+    typer.echo(doc.content)
+
+def _doc_content_command(
+    name: str,
+    doc_id: str,
+    output: Path | None = None,
+    json_output: bool = False,
+):
+    try:
+        doc = vault_router.get_document_content(vault_name=name, doc_id=doc_id)
+        if output:
+            output.write_text(doc.content, encoding="utf-8")
+            typer.secho(f"Exported indexed text to {output}", fg=typer.colors.GREEN, bold=True)
+            if doc.warning:
+                typer.secho(doc.warning, fg=typer.colors.YELLOW)
+            return
+
+        _render_doc_content(doc, json_output=json_output)
+    except Exception as e:
+        typer.secho(f"Error retrieving document content: {e}", fg=typer.colors.RED, bold=True)
         raise typer.Exit(1)
 
 @app.command()

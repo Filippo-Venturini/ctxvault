@@ -1,7 +1,7 @@
 from pathlib import Path
 from ctxvault.core import indexer
 from ctxvault.core.vaults.base import BaseVault
-from ctxvault.models.documents import SemanticDocumentInfo
+from ctxvault.models.documents import SemanticDocumentInfo, DocumentContent
 from ctxvault.models.query_result import ChunkMatch, QueryResult
 from ctxvault.core.exceptions import EmptyQueryError, FileOutsideVaultError, UnsupportedFileTypeError
 from ctxvault.models.vaults import VaultOperation
@@ -15,6 +15,7 @@ class SemanticVault(BaseVault):
         VaultOperation.DELETE,
         VaultOperation.WRITE_DOC,
         VaultOperation.LIST_DOCUMENTS,
+        VaultOperation.READ_DOC_CONTENT,
     })
 
     def index_file(self, file_path:Path, agent_metadata: dict | None = None)-> None:
@@ -112,6 +113,10 @@ class SemanticVault(BaseVault):
     def list_documents(self) -> list[SemanticDocumentInfo]:
         from ctxvault.core import querying
         return querying.list_documents(config=self.config)
+
+    def get_document_content(self, doc_id: str) -> DocumentContent:
+        from ctxvault.core import querying
+        return querying.get_document_content(doc_id=doc_id, config=self.config)
     
     def write_doc(self, file_path: str, content: str, overwrite: bool = True, agent_metadata: dict | None = None)-> None:
         self.write_file(file_path=file_path, content=content, overwrite=overwrite, agent_metadata=agent_metadata)
