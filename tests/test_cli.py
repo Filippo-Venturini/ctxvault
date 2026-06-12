@@ -53,7 +53,9 @@ def test_cli_delete_semantic(mock_vault_config, temp_docs):
 def test_cli_reindex_semantic(mock_vault_config):
     result = runner.invoke(app, ["reindex", "test_vault"])
     assert result.exit_code == 0
-    assert "Reindexed:" in result.stdout or "Skipped:" in result.stdout
+    assert "Reindexed: 2" in result.stdout
+    assert "Skipped: 0" in result.stdout
+    assert "unexpected keyword argument 'vault_config'" not in result.stdout
 
 @pytest.mark.usefixtures("mock_chroma", "temp_docs")
 def test_cli_docs_semantic(mock_vault_config):
