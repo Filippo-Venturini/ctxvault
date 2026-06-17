@@ -52,7 +52,7 @@ class SemanticVault(BaseVault):
 
         for file in self.iter_files(path=base_path, exclude_dirs=[self.db_path]):
             try:
-                self.reindex_file(file_path=file, vault_config=self.config)
+                self.reindex_file(file_path=file)
                 reindexed_files.append(str(file))
             except Exception as e:
                 skipped_files.append(f"{str(file)} ({e})")
