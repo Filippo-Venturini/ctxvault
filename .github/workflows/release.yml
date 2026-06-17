@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dev dependencies
+        run: pip install build twine
+
+      - name: Bump version in pyproject.toml
+        id: bump
+        run: |
+          # Read current version
+          CURRENT=$(grep '^version = ' pyproject.toml | sed 's/version = "//;s/"//')
+          echo "Current version: $CURRENT"
+
+          # Split into parts
+          MAJOR=$(echo $CURRENT | cut -d. -f1)
+          MINOR=$(echo $CURRENT | cut -d. -f2)
+          PATCH=$(echo $CURRENT | cut -d. -f3)
+
+          # Bump
+          case "${{ github.event.inputs.bump }}" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+
+          NEW="$MAJOR.$MINOR.$PATCH"
+          echo "New version: $NEW"
+
+          # Write back
+          sed -i "s/^version = \"$CURRENT\"/version = \"$NEW\"/" pyproject.toml
+
+          echo "new_version=$NEW" >> $GITHUB_OUTPUT
+          echo "old_version=$CURRENT" >> $GITHUB_OUTPUT
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}"
+          git push origin main
+
+      - name: Build package
+        run: python -m build
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: twine upload dist/*
+
+      - name: Generate release notes from commits
+        id: notes
+        run: |
+          OLD_TAG="v${{ steps.bump.outputs.old_version }}"
+          NEW_TAG="v${{ steps.bump.outputs.new_version }}"
+
+          # Get commits since last tag (or all if no tag exists)
+          if git rev-parse "$OLD_TAG" >/dev/null 2>&1; then
+            NOTES=$(git log "$OLD_TAG"..HEAD --pretty=format:"- %s" --no-merges)
+          else
+            NOTES=$(git log --pretty=format:"- %s" --no-merges | head -20)
+          fi
+
+          echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
+          echo "$NOTES" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Create GitHub release and tag
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.bump.outputs.new_version }}"
+          name: "v${{ steps.bump.outputs.new_version }}"
+          body: ${{ env.RELEASE_NOTES }}
+          target_commitish: main
+
+      - name: Merge main into dev
+        run: |
+          git fetch origin dev
+          git checkout dev
+          git merge main --no-ff -m "chore: merge main into dev after v${{ steps.bump.outputs.new_version }}"
+          git push origin dev
