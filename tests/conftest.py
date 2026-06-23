@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 def mock_chroma(monkeypatch):
     monkeypatch.setattr(
         "ctxvault.core.embedding.embed_list",
-        lambda chunks: [[0.1] * 384] * len(chunks),
+        lambda chunks, model_name=None: [[0.1] * 384] * len(chunks),
     )
 
     mock_collection = MagicMock()

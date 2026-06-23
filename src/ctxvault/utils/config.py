@@ -59,7 +59,12 @@ def _get_vault_scope(vault_name: str, global_config: dict, local_config: dict) -
         return "global"
     return None
 
-def create_vault(vault_name: str, vault_type: VaultType, restricted: bool, vault_path: str | None, global_vault: bool = False) -> tuple[str, str]:
+def create_vault(vault_name: str, vault_type: VaultType, restricted: bool, vault_path: str | None, global_vault: bool = False, embedding_model: str | None = None) -> tuple[str, str]:
+    # Embedding only happens in semantic vaults; skill vaults are curated and
+    # never indexed, so a model override there would be silently meaningless.
+    if embedding_model and vault_type != VaultType.SEMANTIC:
+        raise ValueError("--embedding-model is only supported for semantic vaults.")
+
     if global_vault:
         global_config, _, _ = _load_config()
         config = global_config
@@ -88,13 +93,19 @@ def create_vault(vault_name: str, vault_type: VaultType, restricted: bool, vault
 
     vault_path_final = vault_path_abs.as_posix() if global_vault else vault_path_abs.relative_to(save_root.parent).as_posix()
 
-    config["vaults"][vault_name] = {
-        "type": vault_type.value, 
+    entry = {
+        "type": vault_type.value,
         "vault_path": vault_path_final,
         "db_path": db_path_posix,
         "restricted": restricted,
         "allowed_agents": []
     }
+    # Store the model only when overridden, so existing/default vaults keep their
+    # current config shape and resolve to embedding.DEFAULT_EMBEDDING_MODEL.
+    if embedding_model:
+        entry["embedding_model"] = embedding_model
+
+    config["vaults"][vault_name] = entry
 
     _save_config(data=config, root=save_root)
     return str(vault_path_abs), str(_config_file(save_root))
@@ -112,7 +123,8 @@ def get_vaults() -> list[dict]:
             "vault_path": data.get("vault_path"),
             "db_path": data.get("db_path"),
             "restricted": data.get("restricted"),
-            "allowed_agents": data.get("allowed_agents")
+            "allowed_agents": data.get("allowed_agents"),
+            "embedding_model": data.get("embedding_model")
         })
 
     for name, data in global_config["vaults"].items():
@@ -123,7 +135,8 @@ def get_vaults() -> list[dict]:
             "vault_path": data.get("vault_path"),
             "db_path": data.get("db_path"),
             "restricted": data.get("restricted"),
-            "allowed_agents": data.get("allowed_agents")
+            "allowed_agents": data.get("allowed_agents"),
+            "embedding_model": data.get("embedding_model")
         })
 
     return result

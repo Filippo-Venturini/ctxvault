@@ -37,7 +37,9 @@ def build_documents_from_metadatas(metadatas)-> list[SemanticDocumentInfo]:
     ]
 
 def query(query_txt: str, config: dict, n_results: int = 5, filters: dict | None = None)-> dict:
-    query_embedding = embed_list(chunks=[query_txt])
+    # Query must embed with the same model used to index this vault, or the
+    # vectors are not comparable; both read it from the vault config.
+    query_embedding = embed_list(chunks=[query_txt], model_name=config.get("embedding_model"))
     return chroma_store.query(query_embedding=query_embedding, config=config, n_results=n_results, filters=filters)
 
 def list_documents(config: dict)-> list[SemanticDocumentInfo]:

@@ -138,3 +138,21 @@ def test_cli_delete_purge(mock_vault_config):
     result = runner.invoke(app, ["delete", "test_vault", "--purge"])
     assert result.exit_code == 0
     assert "permanently deleted" in result.stdout
+
+# ── Embedding model option (#18) ─────────────────────────────────────────────
+
+def test_cli_init_with_embedding_model(mock_global_config):
+    from ctxvault.utils.config import get_vaults
+    result = runner.invoke(
+        app, ["init", "cli_model_vault", "--global", "--embedding-model", "all-mpnet-base-v2"]
+    )
+    assert result.exit_code == 0
+    vault = next(v for v in get_vaults() if v["name"] == "cli_model_vault")
+    assert vault["embedding_model"] == "all-mpnet-base-v2"
+
+def test_cli_init_embedding_model_rejected_for_skill(mock_global_config):
+    result = runner.invoke(
+        app, ["init", "skill_model_vault", "--type", "skill", "--embedding-model", "x"]
+    )
+    assert result.exit_code == 1
+    assert "semantic" in result.stdout.lower()

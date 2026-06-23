@@ -45,14 +45,14 @@ def purge_vault(vault_name: str) -> None:
     vault = _get_vault(vault_name=vault_name)
     vault.purge_vault()
 
-def init_vault(vault_name: str, vault_type: str | VaultType = VaultType.SEMANTIC, restricted: bool = False, path: str | None = None, global_vault: bool = False)-> tuple[str, str]:
+def init_vault(vault_name: str, vault_type: str | VaultType = VaultType.SEMANTIC, restricted: bool = False, path: str | None = None, global_vault: bool = False, embedding_model: str | None = None)-> tuple[str, str]:
     if isinstance(vault_type, str):
         try:
             vault_type = VaultType(vault_type)
         except ValueError:
             raise VaultTypeNotValidError(f"Vault type not valid: {vault_type}. Choose between: {', '.join(VaultType.list())}")
-    
-    vault_path, config_path = create_vault(vault_name=vault_name, vault_type=vault_type, restricted=restricted, vault_path=path, global_vault=global_vault)
+
+    vault_path, config_path = create_vault(vault_name=vault_name, vault_type=vault_type, restricted=restricted, vault_path=path, global_vault=global_vault, embedding_model=embedding_model)
     return str(vault_path), config_path
 
 def index_files(vault_name: str, path: str | None = None)-> tuple[list[str], list[str]]:
