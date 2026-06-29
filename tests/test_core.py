@@ -182,3 +182,77 @@ def test_chunking_new_defaults():
     sig = inspect.signature(chunking)
     assert sig.parameters["chunk_size"].default == 400
     assert sig.parameters["overlap"].default == 100
+
+# ── Per-vault embedding model (#18) ─────────────────────────────────────────
+
+def test_init_vault_stores_embedding_model(mock_global_config):
+    from ctxvault.utils.config import get_vaults
+    vault_router.init_vault(
+        vault_name="custom_model_vault", global_vault=True,
+        embedding_model="all-mpnet-base-v2"
+    )
+    vault = next(v for v in get_vaults() if v["name"] == "custom_model_vault")
+    assert vault["embedding_model"] == "all-mpnet-base-v2"
+
+def test_init_vault_default_has_no_embedding_model(mock_vault_config):
+    from ctxvault.utils.config import get_vaults
+    vault = next(v for v in get_vaults() if v["name"] == "test_vault")
+    assert vault["embedding_model"] is None
+
+def test_init_vault_rejects_embedding_model_for_skill(mock_global_config):
+    with pytest.raises(ValueError):
+        vault_router.init_vault(
+            vault_name="skill_with_model", vault_type="skill",
+            global_vault=True, embedding_model="all-mpnet-base-v2"
+        )
+
+def test_index_threads_vault_embedding_model(mock_global_config, monkeypatch):
+    vault_path, _ = vault_router.init_vault(
+        vault_name="idx_vault", global_vault=True,
+        embedding_model="all-mpnet-base-v2"
+    )
+    (Path(vault_path) / "doc.txt").write_text("hello world")
+
+    seen = []
+    def recording_embed(chunks, model_name=None):
+        seen.append(model_name)
+        return [[0.1] * 384] * len(chunks)
+    monkeypatch.setattr("ctxvault.core.embedding.embed_list", recording_embed)
+
+    vault_router.index_files(vault_name="idx_vault")
+    assert seen and all(model == "all-mpnet-base-v2" for model in seen)
+
+def test_query_threads_vault_embedding_model(mock_global_config, monkeypatch):
+    vault_router.init_vault(
+        vault_name="qry_vault", global_vault=True,
+        embedding_model="all-mpnet-base-v2"
+    )
+
+    seen = []
+    def recording_embed(chunks, model_name=None):
+        seen.append(model_name)
+        return [[0.1] * 384] * len(chunks)
+    # querying.py binds embed_list at import, so patch it where it is looked up.
+    monkeypatch.setattr("ctxvault.core.querying.embed_list", recording_embed)
+
+    vault_router.query(text="anything", vault_name="qry_vault")
+    assert seen == ["all-mpnet-base-v2"]
+
+def test_get_model_caches_per_name_and_defaults(monkeypatch):
+    import ctxvault.core.embedding as embedding
+
+    created = []
+    class FakeSentenceTransformer:
+        def __init__(self, name):
+            self.name = name
+            created.append(name)
+    monkeypatch.setattr(embedding, "SentenceTransformer", FakeSentenceTransformer)
+    monkeypatch.setattr(embedding, "_MODELS", {})
+
+    first = embedding.get_model("model-a")
+    again = embedding.get_model("model-a")
+    default = embedding.get_model()
+
+    assert first is again  # same name -> cached instance reused
+    assert default is not first  # default model is a distinct instance
+    assert created == ["model-a", embedding.DEFAULT_EMBEDDING_MODEL]

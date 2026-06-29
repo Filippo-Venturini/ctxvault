@@ -310,7 +310,7 @@ attached agents. Pass `--type skill` to create a skill vault for procedural memo
 instead of the default semantic vault.
 
 ```bash
-ctxvault init <name> [--type <type>] [--path <path>] [--global] [--restricted]
+ctxvault init <name> [--type <type>] [--path <path>] [--global] [--restricted] [--embedding-model <model>]
 ```
 
 **Arguments:**
@@ -319,6 +319,7 @@ ctxvault init <name> [--type <type>] [--path <path>] [--global] [--restricted]
 - `--path <path>` - Custom vault location (optional, default: `~/.ctxvault/vaults/<name>`)
 - `--global` - Create a global vault in ~/.ctxvault, available from anywhere on the machine
 - `--restricted` - Create vault as restricted (optional, default: public)
+- `--embedding-model <model>` - sentence-transformers model for this semantic vault (optional, default: `all-MiniLM-L6-v2`). The model is pinned at init time and used for all indexing and querying on the vault. Semantic vaults only.
 
 
 **Example:**
@@ -327,6 +328,7 @@ ctxvault init my-vault                          # semantic vault (default)
 ctxvault init my-vault --type skill             # skill vault for procedural memory
 ctxvault init my-vault --global --type skill    # global skill vault
 ctxvault init my-vault --restricted
+ctxvault init my-vault --embedding-model all-mpnet-base-v2   # custom embedding model
 ```
 
 ---
