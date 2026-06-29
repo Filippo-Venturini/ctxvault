@@ -31,13 +31,17 @@ def _print_vault(v: dict):
 
     typer.echo("")
     typer.secho(f"  {'path:':<20}{v['vault_path']}", fg=typer.colors.BRIGHT_BLACK)
+    # Surface a non-default embedding model so `vaults` shows which model a
+    # semantic vault is pinned to; default vaults omit the key and print nothing.
+    if v.get("embedding_model"):
+        typer.secho(f"  {'embedding model:':<20}{v['embedding_model']}", fg=typer.colors.BRIGHT_BLACK)
     typer.echo("")
 
 @app.command()
-def init(name: str = typer.Argument("my-vault"), type: str = typer.Option(VaultType.SEMANTIC.value, "--type"), restricted: bool = typer.Option(False, "--restricted"), path: str = typer.Option(None, "--path"), global_vault: bool = typer.Option(False, "--global")):
+def init(name: str = typer.Argument("my-vault"), type: str = typer.Option(VaultType.SEMANTIC.value, "--type"), restricted: bool = typer.Option(False, "--restricted"), path: str = typer.Option(None, "--path"), global_vault: bool = typer.Option(False, "--global"), embedding_model: str = typer.Option(None, "--embedding-model", help="sentence-transformers model for this semantic vault (default: all-MiniLM-L6-v2)")):
     try:
         typer.echo(f"Initializing Context Vault {name}...")
-        vault_path, config_path = vault_router.init_vault(vault_name=name, vault_type=type, restricted=restricted, path=path, global_vault=global_vault)
+        vault_path, config_path = vault_router.init_vault(vault_name=name, vault_type=type, restricted=restricted, path=path, global_vault=global_vault, embedding_model=embedding_model)
         typer.secho("Context Vault initialized succesfully!", fg=typer.colors.GREEN, bold=True)
         typer.echo(f"Context Vault path: {vault_path}")
         typer.echo(f"Config file path: {config_path}")

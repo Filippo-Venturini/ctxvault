@@ -11,7 +11,9 @@ def index_file(file_path: str, config: dict, agent_metadata: dict | None = None)
 
     chunks = chunking(text, file_type=file_type)
 
-    embeddings = embed_list(chunks=chunks)
+    # Use the model pinned to this vault (config["embedding_model"]); falls back
+    # to the default model when the vault was created without an override.
+    embeddings = embed_list(chunks=chunks, model_name=config.get("embedding_model"))
 
     chunk_ids, metadatas = build_chunks_metadatas(doc_id=doc_id, chunks_size=len(chunks), source=file_path, filetype=file_type, agent_metadata=agent_metadata)
 

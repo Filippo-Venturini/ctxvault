@@ -2,11 +2,18 @@ import logging
 import transformers
 from sentence_transformers import SentenceTransformer
 
-MODEL: SentenceTransformer = None
+DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-def get_model():
-    global MODEL
-    if MODEL is None:
+# Cache one SentenceTransformer per model name. A vault pins its model at init
+# time (see `ctxvault init --embedding-model`), so a process touching several
+# vaults may need more than one model loaded; keying by name keeps each loaded
+# exactly once while still supporting per-vault models.
+_MODELS: dict[str, SentenceTransformer] = {}
+
+def get_model(model_name: str | None = None) -> SentenceTransformer:
+    name = model_name or DEFAULT_EMBEDDING_MODEL
+    model = _MODELS.get(name)
+    if model is None:
         loggers = [
             "sentence_transformers",
             "transformers",
@@ -17,9 +24,9 @@ def get_model():
             "huggingface_hub._commit_api",
         ]
         original_levels = {}
-        for name in loggers:
-            logger = logging.getLogger(name)
-            original_levels[name] = logger.level
+        for logger_name in loggers:
+            logger = logging.getLogger(logger_name)
+            original_levels[logger_name] = logger.level
             logger.setLevel(logging.ERROR)
 
         original_verbosity = transformers.logging.get_verbosity()
@@ -27,14 +34,16 @@ def get_model():
         transformers.logging.disable_progress_bar()
 
         try:
-            MODEL = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+            model = SentenceTransformer(name)
         finally:
             transformers.logging.set_verbosity(original_verbosity)
             transformers.logging.enable_progress_bar()
-            for name, level in original_levels.items():
-                logging.getLogger(name).setLevel(level)
+            for logger_name, level in original_levels.items():
+                logging.getLogger(logger_name).setLevel(level)
 
-    return MODEL
+        _MODELS[name] = model
 
-def embed_list(chunks: list[str]) -> list[list[float]]:
-    return get_model().encode(sentences=chunks, show_progress_bar=False).tolist()
+    return model
+
+def embed_list(chunks: list[str], model_name: str | None = None) -> list[list[float]]:
+    return get_model(model_name).encode(sentences=chunks, show_progress_bar=False).tolist()
