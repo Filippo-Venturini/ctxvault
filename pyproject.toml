@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ctxvault"
-version = "0.7.1"
+version = "0.8.0"
 description = "Local memory infrastructure for AI agents. Typed vaults (semantic, procedural and episodic) with document indexing, skill management, bi-temporal facts, and autonomous agent access via MCP, HTTP API, or CLI. Multi-vault architecture, zero cloud dependencies."
 readme = "README.md"
 requires-python = ">=3.10"
