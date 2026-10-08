@@ -1,8 +1,16 @@
 from ctxvault.models.vaults import VaultType, SkillInput
+from ctxvault.storage import sqlite_store
 from ctxvault.utils.config import create_vault
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
+
+@pytest.fixture(autouse=True)
+def reset_sqlite_connections():
+    # Connections are cached per database file; tests run against fresh tmp_path
+    # vaults, so the cache is dropped between them to avoid leaking handles.
+    yield
+    sqlite_store.close_connections()
 
 @pytest.fixture(autouse=True)
 def mock_chroma(monkeypatch):
@@ -90,6 +98,11 @@ def mock_vault_config(mock_global_config):
 @pytest.fixture
 def mock_skill_vault_config(mock_global_config):
     vault_path, _ = create_vault("test_skill_vault", VaultType.SKILL, False, None, global_vault=True)
+    return Path(vault_path)
+
+@pytest.fixture
+def mock_episodic_vault_config(mock_global_config):
+    vault_path, _ = create_vault("test_episodic_vault", VaultType.EPISODIC, False, None, global_vault=True)
     return Path(vault_path)
 
 @pytest.fixture

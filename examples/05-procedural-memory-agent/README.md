@@ -1,6 +1,6 @@
 # 05 · Procedural Memory Agent
 
-One agent, two vault types — semantic and skill. The same facts,
+One agent, two vault types: semantic and skill. The same facts,
 written three different ways, because three different procedures
 were applied.
 
@@ -10,7 +10,7 @@ to give agents procedural memory. Where a semantic vault answers
 The agent retrieves facts from one, procedures from the other,
 and produces output that reflects both.
 
-The integration uses MCP — the agent discovers vaults, reads skills,
+The integration uses MCP: the agent discovers vaults, reads skills,
 and queries knowledge autonomously through the MCP server, with no
 API calls written in application code.
 
@@ -19,33 +19,33 @@ API calls written in application code.
 ## Scenario
 
 An internal communications assistant for an engineering team. The
-semantic vault holds company knowledge — team metrics, project
+semantic vault holds company knowledge: team metrics, project
 updates, team structure. The skill vault holds communication
-procedures — exactly how to write a weekly stakeholder update, a
+procedures: exactly how to write a weekly stakeholder update, a
 company newsletter, and an FAQ for employees.
 
 The user asks for three different communications. The agent fetches
 the relevant skill from the skill vault and follows it as a
-behavioral instruction — not as content to summarize, but as a
+behavioral instruction, not as content to summarize, but as a
 procedure to execute.
 
 The same facts appear in all three outputs. What changes is the
 form: structure, tone, word limits, what to include and what to
-omit — all defined by the skill.
+omit, all defined by the skill.
 
 ---
 
 ## What this demonstrates
 
-- Skill vault as procedural memory — instructions that shape agent
+- Skill vault as procedural memory: instructions that shape agent
   behavior, not content the agent reports back
 - Semantic vault and skill vault used together in a single system,
   each serving a distinct purpose
 - The difference between declarative memory ("what we know") and
   procedural memory ("how we act")
-- MCP as the integration layer — the agent uses `list_skills`,
+- MCP as the integration layer: the agent uses `list_skills`,
   `read_skill`, and `query` autonomously with no glue code
-- Skills as invisible behavioral constraints — the user sees the
+- Skills as invisible behavioral constraints: the user sees the
   output, never the procedure
 
 ---
@@ -122,7 +122,7 @@ python app.py
 └── requirements.txt
 ```
 
-Skill files follow a simple format — frontmatter with name and
+Skill files follow a simple format: frontmatter with name and
 description, markdown body with the instructions:
 ```markdown
 ---
@@ -141,14 +141,14 @@ You are writing the weekly engineering update...
 ```
 
 The frontmatter is the only contract with the vault. The filename is
-irrelevant — drop the file, run `ctxvault index comms-skills`, and
+irrelevant: drop the file, run `ctxvault index comms-skills`, and
 the skill is available to any agent that queries the vault.
 
 ---
 
 ## Example output
 ```
-REQUEST 1 — Weekly Update
+REQUEST 1: Weekly Update
 
   ⤷ list_vaults
   ⤷ list_skills [comms-skills]

@@ -182,6 +182,101 @@ def read_skill(vault_name: str, skill_name: str)-> SkillResponse:
     except UnsupportedVaultOperationError as e:
         raise ValueError(e)
 
+@mcp.tool(description="Record something that happened or something the user stated, in an episodic vault. Use this for facts with a lifetime — situations, preferences, relationships, plans — rather than for documents. Give the entities it is about so it can be looked up later, and a salience between 0 and 1 for how much it matters.")
+def write_episode(vault_name: str, content: str, entities: list[str] = [], source: str = None, salience: float = 0.5, confidence: float = 1.0, occurred_at: str = None, valid_from: str = None) -> EpisodeResponse:
+    try:
+        check_access(vault_name, AGENT_ID)
+        episode = vault_router.write_episode(
+            vault_name=vault_name,
+            content=content,
+            entities=entities,
+            source=source or AGENT_ID,
+            salience=salience,
+            confidence=confidence,
+            occurred_at=occurred_at,
+            valid_from=valid_from,
+        )
+        return EpisodeResponse(vault_name=vault_name, episode=episode)
+    except VaultNotFoundError:
+        raise ValueError(f"Vault '{vault_name}' does not exist.")
+    except UnsupportedVaultOperationError as e:
+        raise ValueError(e)
+    except Exception as e:
+        raise ValueError(f"Unexpected error writing episode: {e}")
+
+@mcp.tool(description="Retrieve episodes from an episodic vault. By default only statements that still hold are returned. Filter by entity for 'everything about X', pass valid_at to ask what was true at a past moment, or known_at to ask what the vault had already learned by then. Query text is optional and ranks results; without it the newest come first.")
+def query_episodes(vault_name: str, query: str = None, entities: list[str] = [], valid_at: str = None, known_at: str = None, include_closed: bool = False, order_by: str = None, limit: int = 10) -> QueryEpisodesResponse:
+    try:
+        check_access(vault_name, AGENT_ID)
+        result = vault_router.query_episodes(
+            vault_name=vault_name,
+            text=query,
+            entities=entities or None,
+            valid_at=valid_at,
+            known_at=known_at,
+            include_closed=include_closed,
+            order_by=order_by,
+            limit=limit,
+        )
+        return QueryEpisodesResponse(
+            vault_name=vault_name,
+            query=result.query,
+            order_by=result.order_by,
+            results=result.results,
+        )
+    except VaultNotFoundError:
+        raise ValueError(f"Vault '{vault_name}' does not exist.")
+    except UnsupportedVaultOperationError as e:
+        raise ValueError(e)
+    except ValueError as e:
+        raise ValueError(e)
+
+@mcp.tool(description="Mark an episode as no longer true, without deleting it. Use this when something ends and nothing replaces it. If a corrected version exists instead, use supersede_episode so the two stay linked.")
+def invalidate_episode(vault_name: str, episode_id: str, valid_to: str = None, reason: str = None) -> EpisodeResponse:
+    try:
+        check_access(vault_name, AGENT_ID)
+        episode = vault_router.invalidate_episode(vault_name=vault_name, episode_id=episode_id, valid_to=valid_to, reason=reason)
+        return EpisodeResponse(vault_name=vault_name, episode=episode)
+    except VaultNotFoundError:
+        raise ValueError(f"Vault '{vault_name}' does not exist.")
+    except (EpisodeNotFoundError, EpisodeAlreadyClosedError) as e:
+        raise ValueError(e)
+    except UnsupportedVaultOperationError as e:
+        raise ValueError(e)
+
+@mcp.tool(description="Replace an episode with a corrected or updated version. The old statement is closed exactly where the new one begins and the two are linked, so the history of what changed stays readable. Entities and salience carry over from the old episode unless you pass new ones. Use this whenever new information contradicts something already recorded.")
+def supersede_episode(vault_name: str, episode_id: str, content: str, entities: list[str] = [], source: str = None, salience: float = None) -> EpisodeResponse:
+    try:
+        check_access(vault_name, AGENT_ID)
+        episode = vault_router.supersede_episode(
+            vault_name=vault_name,
+            episode_id=episode_id,
+            content=content,
+            entities=entities or None,
+            source=source or AGENT_ID,
+            salience=salience,
+        )
+        return EpisodeResponse(vault_name=vault_name, episode=episode)
+    except VaultNotFoundError:
+        raise ValueError(f"Vault '{vault_name}' does not exist.")
+    except (EpisodeNotFoundError, EpisodeAlreadyClosedError) as e:
+        raise ValueError(e)
+    except UnsupportedVaultOperationError as e:
+        raise ValueError(e)
+
+@mcp.tool(description="Show every version of a statement, oldest first. Use this to explain why the vault believes something, or to see what an episode used to say before it was corrected.")
+def episode_history(vault_name: str, episode_id: str) -> EpisodeHistoryResponse:
+    try:
+        check_access(vault_name, AGENT_ID)
+        history = vault_router.episode_history(vault_name=vault_name, episode_id=episode_id)
+        return EpisodeHistoryResponse(vault_name=vault_name, episode_id=history.episode_id, chain=history.chain)
+    except VaultNotFoundError:
+        raise ValueError(f"Vault '{vault_name}' does not exist.")
+    except EpisodeNotFoundError as e:
+        raise ValueError(e)
+    except UnsupportedVaultOperationError as e:
+        raise ValueError(e)
+
 def main():
     mcp.run(transport="stdio")
 

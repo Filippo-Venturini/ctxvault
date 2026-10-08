@@ -63,3 +63,15 @@ class MissingAgentNameError(Exception):
 class DocumentNotFoundError(Exception):
     """Raised when a document id is not present in the semantic store."""
     pass
+
+class EpisodeNotFoundError(Exception):
+    """Raised when an episode id is not present in the episodic store."""
+    pass
+
+class EpisodeAlreadyClosedError(Exception):
+    """Raised when trying to invalidate or supersede an episode that is already closed."""
+    pass
+
+class SchemaVersionError(Exception):
+    """Raised when an episodic store was written by a newer version of ctxvault."""
+    pass

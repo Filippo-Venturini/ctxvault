@@ -45,7 +45,7 @@ class TestQueryEndpoint:
         from unittest.mock import MagicMock
         mock_result = MagicMock()
         mock_result.results = []
-        monkeypatch.setattr(vault_router, "query", lambda vault_name, text, filters=None: mock_result)
+        monkeypatch.setattr(vault_router, "query", lambda vault_name, text, filters=None, n_results=5: mock_result)
         response = client.post(
             "/ctxvault/query",
             json={"vault_name": "test_vault", "query": "nonexistent"}

@@ -209,15 +209,15 @@ def main():
 
     requests_list = [
         (
-            "REQUEST 1 — Weekly Update",
+            "REQUEST 1: Weekly Update",
             "Write the weekly engineering update for stakeholders."
         ),
         (
-            "REQUEST 2 — Newsletter",
+            "REQUEST 2: Newsletter",
             "Write the engineering section for this month's company newsletter."
         ),
         (
-            "REQUEST 3 — FAQ",
+            "REQUEST 3: FAQ",
             "Write FAQ answers for employees about the new engineers joining "
             "and the upcoming release freeze."
         ),

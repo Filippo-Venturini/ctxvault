@@ -60,10 +60,11 @@ def _get_vault_scope(vault_name: str, global_config: dict, local_config: dict) -
     return None
 
 def create_vault(vault_name: str, vault_type: VaultType, restricted: bool, vault_path: str | None, global_vault: bool = False, embedding_model: str | None = None) -> tuple[str, str]:
-    # Embedding only happens in semantic vaults; skill vaults are curated and
-    # never indexed, so a model override there would be silently meaningless.
-    if embedding_model and vault_type != VaultType.SEMANTIC:
-        raise ValueError("--embedding-model is only supported for semantic vaults.")
+    # Skill vaults are curated and never embedded, so a model override there
+    # would be silently meaningless. Episodic vaults accept one: it is what
+    # turns on their optional similarity search.
+    if embedding_model and vault_type not in (VaultType.SEMANTIC, VaultType.EPISODIC):
+        raise ValueError("--embedding-model is only supported for semantic and episodic vaults.")
 
     if global_vault:
         global_config, _, _ = _load_config()
@@ -86,6 +87,16 @@ def create_vault(vault_name: str, vault_type: VaultType, restricted: bool, vault
         db_path = vault_path_abs / "chroma"
         db_path.mkdir(parents=True, exist_ok=True)
         
+        if global_vault:
+            db_path_posix = db_path.as_posix()
+        else:
+            db_path_posix = db_path.relative_to(save_root.parent).as_posix()
+
+    # Episodic vaults keep a single SQLite file instead of a vector store
+    # directory; it is created lazily on first use.
+    if vault_type == VaultType.EPISODIC:
+        db_path = vault_path_abs / "episodes.db"
+
         if global_vault:
             db_path_posix = db_path.as_posix()
         else:
@@ -216,6 +227,12 @@ def delete_vault(vault_name: str) -> None:
 
     config = local_config if scope == "local" else global_config
     save_root = local_root if scope == "local" else GLOBAL_DIR
+
+    # An episodic vault holds an open SQLite handle to a file under vault_path;
+    # dropping it before the tree goes away keeps a vault recreated at the same
+    # path from inheriting a connection to a deleted file.
+    from ctxvault.storage import sqlite_store
+    sqlite_store.close_connections()
 
     vault_path = Path(config["vaults"][vault_name]["vault_path"])
     if vault_path.exists():

@@ -37,7 +37,7 @@ async def query(query_request: QueryRequest, request: Request)-> QueryResponse:
     try:
         check_vault_access(vault_name=query_request.vault_name, request=request)
 
-        result = vault_router.query(vault_name=query_request.vault_name,text=query_request.query, filters=query_request.filters)
+        result = vault_router.query(vault_name=query_request.vault_name, text=query_request.query, filters=query_request.filters, n_results=query_request.n_results)
 
         if not result.results:
             raise HTTPException(status_code=404, detail="No results found.")
@@ -84,7 +84,7 @@ async def reindex(reindex_request: ReindexRequest, request: Request)-> ReindexRe
     try:
         check_vault_access(vault_name=reindex_request.vault_name, request=request)
 
-        reindexed_files, skipped_files = vault_router.index_files(vault_name=reindex_request.vault_name, path=reindex_request.file_path)
+        reindexed_files, skipped_files = vault_router.reindex_files(vault_name=reindex_request.vault_name, path=reindex_request.file_path)
 
         return ReindexResponse(reindexed_files=reindexed_files, skipped_files=skipped_files)
     except VaultNotFoundError as e:
@@ -247,3 +247,212 @@ async def read_skill(vault_name: str, skill_name: str, request: Request)-> Skill
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@ctxvault_router.post(
+    "/episodes/write",
+    summary="Record an episode in an episodic vault",
+    description="Store a statement with its validity window, entities and salience."
+)
+async def write_episode(write_request: WriteEpisodeRequest, request: Request)-> EpisodeResponse:
+    try:
+        check_vault_access(vault_name=write_request.vault_name, request=request)
+
+        episode = vault_router.write_episode(
+            vault_name=write_request.vault_name,
+            content=write_request.content,
+            entities=write_request.entities,
+            source=write_request.source,
+            confidence=write_request.confidence,
+            salience=write_request.salience,
+            occurred_at=write_request.occurred_at,
+            valid_from=write_request.valid_from,
+            valid_to=write_request.valid_to,
+            metadata=write_request.metadata,
+        )
+
+        return EpisodeResponse(vault_name=write_request.vault_name, episode=episode)
+    except VaultNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except UnsupportedVaultOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except MissingAgentNameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except VaultAccessDeniedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@ctxvault_router.post(
+    "/episodes/query",
+    summary="Retrieve episodes",
+    description="Filter by entity, validity and source; rank by relevance, recency, salience or a blend."
+)
+async def query_episodes(query_request: QueryEpisodesRequest, request: Request)-> QueryEpisodesResponse:
+    try:
+        check_vault_access(vault_name=query_request.vault_name, request=request)
+
+        result = vault_router.query_episodes(
+            vault_name=query_request.vault_name,
+            text=query_request.query,
+            entities=query_request.entities or None,
+            source=query_request.source,
+            min_confidence=query_request.min_confidence,
+            valid_at=query_request.valid_at,
+            known_at=query_request.known_at,
+            include_closed=query_request.include_closed,
+            metadata_filters=query_request.metadata_filters or None,
+            order_by=query_request.order_by,
+            limit=query_request.limit,
+            half_life_days=query_request.half_life_days,
+            weights=query_request.weights,
+            reinforce=query_request.reinforce,
+        )
+
+        return QueryEpisodesResponse(
+            vault_name=query_request.vault_name,
+            query=result.query,
+            order_by=result.order_by,
+            results=result.results,
+        )
+    except VaultNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except UnsupportedVaultOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except MissingAgentNameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except VaultAccessDeniedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@ctxvault_router.get(
+    "/episodes/{episode_id}",
+    summary="Read a single episode",
+    description="Return one episode with both of its time windows."
+)
+async def get_episode(episode_id: str, vault_name: str, request: Request)-> EpisodeResponse:
+    try:
+        check_vault_access(vault_name=vault_name, request=request)
+
+        episode = vault_router.get_episode(vault_name=vault_name, episode_id=episode_id)
+        return EpisodeResponse(vault_name=vault_name, episode=episode)
+    except EpisodeNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except VaultNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except UnsupportedVaultOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except MissingAgentNameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except VaultAccessDeniedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+@ctxvault_router.get(
+    "/episodes/{episode_id}/history",
+    summary="Read an episode's supersession chain",
+    description="Return every version of a statement, oldest first."
+)
+async def episode_history(episode_id: str, vault_name: str, request: Request)-> EpisodeHistoryResponse:
+    try:
+        check_vault_access(vault_name=vault_name, request=request)
+
+        history = vault_router.episode_history(vault_name=vault_name, episode_id=episode_id)
+        return EpisodeHistoryResponse(vault_name=vault_name, episode_id=history.episode_id, chain=history.chain)
+    except EpisodeNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except VaultNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except UnsupportedVaultOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except MissingAgentNameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except VaultAccessDeniedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+@ctxvault_router.post(
+    "/episodes/{episode_id}/invalidate",
+    summary="Close an episode",
+    description="Mark a statement as no longer true without deleting it."
+)
+async def invalidate_episode(episode_id: str, invalidate_request: InvalidateEpisodeRequest, request: Request)-> EpisodeResponse:
+    try:
+        check_vault_access(vault_name=invalidate_request.vault_name, request=request)
+
+        episode = vault_router.invalidate_episode(
+            vault_name=invalidate_request.vault_name,
+            episode_id=episode_id,
+            valid_to=invalidate_request.valid_to,
+            reason=invalidate_request.reason,
+        )
+
+        return EpisodeResponse(vault_name=invalidate_request.vault_name, episode=episode)
+    except EpisodeNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except EpisodeAlreadyClosedError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except VaultNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except UnsupportedVaultOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except MissingAgentNameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except VaultAccessDeniedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+@ctxvault_router.post(
+    "/episodes/{episode_id}/supersede",
+    summary="Replace an episode with a corrected one",
+    description="Close the old statement and open its successor in a single transaction."
+)
+async def supersede_episode(episode_id: str, supersede_request: SupersedeEpisodeRequest, request: Request)-> EpisodeResponse:
+    try:
+        check_vault_access(vault_name=supersede_request.vault_name, request=request)
+
+        episode = vault_router.supersede_episode(
+            vault_name=supersede_request.vault_name,
+            episode_id=episode_id,
+            content=supersede_request.content,
+            entities=supersede_request.entities or None,
+            source=supersede_request.source,
+            confidence=supersede_request.confidence,
+            salience=supersede_request.salience,
+            occurred_at=supersede_request.occurred_at,
+            valid_from=supersede_request.valid_from,
+            metadata=supersede_request.metadata,
+        )
+
+        return EpisodeResponse(vault_name=supersede_request.vault_name, episode=episode)
+    except EpisodeNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except EpisodeAlreadyClosedError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except VaultNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except UnsupportedVaultOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except MissingAgentNameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except VaultAccessDeniedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@ctxvault_router.get(
+    "/episodes",
+    summary="Episode counts for a vault",
+    description="Return how many episodes a vault holds and how many are still open."
+)
+async def episode_stats(vault_name: str, request: Request)-> EpisodeStatsResponse:
+    try:
+        check_vault_access(vault_name=vault_name, request=request)
+
+        stats = vault_router.episode_stats(vault_name=vault_name)
+        return EpisodeStatsResponse(vault_name=vault_name, **stats)
+    except VaultNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except UnsupportedVaultOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except MissingAgentNameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except VaultAccessDeniedError as e:
+        raise HTTPException(status_code=403, detail=str(e))

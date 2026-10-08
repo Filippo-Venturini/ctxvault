@@ -1,7 +1,7 @@
 # 04 · Composed Topology
 
 Five vaults, three agents, one system. Each agent has a different
-profile of access — private knowledge, shared technical context, and
+profile of access: private knowledge, shared technical context, and
 a public base accessible to all.
 
 This example builds on the isolation primitive of Example 02 and shows
@@ -14,14 +14,14 @@ boundaries.
 ## Scenario
 
 A three-tier customer support system. Each tier has access to exactly
-the knowledge it needs — no more.
+the knowledge it needs, no more.
 
-- **L1 agent** — handles standard requests. Accesses public documentation
+- **L1 agent**: handles standard requests. Accesses public documentation
   and its own procedural vault. No visibility into technical internals.
-- **L2 agent** — handles technical escalations. Accesses public docs,
+- **L2 agent**: handles technical escalations. Accesses public docs,
   its own technical procedures, and a shared vault with known issues and
-  internal tooling — shared with L3.
-- **L3 agent** — handles engineering incidents. Accesses the shared
+  internal tooling, shared with L3.
+- **L3 agent**: handles engineering incidents. Accesses the shared
   technical vault and its own engineering runbooks with architecture
   notes and recovery procedures.
 
@@ -43,7 +43,7 @@ tech-vault     [RESTRICTED]  →  l2-agent, l3-agent
 
 L1 and L3 have no shared retrieval path. L1 cannot reach technical
 internals. L3 cannot reach L2's procedures. The boundaries are
-structural — not enforced by routing logic or prompt rules.
+structural, not enforced by routing logic or prompt rules.
 
 ---
 
@@ -96,14 +96,14 @@ python app.py
 Three tickets are routed through the system in sequence, each requiring
 a different tier to resolve.
 
-**Ticket 1** — password reset, resolved at L1. Public FAQ and L1
+**Ticket 1**: password reset, resolved at L1. Public FAQ and L1
 procedures are sufficient. No escalation.
 
-**Ticket 2** — webhook timeout on large payloads, escalated to L2.
+**Ticket 2**: webhook timeout on large payloads, escalated to L2.
 L1 cannot diagnose integration issues. L2 finds the known issue in
 tech-vault and provides the workaround.
 
-**Ticket 3** — data corruption in production, escalated to L3. L2
+**Ticket 3**: data corruption in production, escalated to L3. L2
 identifies it as an engineering incident and escalates. L3 retrieves
 the recovery procedure from its runbooks and the incident context
 from tech-vault.
