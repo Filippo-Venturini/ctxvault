@@ -17,6 +17,8 @@ def _print_vault(v: dict):
 
     if vault_type == "skill":
         typer.secho("[SKILL]    ", fg=typer.colors.MAGENTA, bold=True, nl=False)
+    elif vault_type == "episodic":
+        typer.secho("[EPISODIC] ", fg=typer.colors.BLUE, bold=True, nl=False)
     else:
         typer.secho("[SEMANTIC] ", fg=typer.colors.CYAN, bold=True, nl=False)
 
@@ -38,7 +40,7 @@ def _print_vault(v: dict):
     typer.echo("")
 
 @app.command()
-def init(name: str = typer.Argument("my-vault"), type: str = typer.Option(VaultType.SEMANTIC.value, "--type"), restricted: bool = typer.Option(False, "--restricted"), path: str = typer.Option(None, "--path"), global_vault: bool = typer.Option(False, "--global"), embedding_model: str = typer.Option(None, "--embedding-model", help="sentence-transformers model for this semantic vault (default: all-MiniLM-L6-v2)")):
+def init(name: str = typer.Argument("my-vault"), type: str = typer.Option(VaultType.SEMANTIC.value, "--type"), restricted: bool = typer.Option(False, "--restricted"), path: str = typer.Option(None, "--path"), global_vault: bool = typer.Option(False, "--global"), embedding_model: str = typer.Option(None, "--embedding-model", help="sentence-transformers model for this vault. Semantic vaults default to all-MiniLM-L6-v2; episodic vaults have no vectors unless one is set.")):
     try:
         typer.echo(f"Initializing Context Vault {name}...")
         vault_path, config_path = vault_router.init_vault(vault_name=name, vault_type=type, restricted=restricted, path=path, global_vault=global_vault, embedding_model=embedding_model)
@@ -67,9 +69,9 @@ def index(name: str = typer.Argument("my-vault"), path: str = typer.Option(None,
         raise typer.Exit(1)
     
 @app.command()
-def query(name: str = typer.Argument("my-vault"), text: str = typer.Argument("")):
+def query(name: str = typer.Argument("my-vault"), text: str = typer.Argument(""), limit: int = typer.Option(5, "--limit", "-n", help="Number of chunks to return")):
     try:
-        result = vault_router.query(text=text, vault_name=name)
+        result = vault_router.query(text=text, vault_name=name, n_results=limit)
         if not result.results:
             typer.secho("No results found.", fg=typer.colors.YELLOW)
             return
@@ -317,6 +319,166 @@ def skill(vault_name: str = typer.Argument(...), skill_name: str = typer.Argumen
         typer.secho(f"Error reading skill: {e}", fg=typer.colors.RED, bold=True)
         raise typer.Exit(1)
 
+
+def _print_episode(e, index: int | None = None, show_score: bool = False):
+    prefix = f"  {index}. " if index is not None else "  "
+    typer.echo(prefix, nl=False)
+    typer.secho(e.content.strip(), bold=True)
+
+    status = "open" if e.valid_to is None else f"closed {e.valid_to}"
+    typer.secho(f"     {e.valid_from} → {status}", fg=typer.colors.BRIGHT_BLACK)
+
+    details = [f"salience {e.salience:.2f}", f"confidence {e.confidence:.2f}"]
+    if e.source:
+        details.append(f"source {e.source}")
+    if e.recall_count:
+        details.append(f"recalled {e.recall_count}x")
+    if show_score and getattr(e, "score", None) is not None:
+        details.append(f"score {e.score:.3f}")
+    typer.secho(f"     {' · '.join(details)}", fg=typer.colors.BRIGHT_BLACK)
+
+    if e.entities:
+        typer.secho(f"     entities: {', '.join(e.entities)}", fg=typer.colors.CYAN)
+    if e.superseded_by:
+        typer.secho(f"     superseded by: {e.superseded_by}", fg=typer.colors.YELLOW)
+
+    typer.secho(f"     id: {e.id}", fg=typer.colors.BRIGHT_BLACK)
+    typer.echo("")
+
+@app.command(name="write-episode")
+def write_episode(
+    name: str = typer.Argument("my-vault"),
+    content: str = typer.Argument(...),
+    entity: list[str] = typer.Option([], "--entity", "-e", help="Entity this episode is about (repeatable)"),
+    source: str = typer.Option(None, "--source", help="Who or what reported this"),
+    salience: float = typer.Option(0.5, "--salience", help="How much this matters, 0 to 1"),
+    confidence: float = typer.Option(1.0, "--confidence", help="How sure we are, 0 to 1"),
+    occurred_at: str = typer.Option(None, "--occurred-at", help="ISO timestamp of when it happened"),
+    valid_from: str = typer.Option(None, "--valid-from", help="ISO timestamp the statement starts holding"),
+    valid_to: str = typer.Option(None, "--valid-to", help="ISO timestamp the statement stops holding"),
+):
+    try:
+        episode = vault_router.write_episode(
+            vault_name=name,
+            content=content,
+            entities=list(entity),
+            source=source,
+            salience=salience,
+            confidence=confidence,
+            occurred_at=occurred_at,
+            valid_from=valid_from,
+            valid_to=valid_to,
+        )
+        typer.secho("Episode recorded.", fg=typer.colors.GREEN, bold=True)
+        _print_episode(episode)
+    except Exception as e:
+        typer.secho(f"Error writing episode: {e}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+
+@app.command()
+def episodes(
+    name: str = typer.Argument("my-vault"),
+    text: str = typer.Argument(None),
+    entity: list[str] = typer.Option([], "--entity", "-e", help="Only episodes about this entity (repeatable)"),
+    source: str = typer.Option(None, "--source"),
+    valid_at: str = typer.Option(None, "--valid-at", help="What held true at this ISO timestamp"),
+    known_at: str = typer.Option(None, "--known-at", help="What the vault already knew at this ISO timestamp"),
+    all_episodes: bool = typer.Option(False, "--all", help="Include closed episodes"),
+    order_by: str = typer.Option(None, "--order-by", help="relevance, recency, salience or composite"),
+    limit: int = typer.Option(10, "--limit", "-n"),
+    stats: bool = typer.Option(False, "--stats", help="Print counts instead of episodes"),
+):
+    try:
+        if stats:
+            counts = vault_router.episode_stats(vault_name=name)
+            typer.secho(f"\n{counts['total']} episodes in '{name}'", fg=typer.colors.GREEN, bold=True)
+            typer.secho(f"  open:   {counts['open']}", fg=typer.colors.GREEN)
+            typer.secho(f"  closed: {counts['closed']}", fg=typer.colors.YELLOW)
+            typer.echo("")
+            return
+
+        result = vault_router.query_episodes(
+            vault_name=name,
+            text=text,
+            entities=list(entity) or None,
+            source=source,
+            valid_at=valid_at,
+            known_at=known_at,
+            include_closed=all_episodes,
+            order_by=order_by,
+            limit=limit,
+        )
+
+        if not result.results:
+            typer.secho("No episodes found.", fg=typer.colors.YELLOW)
+            return
+
+        typer.secho(f"\nFound {len(result.results)} episodes (ordered by {result.order_by})\n", fg=typer.colors.GREEN, bold=True)
+        for i, episode in enumerate(result.results, 1):
+            _print_episode(episode, index=i, show_score=True)
+    except Exception as e:
+        typer.secho(f"Error querying episodes: {e}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+
+@app.command()
+def episode(
+    name: str = typer.Argument("my-vault"),
+    episode_id: str = typer.Argument(...),
+    history: bool = typer.Option(False, "--history", help="Show the whole supersession chain"),
+):
+    try:
+        if history:
+            chain = vault_router.episode_history(vault_name=name, episode_id=episode_id)
+            typer.secho(f"\n{len(chain.chain)} versions of this statement\n", fg=typer.colors.GREEN, bold=True)
+            for i, item in enumerate(chain.chain, 1):
+                _print_episode(item, index=i)
+            return
+
+        _print_episode(vault_router.get_episode(vault_name=name, episode_id=episode_id))
+    except Exception as e:
+        typer.secho(f"Error reading episode: {e}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+
+@app.command()
+def invalidate(
+    name: str = typer.Argument("my-vault"),
+    episode_id: str = typer.Argument(...),
+    valid_to: str = typer.Option(None, "--valid-to", help="ISO timestamp the statement stopped holding"),
+    reason: str = typer.Option(None, "--reason"),
+):
+    try:
+        episode = vault_router.invalidate_episode(vault_name=name, episode_id=episode_id, valid_to=valid_to, reason=reason)
+        typer.secho("Episode closed.", fg=typer.colors.YELLOW, bold=True)
+        _print_episode(episode)
+    except Exception as e:
+        typer.secho(f"Error invalidating episode: {e}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+
+@app.command()
+def supersede(
+    name: str = typer.Argument("my-vault"),
+    episode_id: str = typer.Argument(...),
+    content: str = typer.Argument(...),
+    entity: list[str] = typer.Option([], "--entity", "-e"),
+    source: str = typer.Option(None, "--source"),
+    salience: float = typer.Option(None, "--salience"),
+    valid_from: str = typer.Option(None, "--valid-from"),
+):
+    try:
+        episode = vault_router.supersede_episode(
+            vault_name=name,
+            episode_id=episode_id,
+            content=content,
+            entities=list(entity) or None,
+            source=source,
+            salience=salience,
+            valid_from=valid_from,
+        )
+        typer.secho("Episode superseded.", fg=typer.colors.GREEN, bold=True)
+        _print_episode(episode)
+    except Exception as e:
+        typer.secho(f"Error superseding episode: {e}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
 
 def main():
     app()

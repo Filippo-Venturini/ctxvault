@@ -3,7 +3,7 @@
 The simplest CtxVault setup: one vault, one agent, local semantic search
 over a document collection.
 
-This example is the entry point — no multi-agent topology, no persistent
+This example is the entry point: no multi-agent topology, no persistent
 memory across sessions. Just a vault indexed over a set of documents and
 a LangChain RAG pipeline querying it semantically.
 
@@ -11,8 +11,8 @@ a LangChain RAG pipeline querying it semantically.
 
 ## Scenario
 
-A local collection of research documents — PDFs, markdown notes, plain
-text articles — indexed into a single vault and queried in natural
+A local collection of research documents (PDFs, markdown notes, plain
+text articles) indexed into a single vault and queried in natural
 language. Answers are grounded in the retrieved content, with citations
 back to the source documents.
 
@@ -23,7 +23,7 @@ back to the source documents.
 - Initializing a vault and indexing a multi-format document collection
 - Semantic retrieval as a LangChain retriever
 - Grounded answer generation with source attribution
-- Full local execution — no cloud dependencies
+- Full local execution, no cloud dependencies
 
 ---
 
@@ -35,7 +35,7 @@ export OPENAI_API_KEY=your_key
 python app.py
 ```
 
-> Any LLM works — replace `ChatOpenAI` with `Ollama` or any
+> Any LLM works: replace `ChatOpenAI` with `Ollama` or any
 > LangChain-compatible provider.
 
 ---
@@ -66,7 +66,7 @@ Retrieved from:
   - personal_notes.md
 
 ANSWER:
-RAG avoids retraining entirely — knowledge updates require only adding
+RAG avoids retraining entirely: knowledge updates require only adding
 documents to the vault. Retrieved content provides direct citations,
 and the data never leaves your infrastructure.
 ```
@@ -76,4 +76,4 @@ and the data never leaves your infrastructure.
 ## Next
 
 **Example 02** introduces multiple agents with isolated vaults and access
-control — the same vault primitive, composed into a multi-agent topology.
+control: the same vault primitive, composed into a multi-agent topology.

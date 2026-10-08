@@ -1,17 +1,34 @@
 from ctxvault.core.exceptions import VaultTypeNotValidError
+from ctxvault.core.vaults.episodic import EpisodicVault
 from ctxvault.core.vaults.semantic import SemanticVault
 from ctxvault.core.vaults.skill import SkillVault
 from ctxvault.models.documents import SemanticDocumentInfo, SkillDocumentInfo, DocumentContent
+from ctxvault.models.episodes import Episode, EpisodeHistory, EpisodeQueryResult
 from ctxvault.models.query_result import QueryResult
 from ctxvault.models.vaults import SkillOutput, SkillInput, VaultOperation, VaultType
 from ctxvault.utils.config import create_vault, get_vault_config, get_vaults
 
+# Explicit, and deliberately not a default: a vault whose type this version does
+# not know must fail loudly. Falling back to semantic would silently open an
+# episodic vault written by a newer ctxvault as a document store.
+_VAULT_CLASSES = {
+    VaultType.SEMANTIC.value: SemanticVault,
+    VaultType.SKILL.value: SkillVault,
+    VaultType.EPISODIC.value: EpisodicVault,
+}
+
 def _get_vault(vault_name: str):
     config = get_vault_config(vault_name)
-    vault_type = config.get("type", "semantic")
-    if vault_type == "skill":
-        return SkillVault(vault_name, config)
-    return SemanticVault(vault_name, config)
+    vault_type = config.get("type", VaultType.SEMANTIC.value)
+
+    vault_class = _VAULT_CLASSES.get(vault_type)
+    if vault_class is None:
+        raise VaultTypeNotValidError(
+            f"Vault '{vault_name}' has unknown type '{vault_type}'. "
+            f"Known types: {', '.join(_VAULT_CLASSES)}."
+        )
+
+    return vault_class(vault_name, config)
 
 def warmup() -> None:
     """
@@ -60,10 +77,10 @@ def index_files(vault_name: str, path: str | None = None)-> tuple[list[str], lis
     vault._require_operation(VaultOperation.INDEX)
     return vault.index_files(path=path)
 
-def query(text: str, vault_name: str, filters: dict | None = None)-> QueryResult:
+def query(text: str, vault_name: str, filters: dict | None = None, n_results: int = 5)-> QueryResult:
     vault = _get_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.QUERY)
-    return vault.query(text=text, filters=filters)
+    return vault.query(text=text, filters=filters, n_results=n_results)
 
 def delete_files(vault_name: str, path: str | None = None)-> tuple[list[str], list[str]]:
     vault = _get_vault(vault_name=vault_name)
@@ -107,3 +124,43 @@ def read_skill(vault_name: str, skill_name: str)-> SkillOutput:
 
 def list_vaults()-> list[dict]:
     return get_vaults()
+
+def write_episode(vault_name: str, content: str, **kwargs)-> Episode:
+    vault = _get_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.WRITE_EPISODE)
+    return vault.write_episode(content=content, **kwargs)
+
+def get_episode(vault_name: str, episode_id: str)-> Episode:
+    vault = _get_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.READ_EPISODE)
+    return vault.get_episode(episode_id=episode_id)
+
+def query_episodes(vault_name: str, text: str | None = None, **kwargs)-> EpisodeQueryResult:
+    vault = _get_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.QUERY_EPISODES)
+    return vault.query_episodes(text=text, **kwargs)
+
+def invalidate_episode(vault_name: str, episode_id: str, valid_to: str | None = None, reason: str | None = None)-> Episode:
+    vault = _get_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.INVALIDATE_EPISODE)
+    return vault.invalidate_episode(episode_id=episode_id, valid_to=valid_to, reason=reason)
+
+def supersede_episode(vault_name: str, episode_id: str, content: str, **kwargs)-> Episode:
+    vault = _get_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.SUPERSEDE_EPISODE)
+    return vault.supersede_episode(episode_id=episode_id, content=content, **kwargs)
+
+def episode_history(vault_name: str, episode_id: str)-> EpisodeHistory:
+    vault = _get_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.READ_EPISODE)
+    return vault.history(episode_id=episode_id)
+
+def mark_recalled(vault_name: str, episode_ids: list[str])-> None:
+    vault = _get_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.WRITE_EPISODE)
+    vault.mark_recalled(episode_ids=episode_ids)
+
+def episode_stats(vault_name: str)-> dict:
+    vault = _get_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.READ_EPISODE)
+    return vault.stats()

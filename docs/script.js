@@ -42,7 +42,7 @@ document.querySelectorAll(".code-tab").forEach((tab) => {
       }
     }
   } catch (e) {
-    // silently fail — keep the default ⭐
+    // silently fail, keep the default ⭐
   }
 })();
 

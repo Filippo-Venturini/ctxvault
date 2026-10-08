@@ -1,0 +1,1 @@
+{"vaults": {"account-memory": {"type": "episodic", "vault_path": ".ctxvault/vaults/account-memory", "db_path": ".ctxvault/vaults/account-memory/episodes.db", "restricted": false, "allowed_agents": []}}}

@@ -74,12 +74,12 @@ class SemanticVault(BaseVault):
         indexer.delete_file(file_path=str(file_path), config=self.config)
         super().delete_file(file_path=file_path)
         
-    def query(self, text: str, filters: dict | None = None) -> QueryResult:
+    def query(self, text: str, filters: dict | None = None, n_results: int = 5) -> QueryResult:
         from ctxvault.core import querying
         if not text.strip():
             raise EmptyQueryError("Query text cannot be empty.")
 
-        result_dict = querying.query(query_txt=text, config=self.config, filters=filters)
+        result_dict = querying.query(query_txt=text, config=self.config, n_results=n_results, filters=filters)
 
         raw_triples = list(zip(
             result_dict["documents"][0],
