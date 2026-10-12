@@ -504,6 +504,62 @@ def select_episodes(
 
     return episodes
 
+def list_entities(
+    config: dict,
+    *,
+    include_closed: bool = False,
+    valid_at: str | None = None,
+    min_episodes: int = 1,
+) -> list[dict]:
+    """The vault's vocabulary: every entity it knows, with how often it occurs.
+
+    This is the inventory counterpart of `select_episodes`. That one answers
+    "which episodes mention X"; this one answers "which X exist at all", which
+    a retrieval query cannot: retrieval ranks and truncates, so enumerating
+    through it silently loses whatever falls past the limit. The entity index
+    is read directly instead, so the answer stays complete however large the
+    vault grows.
+
+    Validity filtering mirrors `select_episodes`: by default only episodes that
+    hold now are counted, `valid_at` moves that instant, and `include_closed`
+    counts the whole history. An entity therefore disappears from the default
+    listing once every episode naming it has been closed.
+
+    Entities are grouped by normalised form. `entity` reports the first surface
+    spelling in sort order, so repeated calls return the same answer.
+    """
+    conn = get_connection(config)
+
+    clauses = []
+    params: list = []
+
+    if not include_closed:
+        instant = valid_at or now_iso()
+        clauses.append("ep.valid_from <= ? AND (ep.valid_to IS NULL OR ep.valid_to > ?)")
+        params.extend([instant, instant])
+    elif valid_at:
+        clauses.append("ep.valid_from <= ? AND (ep.valid_to IS NULL OR ep.valid_to > ?)")
+        params.extend([valid_at, valid_at])
+
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    rows = conn.execute(
+        f"""
+        SELECT MIN(ee.entity)       AS entity,
+               ee.entity_norm       AS entity_norm,
+               COUNT(*)             AS episode_count,
+               MAX(ep.recorded_at)  AS last_recorded_at
+        FROM episode_entities ee
+        JOIN episodes ep ON ep.id = ee.episode_id
+        {where}
+        GROUP BY ee.entity_norm
+        HAVING COUNT(*) >= ?
+        ORDER BY episode_count DESC, ee.entity_norm ASC
+        """,
+        (*params, max(1, min_episodes)),
+    ).fetchall()
+
+    return [dict(row) for row in rows]
+
 def count_episodes(config: dict) -> dict:
     conn = get_connection(config)
     total = conn.execute("SELECT COUNT(*) AS n FROM episodes").fetchone()["n"]

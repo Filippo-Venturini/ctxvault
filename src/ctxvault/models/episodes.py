@@ -63,3 +63,17 @@ class EpisodeHistory(BaseModel):
 
     episode_id: str
     chain: list[Episode]
+
+class VaultEntity(BaseModel):
+    """One entity the vault knows about, and how much it is talked about.
+
+    `entity_norm` is the key episodes are matched on; `entity` is a surface
+    spelling to show a human. `episode_count` is what makes the list usable as
+    a vocabulary: a caller can keep the entities worth matching on and drop the
+    ones mentioned once.
+    """
+
+    entity: str
+    entity_norm: str
+    episode_count: int
+    last_recorded_at: str | None = None

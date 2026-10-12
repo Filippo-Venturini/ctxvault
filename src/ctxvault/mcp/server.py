@@ -277,6 +277,22 @@ def episode_history(vault_name: str, episode_id: str) -> EpisodeHistoryResponse:
     except UnsupportedVaultOperationError as e:
         raise ValueError(e)
 
+@mcp.tool(description="List the entities an episodic vault knows about, with how many episodes mention each one. This is the vault's vocabulary: use it to find out what subjects exist before querying for them, to spot the name a person or thing is recorded under, or to see what has gone quiet. Unlike query_episodes it enumerates rather than ranks, so nothing is left out. By default only entities named by statements that still hold are listed; pass include_closed to see everything the vault ever recorded.")
+def list_entities(vault_name: str, include_closed: bool = False, valid_at: str = None, min_episodes: int = 1) -> ListEntitiesResponse:
+    try:
+        check_access(vault_name, AGENT_ID)
+        entities = vault_router.list_entities(
+            vault_name=vault_name,
+            include_closed=include_closed,
+            valid_at=valid_at,
+            min_episodes=min_episodes,
+        )
+        return ListEntitiesResponse(vault_name=vault_name, total=len(entities), entities=entities)
+    except VaultNotFoundError:
+        raise ValueError(f"Vault '{vault_name}' does not exist.")
+    except UnsupportedVaultOperationError as e:
+        raise ValueError(e)
+
 def main():
     mcp.run(transport="stdio")
 

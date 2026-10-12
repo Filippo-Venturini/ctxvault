@@ -387,6 +387,8 @@ def episodes(
     order_by: str = typer.Option(None, "--order-by", help="relevance, recency, salience or composite"),
     limit: int = typer.Option(10, "--limit", "-n"),
     stats: bool = typer.Option(False, "--stats", help="Print counts instead of episodes"),
+    entities: bool = typer.Option(False, "--entities", help="List the vault's entities instead of episodes"),
+    min_episodes: int = typer.Option(1, "--min-episodes", help="With --entities, hide entities mentioned fewer times"),
 ):
     try:
         if stats:
@@ -394,6 +396,24 @@ def episodes(
             typer.secho(f"\n{counts['total']} episodes in '{name}'", fg=typer.colors.GREEN, bold=True)
             typer.secho(f"  open:   {counts['open']}", fg=typer.colors.GREEN)
             typer.secho(f"  closed: {counts['closed']}", fg=typer.colors.YELLOW)
+            typer.echo("")
+            return
+
+        if entities:
+            known = vault_router.list_entities(
+                vault_name=name,
+                include_closed=all_episodes,
+                valid_at=valid_at,
+                min_episodes=min_episodes,
+            )
+            if not known:
+                typer.secho("No entities found.", fg=typer.colors.YELLOW)
+                return
+
+            typer.secho(f"\n{len(known)} entities in '{name}'\n", fg=typer.colors.GREEN, bold=True)
+            width = max(len(e.entity) for e in known)
+            for known_entity in known:
+                typer.echo(f"  {known_entity.entity.ljust(width)}  {known_entity.episode_count}")
             typer.echo("")
             return
 

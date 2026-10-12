@@ -1,7 +1,7 @@
 from ctxvault.api.schemas import *
 from ctxvault.core.exceptions import *
 from ctxvault.models.vaults import SkillInput
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from ctxvault.core import vault_router
 
 app = FastAPI()
@@ -324,6 +324,39 @@ async def query_episodes(query_request: QueryEpisodesRequest, request: Request)-
         raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+# Registered before /episodes/{episode_id} so that "entities" is read as this
+# route and not as an episode id.
+@ctxvault_router.get(
+    "/episodes/entities",
+    summary="List the entities a vault knows",
+    description="Enumerate the vault's entities with their episode counts, for callers that need the whole vocabulary rather than the best matches."
+)
+async def list_entities(
+    vault_name: str,
+    request: Request,
+    include_closed: bool = False,
+    valid_at: str | None = None,
+    min_episodes: int = Query(default=1, ge=1),
+)-> ListEntitiesResponse:
+    try:
+        check_vault_access(vault_name=vault_name, request=request)
+
+        entities = vault_router.list_entities(
+            vault_name=vault_name,
+            include_closed=include_closed,
+            valid_at=valid_at,
+            min_episodes=min_episodes,
+        )
+        return ListEntitiesResponse(vault_name=vault_name, total=len(entities), entities=entities)
+    except VaultNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except UnsupportedVaultOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except MissingAgentNameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except VaultAccessDeniedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
 
 @ctxvault_router.get(
     "/episodes/{episode_id}",
