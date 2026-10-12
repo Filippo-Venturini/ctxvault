@@ -1,6 +1,6 @@
 from typing import Any
 from ctxvault.models.documents import SemanticDocumentInfo, SkillDocumentInfo, DocumentContent
-from ctxvault.models.episodes import Episode, EpisodeMatch, EpisodeOrder
+from ctxvault.models.episodes import Episode, EpisodeMatch, EpisodeOrder, VaultEntity
 from ctxvault.models.query_result import ChunkMatch
 from ctxvault.models.vaults import SkillOutput, VaultType
 from pydantic import BaseModel, ConfigDict, Field
@@ -166,3 +166,8 @@ class EpisodeStatsResponse(BaseModel):
     total: int
     open: int
     closed: int
+
+class ListEntitiesResponse(BaseModel):
+    vault_name: str
+    total: int
+    entities: list[VaultEntity]

@@ -282,6 +282,121 @@ class TestFiltersAndOrdering:
 
         assert len(query(limit=2)) == 2
 
+class TestEntityListing:
+    def test_lists_every_entity_with_counts(self, mock_episodic_vault_config):
+        write("Giuseppe walks the dog", entities=["Giuseppe", "Briciola"])
+        write("Briciola had her shots", entities=["Briciola"])
+        write("The daughter called from Japan", entities=["Chiara", "Japan"])
+
+        entities = vault_router.list_entities(vault_name=VAULT)
+        counts = {e.entity_norm: e.episode_count for e in entities}
+
+        assert counts == {"giuseppe": 1, "briciola": 2, "chiara": 1, "japan": 1}
+
+    def test_ordered_by_how_often_mentioned(self, mock_episodic_vault_config):
+        write("one", entities=["Briciola"])
+        write("two", entities=["Briciola"])
+        write("three", entities=["Chiara"])
+
+        entities = vault_router.list_entities(vault_name=VAULT)
+
+        assert [e.entity_norm for e in entities] == ["briciola", "chiara"]
+
+    def test_surface_spelling_is_stable_across_casings(self, mock_episodic_vault_config):
+        write("one", entities=["Briciola"])
+        write("two", entities=["briciola"])
+
+        entities = vault_router.list_entities(vault_name=VAULT)
+
+        assert len(entities) == 1
+        assert entities[0].entity == "Briciola"
+        assert entities[0].episode_count == 2
+
+    def test_closed_episodes_drop_out_unless_asked_for(self, mock_episodic_vault_config):
+        episode = write("Giuseppe has a dog", entities=["Giuseppe", "Briciola"])
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=episode.id)
+        write("Giuseppe walks every morning", entities=["Giuseppe"])
+
+        open_only = {e.entity_norm for e in vault_router.list_entities(vault_name=VAULT)}
+        everything = {
+            e.entity_norm
+            for e in vault_router.list_entities(vault_name=VAULT, include_closed=True)
+        }
+
+        assert open_only == {"giuseppe"}
+        assert everything == {"giuseppe", "briciola"}
+
+    def test_valid_at_reads_the_vocabulary_of_a_past_moment(self, mock_episodic_vault_config):
+        write("Giuseppe lived in Mestre", entities=["Mestre"],
+              valid_from="2020-01-01T00:00:00+00:00", valid_to="2023-01-01T00:00:00+00:00")
+        write("Giuseppe lives in Padova", entities=["Padova"],
+              valid_from="2023-01-01T00:00:00+00:00")
+
+        then = vault_router.list_entities(vault_name=VAULT, valid_at="2021-06-01T00:00:00+00:00")
+        now = vault_router.list_entities(vault_name=VAULT)
+
+        assert [e.entity_norm for e in then] == ["mestre"]
+        assert [e.entity_norm for e in now] == ["padova"]
+
+    def test_min_episodes_drops_the_long_tail(self, mock_episodic_vault_config):
+        write("one", entities=["Briciola"])
+        write("two", entities=["Briciola"])
+        write("three", entities=["Chiara"])
+
+        entities = vault_router.list_entities(vault_name=VAULT, min_episodes=2)
+
+        assert [e.entity_norm for e in entities] == ["briciola"]
+
+    def test_empty_vault_lists_nothing(self, mock_episodic_vault_config):
+        assert vault_router.list_entities(vault_name=VAULT) == []
+
+    def test_listing_is_complete_past_any_query_limit(self, mock_episodic_vault_config):
+        """The reason this operation exists.
+
+        A query ranks and truncates, so deriving the vocabulary from its
+        results silently loses whatever falls past the limit. Enumerating
+        must not.
+        """
+        for n in range(250):
+            write(f"fact {n}", entities=[f"entity{n:03d}"], salience=n / 250)
+
+        from_query = {
+            e for match in query(order_by="salience", limit=200) for e in match.entities
+        }
+        from_listing = {e.entity for e in vault_router.list_entities(vault_name=VAULT)}
+
+        assert len(from_query) == 200
+        assert len(from_listing) == 250
+        assert from_query < from_listing
+
+class TestEntityListingEndpoint:
+    """The route carries a literal segment where episode ids also live.
+
+    /episodes/entities must not be read as /episodes/{episode_id} with the id
+    "entities", which is what happens if the two are registered in the wrong
+    order.
+    """
+
+    def test_endpoint_lists_entities(self, mock_episodic_vault_config):
+        from fastapi.testclient import TestClient
+
+        from ctxvault.api.app import app, ctxvault_router
+
+        app.include_router(ctxvault_router)
+        client = TestClient(app)
+
+        write("Giuseppe walks the dog", entities=["Giuseppe", "Briciola"])
+        write("Briciola had her shots", entities=["Briciola"])
+
+        response = client.get("/ctxvault/episodes/entities", params={"vault_name": VAULT})
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["vault_name"] == VAULT
+        assert body["total"] == 2
+        assert [e["entity_norm"] for e in body["entities"]] == ["briciola", "giuseppe"]
+        assert body["entities"][0]["episode_count"] == 2
+
 class TestReinforcement:
     def test_recall_is_not_recorded_unless_asked(self, mock_episodic_vault_config):
         episode = write("Giuseppe likes coffee")

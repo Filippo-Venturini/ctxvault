@@ -12,7 +12,13 @@ from datetime import datetime, timezone
 
 from ctxvault.core.exceptions import UnsupportedVaultOperationError
 from ctxvault.core.vaults.base import BaseVault
-from ctxvault.models.episodes import Episode, EpisodeHistory, EpisodeMatch, EpisodeQueryResult
+from ctxvault.models.episodes import (
+    Episode,
+    EpisodeHistory,
+    EpisodeMatch,
+    EpisodeQueryResult,
+    VaultEntity,
+)
 from ctxvault.models.vaults import VaultOperation
 from ctxvault.storage import sqlite_store
 
@@ -185,6 +191,28 @@ class EpisodicVault(BaseVault):
 
     def stats(self) -> dict:
         return sqlite_store.count_episodes(self.config)
+
+    def list_entities(
+        self,
+        *,
+        include_closed: bool = False,
+        valid_at: str | None = None,
+        min_episodes: int = 1,
+    ) -> list[VaultEntity]:
+        """The vault's vocabulary, most mentioned first.
+
+        Enumeration, not retrieval: a caller that needs to know which names
+        exist — to spot them in free text, to offer them as filters, to prune
+        what is no longer talked about — asks here rather than paging through
+        `query_episodes`, which ranks and truncates.
+        """
+        rows = sqlite_store.list_entities(
+            self.config,
+            include_closed=include_closed,
+            valid_at=valid_at,
+            min_episodes=min_episodes,
+        )
+        return [VaultEntity(**row) for row in rows]
 
     def query_episodes(
         self,

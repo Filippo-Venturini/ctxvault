@@ -3,7 +3,7 @@ from ctxvault.core.vaults.episodic import EpisodicVault
 from ctxvault.core.vaults.semantic import SemanticVault
 from ctxvault.core.vaults.skill import SkillVault
 from ctxvault.models.documents import SemanticDocumentInfo, SkillDocumentInfo, DocumentContent
-from ctxvault.models.episodes import Episode, EpisodeHistory, EpisodeQueryResult
+from ctxvault.models.episodes import Episode, EpisodeHistory, EpisodeQueryResult, VaultEntity
 from ctxvault.models.query_result import QueryResult
 from ctxvault.models.vaults import SkillOutput, SkillInput, VaultOperation, VaultType
 from ctxvault.utils.config import create_vault, get_vault_config, get_vaults
@@ -164,3 +164,8 @@ def episode_stats(vault_name: str)-> dict:
     vault = _get_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.READ_EPISODE)
     return vault.stats()
+
+def list_entities(vault_name: str, **kwargs)-> list[VaultEntity]:
+    vault = _get_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.READ_EPISODE)
+    return vault.list_entities(**kwargs)

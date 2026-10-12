@@ -135,7 +135,7 @@ CtxVault exposes the same vault layer through three interfaces. Use whichever fi
 
 **HTTP API**: Programmatic integration. Connect LangChain, LangGraph, or any custom pipeline to vaults via REST. Full CRUD, semantic search, and agent write support.
 
-**MCP server**: For autonomous agents. Give any MCP-compatible client direct vault access with no integration code required. The agent handles `list_vaults`, `query`, `write`, and `list_docs` on its own, and on an episodic vault it records and corrects facts with `write_episode`, `query_episodes`, `supersede_episode` and `invalidate_episode`.
+**MCP server**: For autonomous agents. Give any MCP-compatible client direct vault access with no integration code required. The agent handles `list_vaults`, `query`, `write`, and `list_docs` on its own, and on an episodic vault it records and corrects facts with `write_episode`, `query_episodes`, `supersede_episode` and `invalidate_episode`, and discovers what the vault is about with `list_entities`.
 
 ---
 
@@ -293,7 +293,7 @@ print(answer.content)
 
 ### MCP Integration (Claude Desktop, Cursor, and any MCP-compatible client)
 
-Give any MCP-compatible AI client direct access to your vaults, no code required. The agent handles `list_vaults`, `query`, `write`, and `list_docs` autonomously, and on an episodic vault it also records and corrects facts with `write_episode`, `query_episodes`, `supersede_episode` and `invalidate_episode`.
+Give any MCP-compatible AI client direct access to your vaults, no code required. The agent handles `list_vaults`, `query`, `write`, and `list_docs` autonomously, and on an episodic vault it also records and corrects facts with `write_episode`, `query_episodes`, `supersede_episode` and `invalidate_episode`, and discovers what the vault is about with `list_entities`.
 
 **Install:**
 ```bash
@@ -583,7 +583,7 @@ Query an **episodic** vault. By default only statements that still hold are
 returned, ranked by recency, or by relevance when a query text is given.
 
 ```bash
-ctxvault episodes <vault> [text] [--entity <name>]... [--valid-at <iso>] [--known-at <iso>] [--all] [--order-by <mode>] [--limit <n>] [--stats]
+ctxvault episodes <vault> [text] [--entity <name>]... [--valid-at <iso>] [--known-at <iso>] [--all] [--order-by <mode>] [--limit <n>] [--stats] [--entities]
 ```
 
 **Arguments:**
@@ -597,6 +597,8 @@ ctxvault episodes <vault> [text] [--entity <name>]... [--valid-at <iso>] [--know
 - `--order-by <mode>` - `relevance`, `recency`, `salience` or `composite` (a blend of the three)
 - `--limit <n>`, `-n <n>` - Maximum results (optional, default: `10`)
 - `--stats` - Print counts instead of episodes
+- `--entities` - List the vault's entities and how often each is mentioned, instead of episodes. Honours `--all` and `--valid-at`
+- `--min-episodes <n>` - With `--entities`, hide entities mentioned fewer than `n` times
 
 **Example:**
 ```bash
@@ -604,6 +606,7 @@ ctxvault episodes memories --entity Anna
 ctxvault episodes memories --entity Anna --valid-at 2026-05-01T00:00:00+00:00   # what was true in May
 ctxvault episodes memories "university" --order-by composite
 ctxvault episodes memories --stats
+ctxvault episodes memories --entities                                       # what subjects exist at all
 ```
 
 ---
@@ -846,6 +849,7 @@ Drop the file into a skill vault and run `ctxvault index <vault>` and the skill 
 | `/episodes/write` | POST | Record an episode |
 | `/episodes/query` | POST | Retrieve episodes by entity, validity, source and ranking |
 | `/episodes` | GET | Episode counts for a vault |
+| `/episodes/entities` | GET | List the entities a vault knows, with their episode counts |
 | `/episodes/{episode_id}` | GET | Read a single episode |
 | `/episodes/{episode_id}/history` | GET | Read the supersession chain |
 | `/episodes/{episode_id}/invalidate` | POST | Close an episode |
