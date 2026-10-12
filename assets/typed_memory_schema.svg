@@ -22,17 +22,17 @@
       }
     </style>
 
-    <marker id="arr-blue" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0.5 L0,6.5 L6.5,3.5 Z" fill="#7a9bb5"/>
+    <marker id="arr-blue" markerWidth="10.5" markerHeight="10.5" refX="9" refY="5.25" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0.75 L0,9.75 L9.75,5.25 Z" fill="#7a9bb5"/>
     </marker>
-    <marker id="arr-amber" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0.5 L0,6.5 L6.5,3.5 Z" fill="#b5946a"/>
+    <marker id="arr-amber" markerWidth="10.5" markerHeight="10.5" refX="9" refY="5.25" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0.75 L0,9.75 L9.75,5.25 Z" fill="#b5946a"/>
     </marker>
-    <marker id="arr-violet" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0.5 L0,6.5 L6.5,3.5 Z" fill="#8b7fa8"/>
+    <marker id="arr-violet" markerWidth="10.5" markerHeight="10.5" refX="9" refY="5.25" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0.75 L0,9.75 L9.75,5.25 Z" fill="#8b7fa8"/>
     </marker>
-    <marker id="arr-green" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0.5 L0,6.5 L6.5,3.5 Z" fill="#4a9e6b"/>
+    <marker id="arr-green" markerWidth="10.5" markerHeight="10.5" refX="9" refY="5.25" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0.75 L0,9.75 L9.75,5.25 Z" fill="#4a9e6b"/>
     </marker>
   </defs>
 
@@ -52,12 +52,12 @@
 
   <!-- LEFT: semantic vault -->
   <!-- Down: query -->
-  <path d="M 470 142 L 470 168 L 225 168 L 225 210" fill="none"
+  <path d="M 460 142 L 460 180 L 225 180 L 225 210" fill="none"
         stroke="#7a9bb5" stroke-width="1.5" marker-end="url(#arr-blue)" class="flow"/>
-  <text x="232" y="201" fill="#7a9bb5" font-size="8" font-weight="500">query</text>
+  <text x="238" y="201" fill="#7a9bb5" font-size="8" font-weight="500">query</text>
 
   <!-- Up: knowledge -->
-  <path d="M 165 210 L 165 186 L 430 186 L 430 142" fill="none"
+  <path d="M 165 210 L 165 160 L 430 160 L 430 142" fill="none"
         stroke="#7a9bb5" stroke-width="1.2" marker-end="url(#arr-blue)" class="ret"/>
   <text x="158" y="201" text-anchor="end" fill="#7a9bb5" font-size="8" font-weight="500">knowledge</text>
 
@@ -65,23 +65,23 @@
   <!-- Down: read_skill -->
   <line x1="520" y1="142" x2="520" y2="210"
         stroke="#b5946a" stroke-width="1.5" marker-end="url(#arr-amber)" class="flow2"/>
-  <text x="515" y="180" text-anchor="end" fill="#b5946a" font-size="8" font-weight="500">read_skill</text>
+  <text x="508" y="201" text-anchor="end" fill="#b5946a" font-size="8" font-weight="500">read_skill</text>
 
   <!-- Up: instructions -->
   <line x1="560" y1="210" x2="560" y2="142"
         stroke="#b5946a" stroke-width="1.2" marker-end="url(#arr-amber)" class="ret2"/>
-  <text x="565" y="180" fill="#b5946a" font-size="8" font-weight="500">instructions</text>
+  <text x="567" y="201" fill="#b5946a" font-size="8" font-weight="500">instructions</text>
 
   <!-- RIGHT: episodic vault -->
   <!-- Down: query_episodes -->
-  <path d="M 610 142 L 610 168 L 855 168 L 855 210" fill="none"
+  <path d="M 620 142 L 620 180 L 855 180 L 855 210" fill="none"
         stroke="#8b7fa8" stroke-width="1.5" marker-end="url(#arr-violet)" class="flow3"/>
-  <text x="848" y="201" text-anchor="end" fill="#8b7fa8" font-size="8" font-weight="500">query_episodes</text>
+  <text x="842" y="201" text-anchor="end" fill="#8b7fa8" font-size="8" font-weight="500">query_episodes</text>
 
-  <!-- Up: what still holds -->
-  <path d="M 915 210 L 915 186 L 650 186 L 650 142" fill="none"
+  <!-- Up: episodes -->
+  <path d="M 915 210 L 915 160 L 650 160 L 650 142" fill="none"
         stroke="#8b7fa8" stroke-width="1.2" marker-end="url(#arr-violet)" class="ret3"/>
-  <text x="922" y="201" fill="#8b7fa8" font-size="8" font-weight="500">what holds</text>
+  <text x="922" y="201" fill="#8b7fa8" font-size="8" font-weight="500">episodes</text>
 
   <!-- SEMANTIC VAULT -->
   <rect x="60" y="212" width="270" height="130" rx="8" fill="#f0f4f8" stroke="#c8c8c4" stroke-width="1.5"/>
