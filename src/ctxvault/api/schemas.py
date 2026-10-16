@@ -128,6 +128,7 @@ class QueryEpisodesRequest(BaseModel):
     known_at: str | None = None
     include_closed: bool = False
     metadata_filters: dict[str, Any] = Field(default_factory=dict)
+    disputed: bool | None = None
     order_by: EpisodeOrder | None = None
     limit: int = Field(default=10, ge=1, le=200)
     half_life_days: float = Field(default=30.0, gt=0.0)
@@ -155,6 +156,17 @@ class SupersedeEpisodeRequest(BaseModel):
     occurred_at: str | None = None
     valid_from: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+class ConfirmEpisodeRequest(BaseModel):
+    vault_name: str
+    at: str | None = None
+    source: str | None = None
+
+class DisputeEpisodeRequest(BaseModel):
+    vault_name: str
+    other_id: str
+    at: str | None = None
+    note: str | None = None
 
 class EpisodeHistoryResponse(BaseModel):
     vault_name: str

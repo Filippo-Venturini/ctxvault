@@ -333,6 +333,8 @@ def _print_episode(e, index: int | None = None, show_score: bool = False):
         details.append(f"source {e.source}")
     if e.recall_count:
         details.append(f"recalled {e.recall_count}x")
+    if e.confirmed_count:
+        details.append(f"confirmed {e.confirmed_count}x")
     if show_score and getattr(e, "score", None) is not None:
         details.append(f"score {e.score:.3f}")
     typer.secho(f"     {' · '.join(details)}", fg=typer.colors.BRIGHT_BLACK)
@@ -341,6 +343,8 @@ def _print_episode(e, index: int | None = None, show_score: bool = False):
         typer.secho(f"     entities: {', '.join(e.entities)}", fg=typer.colors.CYAN)
     if e.superseded_by:
         typer.secho(f"     superseded by: {e.superseded_by}", fg=typer.colors.YELLOW)
+    if e.disputed_with:
+        typer.secho(f"     disputed with: {', '.join(e.disputed_with)}", fg=typer.colors.YELLOW)
 
     typer.secho(f"     id: {e.id}", fg=typer.colors.BRIGHT_BLACK)
     typer.echo("")
@@ -384,6 +388,7 @@ def episodes(
     valid_at: str = typer.Option(None, "--valid-at", help="What held true at this ISO timestamp"),
     known_at: str = typer.Option(None, "--known-at", help="What the vault already knew at this ISO timestamp"),
     all_episodes: bool = typer.Option(False, "--all", help="Include closed episodes"),
+    disputed: bool = typer.Option(False, "--disputed", help="Only episodes in an open dispute"),
     order_by: str = typer.Option(None, "--order-by", help="relevance, recency, salience or composite"),
     limit: int = typer.Option(10, "--limit", "-n"),
     stats: bool = typer.Option(False, "--stats", help="Print counts instead of episodes"),
@@ -425,6 +430,7 @@ def episodes(
             valid_at=valid_at,
             known_at=known_at,
             include_closed=all_episodes,
+            disputed=True if disputed else None,
             order_by=order_by,
             limit=limit,
         )
@@ -498,6 +504,36 @@ def supersede(
         _print_episode(episode)
     except Exception as e:
         typer.secho(f"Error superseding episode: {e}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+
+@app.command()
+def confirm(
+    name: str = typer.Argument("my-vault"),
+    episode_id: str = typer.Argument(...),
+    at: str = typer.Option(None, "--at", help="ISO timestamp of the reassertion (default: now)"),
+    source: str = typer.Option(None, "--source", help="Who reasserted it"),
+):
+    try:
+        episode = vault_router.confirm_episode(vault_name=name, episode_id=episode_id, at=at, source=source)
+        typer.secho(f"Episode confirmed ({episode.confirmed_count}x).", fg=typer.colors.GREEN, bold=True)
+        _print_episode(episode)
+    except Exception as e:
+        typer.secho(f"Error confirming episode: {e}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+
+@app.command()
+def dispute(
+    name: str = typer.Argument("my-vault"),
+    episode_id: str = typer.Argument(...),
+    other_id: str = typer.Argument(...),
+    note: str = typer.Option(None, "--note", help="Why the two cannot both hold"),
+):
+    try:
+        episode = vault_router.dispute_episodes(vault_name=name, episode_id=episode_id, other_id=other_id, note=note)
+        typer.secho("Episodes in dispute.", fg=typer.colors.YELLOW, bold=True)
+        _print_episode(episode)
+    except Exception as e:
+        typer.secho(f"Error disputing episodes: {e}", fg=typer.colors.RED, bold=True)
         raise typer.Exit(1)
 
 def main():

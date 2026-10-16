@@ -155,6 +155,18 @@ def episode_history(vault_name: str, episode_id: str)-> EpisodeHistory:
     vault._require_operation(VaultOperation.READ_EPISODE)
     return vault.history(episode_id=episode_id)
 
+def confirm_episode(vault_name: str, episode_id: str, at: str | None = None,
+                    source: str | None = None)-> Episode:
+    vault = _get_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.WRITE_EPISODE)
+    return vault.confirm_episode(episode_id=episode_id, at=at, source=source)
+
+def dispute_episodes(vault_name: str, episode_id: str, other_id: str,
+                     at: str | None = None, note: str | None = None)-> Episode:
+    vault = _get_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.WRITE_EPISODE)
+    return vault.dispute_episodes(episode_id=episode_id, other_id=other_id, at=at, note=note)
+
 def mark_recalled(vault_name: str, episode_ids: list[str])-> None:
     vault = _get_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.WRITE_EPISODE)

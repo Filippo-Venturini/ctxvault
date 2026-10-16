@@ -45,7 +45,7 @@ Classical cognitive architectures, from [ACT-R (Anderson et al., 2004)](https://
 
 In CtxVault, the separation is structural. A **semantic vault** holds documents, indexes them into a vector store, and supports retrieval by meaning: it is the agent's knowledge base. A **skill vault** holds natural-language procedures with explicit names and descriptions, the agent's behavioral repertoire. An **episodic vault** holds individual statements that have a lifetime: what happened, when, and whether it still holds. The agent queries the first to know *what*, reads the second to know *how*, and consults the third to know *when*.
 
-Episodic memory is the one an agent needs to stay coherent across sessions, and the one a vector index handles worst: similarity cannot tell a fact from the fact that replaced it. So episodes are stored **bi-temporally**: each one records the window in which it is true in the world (`valid_from` / `valid_to`) and the window in which the vault believed it (`recorded_at` / `invalidated_at`). Correcting a statement closes the old one exactly where its successor opens, in a single transaction, and links the two. Nothing is deleted: `valid_at` reconstructs what was true at any past moment, `known_at` reconstructs what the agent had learned by then, and the supersession chain explains how a belief got where it is.
+Episodic memory is the one an agent needs to stay coherent across sessions, and the one a vector index handles worst: similarity cannot tell a fact from the fact that replaced it. So episodes are stored **bi-temporally**: each one records the window in which it is true in the world (`valid_from` / `valid_to`) and the window in which the vault believed it (`recorded_at` / `invalidated_at`). Correcting a statement closes the old one exactly where its successor opens, in a single transaction, and links the two. Nothing is deleted: `valid_at` reconstructs what was true at any past moment, `known_at` reconstructs what the agent had learned by then, and the supersession chain explains how a belief got where it is. Hearing a statement again is neither a new episode nor a correction: confirming it keeps the one episode and records one more attestation, so a fact heard once can be told from one heard fifty times. And two statements that cannot both hold, when nobody can yet say which is wrong, are put in dispute rather than one of them being guessed away: both stay open and come back flagged with each other, until closing or superseding one settles it.
 
 Retrieval in an episodic vault is structured first, by entity, validity and source, because that is what most questions to an episodic memory actually are. Semantic similarity is an optional second path that only switches on when the vault is created with an embedding model, so episodic memory costs nothing to anyone who does not want vectors.
 
@@ -135,7 +135,7 @@ CtxVault exposes the same vault layer through three interfaces. Use whichever fi
 
 **HTTP API**: Programmatic integration. Connect LangChain, LangGraph, or any custom pipeline to vaults via REST. Full CRUD, semantic search, and agent write support.
 
-**MCP server**: For autonomous agents. Give any MCP-compatible client direct vault access with no integration code required. The agent handles `list_vaults`, `query`, `write`, and `list_docs` on its own, and on an episodic vault it records and corrects facts with `write_episode`, `query_episodes`, `supersede_episode` and `invalidate_episode`, and discovers what the vault is about with `list_entities`.
+**MCP server**: For autonomous agents. Give any MCP-compatible client direct vault access with no integration code required. The agent handles `list_vaults`, `query`, `write`, and `list_docs` on its own, and on an episodic vault it records and corrects facts with `write_episode`, `query_episodes`, `supersede_episode` and `invalidate_episode`, counts repetitions with `confirm_episode`, holds contradictions open with `dispute_episodes`, and discovers what the vault is about with `list_entities`.
 
 ---
 
@@ -293,7 +293,7 @@ print(answer.content)
 
 ### MCP Integration (Claude Desktop, Cursor, and any MCP-compatible client)
 
-Give any MCP-compatible AI client direct access to your vaults, no code required. The agent handles `list_vaults`, `query`, `write`, and `list_docs` autonomously, and on an episodic vault it also records and corrects facts with `write_episode`, `query_episodes`, `supersede_episode` and `invalidate_episode`, and discovers what the vault is about with `list_entities`.
+Give any MCP-compatible AI client direct access to your vaults, no code required. The agent handles `list_vaults`, `query`, `write`, and `list_docs` autonomously, and on an episodic vault it also records and corrects facts with `write_episode`, `query_episodes`, `supersede_episode` and `invalidate_episode`, counts repetitions with `confirm_episode`, holds contradictions open with `dispute_episodes`, and discovers what the vault is about with `list_entities`.
 
 **Install:**
 ```bash
@@ -583,7 +583,7 @@ Query an **episodic** vault. By default only statements that still hold are
 returned, ranked by recency, or by relevance when a query text is given.
 
 ```bash
-ctxvault episodes <vault> [text] [--entity <name>]... [--valid-at <iso>] [--known-at <iso>] [--all] [--order-by <mode>] [--limit <n>] [--stats] [--entities]
+ctxvault episodes <vault> [text] [--entity <name>]... [--valid-at <iso>] [--known-at <iso>] [--all] [--disputed] [--order-by <mode>] [--limit <n>] [--stats] [--entities]
 ```
 
 **Arguments:**
@@ -594,6 +594,7 @@ ctxvault episodes <vault> [text] [--entity <name>]... [--valid-at <iso>] [--know
 - `--valid-at <iso>` - What was true in the world at that instant
 - `--known-at <iso>` - What the vault had already recorded by that instant
 - `--all` - Include closed episodes
+- `--disputed` - Only episodes in an open dispute with another one (see `dispute`)
 - `--order-by <mode>` - `relevance`, `recency`, `salience` or `composite` (a blend of the three)
 - `--limit <n>`, `-n <n>` - Maximum results (optional, default: `10`)
 - `--stats` - Print counts instead of episodes
@@ -671,6 +672,55 @@ ctxvault supersede <vault> <episode_id> <content> [--entity <name>]... [--source
 **Example:**
 ```bash
 ctxvault supersede memories 6f1c... "Anna studies literature in Milan" -e Anna --valid-from 2026-09-01T00:00:00+00:00
+```
+
+---
+
+#### `confirm`
+Record that an open statement was asserted again. The episode is left as it
+is and gains one attestation; `confirmed_count` and `last_confirmed_at` are
+read from those, as of `--known-at` when a query asks for a past instant. Use
+it when you hear something the vault already holds, instead of writing it a
+second time.
+
+```bash
+ctxvault confirm <vault> <episode_id> [--at <iso>] [--source <who>]
+```
+
+**Arguments:**
+- `<vault>` - Vault name (required)
+- `<episode_id>` - Episode id (required); must still be open
+- `--at <iso>` - When it was reasserted (optional, default: now); cannot precede the episode's `valid_from`
+- `--source <who>` - Who reasserted it (optional)
+
+**Example:**
+```bash
+ctxvault confirm memories 6f1c... --source conversation
+```
+
+---
+
+#### `dispute`
+Record that two open statements cannot both hold, when nobody can yet say
+which is wrong. Neither is closed: both keep coming back from queries, each
+listing the other in `disputed_with`. The dispute lasts exactly as long as
+both episodes stay open, so it is resolved by `invalidate` or `supersede` on
+one of them and needs no command of its own to end. `episodes --disputed`
+lists what is still unsettled.
+
+```bash
+ctxvault dispute <vault> <episode_id> <other_id> [--note <text>]
+```
+
+**Arguments:**
+- `<vault>` - Vault name (required)
+- `<episode_id>`, `<other_id>` - The two episodes (required); both must still be open
+- `--note <text>` - Why they cannot both hold (optional)
+
+**Example:**
+```bash
+ctxvault dispute memories 6f1c... 9a2d... --note "one says Bologna, the other Padova"
+ctxvault episodes memories --disputed
 ```
 
 ---

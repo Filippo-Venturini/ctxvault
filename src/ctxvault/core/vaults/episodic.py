@@ -182,6 +182,18 @@ class EpisodicVault(BaseVault):
         )
         return self._to_episode(data)
 
+    def confirm_episode(self, episode_id: str, *, at: str | None = None,
+                        source: str | None = None) -> Episode:
+        return self._to_episode(
+            sqlite_store.confirm_episode(self.config, episode_id, at=at, source=source)
+        )
+
+    def dispute_episodes(self, episode_id: str, other_id: str, *, at: str | None = None,
+                         note: str | None = None) -> Episode:
+        return self._to_episode(
+            sqlite_store.dispute_episodes(self.config, episode_id, other_id, at=at, note=note)
+        )
+
     def history(self, episode_id: str) -> EpisodeHistory:
         chain = [self._to_episode(item) for item in sqlite_store.history(self.config, episode_id)]
         return EpisodeHistory(episode_id=episode_id, chain=chain)
@@ -225,6 +237,7 @@ class EpisodicVault(BaseVault):
         known_at: str | None = None,
         include_closed: bool = False,
         metadata_filters: dict | None = None,
+        disputed: bool | None = None,
         order_by: str | None = None,
         limit: int = DEFAULT_LIMIT,
         half_life_days: float = DEFAULT_HALF_LIFE_DAYS,
@@ -240,6 +253,7 @@ class EpisodicVault(BaseVault):
             known_at=known_at,
             include_closed=include_closed,
             metadata_filters=metadata_filters,
+            disputed=disputed,
         )
 
         order = order_by or ("relevance" if text else "recency")

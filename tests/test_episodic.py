@@ -414,6 +414,209 @@ class TestReinforcement:
         assert refreshed.recall_count == 1
         assert refreshed.last_recalled_at is not None
 
+def days_from_now(days: int) -> str:
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+
+def confirm(episode_id, **kwargs):
+    return vault_router.confirm_episode(vault_name=VAULT, episode_id=episode_id, **kwargs)
+
+def dispute(episode_id, other_id, **kwargs):
+    return vault_router.dispute_episodes(vault_name=VAULT, episode_id=episode_id, other_id=other_id, **kwargs)
+
+class TestConfirmation:
+    def test_a_new_episode_is_unconfirmed(self, mock_episodic_vault_config):
+        episode = write("Giuseppe likes coffee")
+
+        assert episode.confirmed_count == 0
+        assert episode.last_confirmed_at is None
+
+    def test_confirming_attests_without_changing_the_statement(self, mock_episodic_vault_config):
+        episode = write("Giuseppe likes coffee", entities=["Giuseppe"], metadata={"topic": "habits"})
+
+        confirm(episode.id)
+        confirmed = confirm(episode.id, source="conversation")
+
+        assert confirmed.confirmed_count == 2
+        assert confirmed.last_confirmed_at is not None
+        assert confirmed.content == episode.content
+        assert confirmed.valid_from == episode.valid_from
+        assert confirmed.metadata == {"topic": "habits"}
+        assert confirmed.is_open
+        assert vault_router.episode_stats(vault_name=VAULT)["total"] == 1
+
+    def test_the_latest_attestation_is_reported_whatever_the_order(self, mock_episodic_vault_config):
+        episode = write("Giuseppe likes coffee", valid_from="2026-01-01T00:00:00+00:00")
+
+        confirm(episode.id, at="2026-03-01T00:00:00+00:00")
+        confirmed = confirm(episode.id, at="2026-02-01T00:00:00+00:00")
+
+        assert confirmed.confirmed_count == 2
+        assert confirmed.last_confirmed_at == "2026-03-01T00:00:00+00:00"
+
+    def test_known_at_reads_how_well_attested_it_was_then(self, mock_episodic_vault_config):
+        """Attestations are events, not a counter, so a past instant reads
+        the standing a belief had then and not the one it has now."""
+        # `known_at` is transaction time, and the episode is recorded now, so
+        # the instant to look back from has to lie after now: the
+        # attestations are placed in the days ahead and read from between.
+        episode = write("Giuseppe likes coffee")
+        first, between, second = (days_from_now(10), days_from_now(20), days_from_now(40))
+        confirm(episode.id, at=first)
+        confirm(episode.id, at=second)
+
+        then = query(known_at=between, valid_at=between)
+        now = query(known_at=days_from_now(60), valid_at=days_from_now(60))
+
+        assert len(then) == 1
+        assert (then[0].confirmed_count, then[0].last_confirmed_at) == (1, first)
+        assert (now[0].confirmed_count, now[0].last_confirmed_at) == (2, second)
+
+    def test_confirming_before_the_start_is_refused(self, mock_episodic_vault_config):
+        episode = write("Giuseppe likes coffee", valid_from="2026-03-01T00:00:00+00:00")
+
+        with pytest.raises(ValueError):
+            confirm(episode.id, at="2026-01-01T00:00:00+00:00")
+
+    def test_a_closed_episode_cannot_be_confirmed(self, mock_episodic_vault_config):
+        episode = write("Giuseppe likes coffee")
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=episode.id)
+
+        with pytest.raises(EpisodeAlreadyClosedError):
+            confirm(episode.id)
+
+    def test_missing_episode_raises(self, mock_episodic_vault_config):
+        with pytest.raises(EpisodeNotFoundError):
+            confirm("nope")
+
+    def test_endpoint_confirms(self, mock_episodic_vault_config):
+        from fastapi.testclient import TestClient
+
+        from ctxvault.api.app import app, ctxvault_router
+
+        app.include_router(ctxvault_router)
+        client = TestClient(app)
+        episode = write("Giuseppe likes coffee")
+
+        response = client.post(f"/ctxvault/episodes/{episode.id}/confirm", json={"vault_name": VAULT})
+
+        assert response.status_code == 200
+        assert response.json()["episode"]["confirmed_count"] == 1
+
+class TestDispute:
+    def test_both_sides_stay_open_and_point_at_each_other(self, mock_episodic_vault_config):
+        mestre = write("Giuseppe lives in Mestre", entities=["Giuseppe"])
+        padova = write("Giuseppe lives in Padova", entities=["Giuseppe"])
+
+        dispute(mestre.id, padova.id, note="he said both this month")
+
+        a = vault_router.get_episode(vault_name=VAULT, episode_id=mestre.id)
+        b = vault_router.get_episode(vault_name=VAULT, episode_id=padova.id)
+        assert a.disputed_with == [padova.id] and a.disputed
+        assert b.disputed_with == [mestre.id] and b.disputed
+        assert a.is_open and b.is_open
+        assert {e.id for e in query(entities=["Giuseppe"])} == {mestre.id, padova.id}
+
+    def test_a_dispute_is_not_a_belief_event(self, mock_episodic_vault_config):
+        mestre = write("Giuseppe lives in Mestre")
+        padova = write("Giuseppe lives in Padova")
+
+        disputed = dispute(mestre.id, padova.id)
+
+        assert disputed.content == mestre.content
+        assert disputed.valid_from == mestre.valid_from
+        assert disputed.recorded_at == mestre.recorded_at
+        assert disputed.metadata == {}
+        assert vault_router.episode_stats(vault_name=VAULT) == {"total": 2, "open": 2, "closed": 0}
+
+    def test_recording_the_same_pair_twice_is_harmless(self, mock_episodic_vault_config):
+        mestre = write("Giuseppe lives in Mestre")
+        padova = write("Giuseppe lives in Padova")
+
+        dispute(mestre.id, padova.id)
+        again = dispute(padova.id, mestre.id)
+
+        assert again.disputed_with == [mestre.id]
+
+    def test_superseding_one_side_settles_it(self, mock_episodic_vault_config):
+        mestre = write("Giuseppe lives in Mestre")
+        padova = write("Giuseppe lives in Padova")
+        dispute(mestre.id, padova.id)
+
+        vault_router.supersede_episode(vault_name=VAULT, episode_id=mestre.id, content="Giuseppe lives in Padova now")
+
+        survivor = vault_router.get_episode(vault_name=VAULT, episode_id=padova.id)
+        assert survivor.disputed_with == []
+        assert not survivor.disputed
+
+    def test_invalidating_one_side_settles_it(self, mock_episodic_vault_config):
+        mestre = write("Giuseppe lives in Mestre")
+        padova = write("Giuseppe lives in Padova")
+        dispute(mestre.id, padova.id)
+
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=padova.id)
+
+        assert not vault_router.get_episode(vault_name=VAULT, episode_id=mestre.id).disputed
+
+    def test_known_at_hides_a_dispute_noticed_later(self, mock_episodic_vault_config):
+        mestre = write("Giuseppe lives in Mestre")
+        padova = write("Giuseppe lives in Padova")
+        dispute(mestre.id, padova.id, at=days_from_now(30))
+
+        before = query(known_at=days_from_now(10), valid_at=days_from_now(10))
+        after = query(known_at=days_from_now(60), valid_at=days_from_now(60))
+
+        assert len(before) == 2 and not any(e.disputed for e in before)
+        assert len(after) == 2 and all(e.disputed for e in after)
+
+    def test_the_query_can_keep_only_what_is_unsettled(self, mock_episodic_vault_config):
+        mestre = write("Giuseppe lives in Mestre")
+        padova = write("Giuseppe lives in Padova")
+        coffee = write("Giuseppe likes coffee")
+        dispute(mestre.id, padova.id)
+
+        assert {e.id for e in query(disputed=True)} == {mestre.id, padova.id}
+        assert [e.id for e in query(disputed=False)] == [coffee.id]
+
+    def test_a_closed_episode_cannot_be_disputed(self, mock_episodic_vault_config):
+        mestre = write("Giuseppe lives in Mestre")
+        padova = write("Giuseppe lives in Padova")
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=mestre.id)
+
+        with pytest.raises(EpisodeAlreadyClosedError):
+            dispute(padova.id, mestre.id)
+
+    def test_an_episode_cannot_dispute_itself(self, mock_episodic_vault_config):
+        mestre = write("Giuseppe lives in Mestre")
+
+        with pytest.raises(ValueError):
+            dispute(mestre.id, mestre.id)
+
+    def test_missing_episode_raises(self, mock_episodic_vault_config):
+        mestre = write("Giuseppe lives in Mestre")
+
+        with pytest.raises(EpisodeNotFoundError):
+            dispute(mestre.id, "nope")
+
+    def test_endpoint_disputes(self, mock_episodic_vault_config):
+        from fastapi.testclient import TestClient
+
+        from ctxvault.api.app import app, ctxvault_router
+
+        app.include_router(ctxvault_router)
+        client = TestClient(app)
+        mestre = write("Giuseppe lives in Mestre")
+        padova = write("Giuseppe lives in Padova")
+
+        response = client.post(
+            f"/ctxvault/episodes/{mestre.id}/dispute",
+            json={"vault_name": VAULT, "other_id": padova.id},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["episode"]["disputed_with"] == [padova.id]
+
 class TestVaultContract:
     def test_episodic_vault_refuses_file_indexing(self, mock_episodic_vault_config):
         with pytest.raises(UnsupportedVaultOperationError):
@@ -448,6 +651,51 @@ class TestSchemaVersioning:
         stored = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0]
         conn.close()
 
+        assert int(stored) == sqlite_store.SCHEMA_VERSION
+
+    def test_a_v1_file_is_migrated_on_open(self, mock_episodic_vault_config):
+        """A vault written before attestations and disputes existed opens,
+        gains the tables, and reads its old rows as unconfirmed and
+        undisputed."""
+        db_path = mock_episodic_vault_config / "episodes.db"
+        sqlite_store.close_connections()
+
+        conn = sqlite3.connect(db_path)
+        conn.executescript("""
+            CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO meta (key, value) VALUES ('schema_version', '1');
+            CREATE TABLE episodes (
+                id TEXT PRIMARY KEY, content TEXT NOT NULL, source TEXT,
+                confidence REAL NOT NULL DEFAULT 1.0, salience REAL NOT NULL DEFAULT 0.5,
+                occurred_at TEXT, valid_from TEXT NOT NULL, valid_to TEXT,
+                recorded_at TEXT NOT NULL, invalidated_at TEXT,
+                superseded_by TEXT REFERENCES episodes(id),
+                recall_count INTEGER NOT NULL DEFAULT 0, last_recalled_at TEXT,
+                metadata TEXT NOT NULL DEFAULT '{}', embedding BLOB
+            );
+            CREATE TABLE episode_entities (
+                episode_id TEXT NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+                entity TEXT NOT NULL, entity_norm TEXT NOT NULL,
+                PRIMARY KEY (episode_id, entity_norm)
+            );
+            INSERT INTO episodes (id, content, valid_from, recorded_at)
+            VALUES ('old1', 'Written under schema v1', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00');
+        """)
+        conn.commit()
+        conn.close()
+
+        old = vault_router.get_episode(vault_name=VAULT, episode_id="old1")
+        assert old.confirmed_count == 0
+        assert old.last_confirmed_at is None
+        assert old.disputed_with == []
+
+        assert confirm("old1").confirmed_count == 1
+        new = write("Written under schema v2")
+        assert dispute("old1", new.id).disputed_with == [new.id]
+
+        conn = sqlite3.connect(db_path)
+        stored = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0]
+        conn.close()
         assert int(stored) == sqlite_store.SCHEMA_VERSION
 
     def test_a_newer_file_is_refused_instead_of_misread(self, mock_episodic_vault_config):

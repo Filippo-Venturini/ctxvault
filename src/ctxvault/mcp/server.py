@@ -264,6 +264,36 @@ def supersede_episode(vault_name: str, episode_id: str, content: str, entities: 
     except UnsupportedVaultOperationError as e:
         raise ValueError(e)
 
+@mcp.tool(description="Record that a statement already in the vault was asserted again. Use this when you hear something the vault already holds, instead of writing it a second time: the episode stays as it is and gains one attestation, so a fact heard once can be told from one heard many times.")
+def confirm_episode(vault_name: str, episode_id: str, at: str = None, source: str = None) -> EpisodeResponse:
+    try:
+        check_access(vault_name, AGENT_ID)
+        episode = vault_router.confirm_episode(
+            vault_name=vault_name, episode_id=episode_id, at=at, source=source or AGENT_ID
+        )
+        return EpisodeResponse(vault_name=vault_name, episode=episode)
+    except VaultNotFoundError:
+        raise ValueError(f"Vault '{vault_name}' does not exist.")
+    except (EpisodeNotFoundError, EpisodeAlreadyClosedError) as e:
+        raise ValueError(e)
+    except UnsupportedVaultOperationError as e:
+        raise ValueError(e)
+
+@mcp.tool(description="Record that two open statements cannot both hold, when you cannot tell which one is wrong. Neither is closed: both keep coming back from queries, each flagged with the other in disputed_with, so you can ask instead of assert. The dispute ends by itself when one side is invalidated or superseded. If you do know which one is wrong, use supersede_episode or invalidate_episode instead.")
+def dispute_episodes(vault_name: str, episode_id: str, other_id: str, note: str = None) -> EpisodeResponse:
+    try:
+        check_access(vault_name, AGENT_ID)
+        episode = vault_router.dispute_episodes(
+            vault_name=vault_name, episode_id=episode_id, other_id=other_id, note=note
+        )
+        return EpisodeResponse(vault_name=vault_name, episode=episode)
+    except VaultNotFoundError:
+        raise ValueError(f"Vault '{vault_name}' does not exist.")
+    except (EpisodeNotFoundError, EpisodeAlreadyClosedError, ValueError) as e:
+        raise ValueError(e)
+    except UnsupportedVaultOperationError as e:
+        raise ValueError(e)
+
 @mcp.tool(description="Show every version of a statement, oldest first. Use this to explain why the vault believes something, or to see what an episode used to say before it was corrected.")
 def episode_history(vault_name: str, episode_id: str) -> EpisodeHistoryResponse:
     try:

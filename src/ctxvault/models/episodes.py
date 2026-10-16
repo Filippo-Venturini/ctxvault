@@ -40,11 +40,23 @@ class Episode(BaseModel):
 
     recall_count: int = 0
     last_recalled_at: str | None = None
+    # Derived, never stored: how many times the statement was asserted again
+    # after being recorded, and when last. Repetition is evidence, not a new
+    # episode. Read as of `known_at` when a query asks for a past instant.
+    confirmed_count: int = 0
+    last_confirmed_at: str | None = None
+    # Derived: the open episodes this one cannot hold together with. A
+    # dispute lasts exactly as long as both sides stay open.
+    disputed_with: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def is_open(self) -> bool:
         return self.valid_to is None and self.invalidated_at is None
+
+    @property
+    def disputed(self) -> bool:
+        return bool(self.disputed_with)
 
 class EpisodeMatch(Episode):
     """An episode returned by a query, with the scores that ranked it."""
