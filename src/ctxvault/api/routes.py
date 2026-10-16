@@ -432,6 +432,9 @@ async def invalidate_episode(episode_id: str, invalidate_request: InvalidateEpis
         raise HTTPException(status_code=400, detail=str(e))
     except VaultAccessDeniedError as e:
         raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        # A valid_to before the episode's own start, refused by the store.
+        raise HTTPException(status_code=400, detail=str(e))
 
 @ctxvault_router.post(
     "/episodes/{episode_id}/supersede",

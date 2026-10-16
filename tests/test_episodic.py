@@ -504,6 +504,24 @@ class TestConfirmation:
         assert response.status_code == 200
         assert response.json()["episode"]["confirmed_count"] == 1
 
+class TestInvalidateEndpoint:
+    def test_closing_before_the_start_is_a_client_error_not_a_crash(self, mock_episodic_vault_config):
+        from fastapi.testclient import TestClient
+
+        from ctxvault.api.app import app, ctxvault_router
+
+        app.include_router(ctxvault_router)
+        client = TestClient(app)
+        episode = write("Giuseppe likes coffee", valid_from="2026-03-01T00:00:00+00:00")
+
+        response = client.post(
+            f"/ctxvault/episodes/{episode.id}/invalidate",
+            json={"vault_name": VAULT, "valid_to": "2026-01-01T00:00:00+00:00"},
+        )
+
+        assert response.status_code == 400
+        assert "before" in response.json()["detail"]
+
 class TestDispute:
     def test_both_sides_stay_open_and_point_at_each_other(self, mock_episodic_vault_config):
         mestre = write("Giuseppe lives in Mestre", entities=["Giuseppe"])
