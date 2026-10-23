@@ -183,7 +183,7 @@ def read_skill(vault_name: str, skill_name: str)-> SkillResponse:
         raise ValueError(e)
 
 @mcp.tool(description="Record something that happened or something the user stated, in an episodic vault. Use this for facts with a lifetime — situations, preferences, relationships, plans — rather than for documents. Give the entities it is about so it can be looked up later, and a salience between 0 and 1 for how much it matters.")
-def write_episode(vault_name: str, content: str, entities: list[str] = [], source: str = None, salience: float = 0.5, confidence: float = 1.0, occurred_at: str = None, valid_from: str = None) -> EpisodeResponse:
+def write_episode(vault_name: str, content: str, entities: list[str] = [], source: str | None = None, salience: float = 0.5, confidence: float = 1.0, occurred_at: str | None = None, valid_from: str | None = None) -> EpisodeResponse:
     try:
         check_access(vault_name, AGENT_ID)
         episode = vault_router.write_episode(
@@ -205,7 +205,7 @@ def write_episode(vault_name: str, content: str, entities: list[str] = [], sourc
         raise ValueError(f"Unexpected error writing episode: {e}")
 
 @mcp.tool(description="Retrieve episodes from an episodic vault. By default only statements that still hold are returned. Filter by entity for 'everything about X', pass valid_at to ask what was true at a past moment, or known_at to ask what the vault had already learned by then. Query text is optional and ranks results; without it the newest come first.")
-def query_episodes(vault_name: str, query: str = None, entities: list[str] = [], valid_at: str = None, known_at: str = None, include_closed: bool = False, order_by: str = None, limit: int = 10) -> QueryEpisodesResponse:
+def query_episodes(vault_name: str, query: str = None, entities: list[str] = [], valid_at: str | None = None, known_at: str | None = None, include_closed: bool = False, order_by: str | None = None, limit: int = 10) -> QueryEpisodesResponse:
     try:
         check_access(vault_name, AGENT_ID)
         result = vault_router.query_episodes(
@@ -232,7 +232,7 @@ def query_episodes(vault_name: str, query: str = None, entities: list[str] = [],
         raise ValueError(e)
 
 @mcp.tool(description="Mark an episode as no longer true, without deleting it. Use this when something ends and nothing replaces it. If a corrected version exists instead, use supersede_episode so the two stay linked.")
-def invalidate_episode(vault_name: str, episode_id: str, valid_to: str = None, reason: str = None) -> EpisodeResponse:
+def invalidate_episode(vault_name: str, episode_id: str, valid_to: str | None = None, reason: str = None) -> EpisodeResponse:
     try:
         check_access(vault_name, AGENT_ID)
         episode = vault_router.invalidate_episode(vault_name=vault_name, episode_id=episode_id, valid_to=valid_to, reason=reason)
@@ -245,7 +245,7 @@ def invalidate_episode(vault_name: str, episode_id: str, valid_to: str = None, r
         raise ValueError(e)
 
 @mcp.tool(description="Replace an episode with a corrected or updated version. The old statement is closed exactly where the new one begins and the two are linked, so the history of what changed stays readable. Entities and salience carry over from the old episode unless you pass new ones. Use this whenever new information contradicts something already recorded.")
-def supersede_episode(vault_name: str, episode_id: str, content: str, entities: list[str] = [], source: str = None, salience: float = None) -> EpisodeResponse:
+def supersede_episode(vault_name: str, episode_id: str, content: str, entities: list[str] = [], source: str | None = None, salience: float | None = None) -> EpisodeResponse:
     try:
         check_access(vault_name, AGENT_ID)
         episode = vault_router.supersede_episode(
@@ -278,7 +278,7 @@ def episode_history(vault_name: str, episode_id: str) -> EpisodeHistoryResponse:
         raise ValueError(e)
 
 @mcp.tool(description="List the entities an episodic vault knows about, with how many episodes mention each one. This is the vault's vocabulary: use it to find out what subjects exist before querying for them, to spot the name a person or thing is recorded under, or to see what has gone quiet. Unlike query_episodes it enumerates rather than ranks, so nothing is left out. By default only entities named by statements that still hold are listed; pass include_closed to see everything the vault ever recorded.")
-def list_entities(vault_name: str, include_closed: bool = False, valid_at: str = None, min_episodes: int = 1) -> ListEntitiesResponse:
+def list_entities(vault_name: str, include_closed: bool = False, valid_at: str | None = None, min_episodes: int = 1) -> ListEntitiesResponse:
     try:
         check_access(vault_name, AGENT_ID)
         entities = vault_router.list_entities(
