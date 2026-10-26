@@ -205,12 +205,12 @@ def write_episode(vault_name: str, content: str, entities: list[str] = [], sourc
         raise ValueError(f"Unexpected error writing episode: {e}")
 
 @mcp.tool(description="Retrieve episodes from an episodic vault. By default only statements that still hold are returned. Filter by entity for 'everything about X', pass valid_at to ask what was true at a past moment, or known_at to ask what the vault had already learned by then. Query text is optional and ranks results; without it the newest come first.")
-def query_episodes(vault_name: str, query: str = None, entities: list[str] = [], valid_at: str | None = None, known_at: str | None = None, include_closed: bool = False, order_by: str | None = None, limit: int = 10) -> QueryEpisodesResponse:
+def query_episodes(vault_name: str, query: str = "", entities: list[str] = [], valid_at: str | None = None, known_at: str | None = None, include_closed: bool = False, order_by: str | None = None, limit: int = 10) -> QueryEpisodesResponse:
     try:
         check_access(vault_name, AGENT_ID)
         result = vault_router.query_episodes(
             vault_name=vault_name,
-            text=query,
+            text=query or None,
             entities=entities or None,
             valid_at=valid_at,
             known_at=known_at,
@@ -232,10 +232,10 @@ def query_episodes(vault_name: str, query: str = None, entities: list[str] = [],
         raise ValueError(e)
 
 @mcp.tool(description="Mark an episode as no longer true, without deleting it. Use this when something ends and nothing replaces it. If a corrected version exists instead, use supersede_episode so the two stay linked.")
-def invalidate_episode(vault_name: str, episode_id: str, valid_to: str | None = None, reason: str = None) -> EpisodeResponse:
+def invalidate_episode(vault_name: str, episode_id: str, valid_to: str | None = None, reason: str = "") -> EpisodeResponse:
     try:
         check_access(vault_name, AGENT_ID)
-        episode = vault_router.invalidate_episode(vault_name=vault_name, episode_id=episode_id, valid_to=valid_to, reason=reason)
+        episode = vault_router.invalidate_episode(vault_name=vault_name, episode_id=episode_id, valid_to=valid_to, reason=reason or None)
         return EpisodeResponse(vault_name=vault_name, episode=episode)
     except VaultNotFoundError:
         raise ValueError(f"Vault '{vault_name}' does not exist.")
