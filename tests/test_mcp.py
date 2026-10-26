@@ -2,7 +2,8 @@ import asyncio
 
 from ctxvault.mcp.server import mcp
 
-# Free-text arguments stay plain `str`: with `str | None` the SDK JSON-decodes them, so JSON-looking text would be rejected.
+# Free-text arguments stay plain `str` with a "" default: with `str | None` the SDK
+# JSON-decodes them, so JSON-looking text would be rejected.
 FREE_TEXT_PARAMS = {("query_episodes", "query"), ("invalidate_episode", "reason")}
 
 
@@ -13,8 +14,6 @@ def _tools():
 def _null_default_params():
     for tool in _tools():
         for name, prop in tool.inputSchema.get("properties", {}).items():
-            if (tool.name, name) in FREE_TEXT_PARAMS:
-                continue
             if "default" in prop and prop["default"] is None:
                 yield tool, name, prop
 
@@ -37,4 +36,13 @@ class TestToolSchemas:
             _validate(tool.name, tool.inputSchema.get("required", []), {name: None})
             checked += 1
         assert checked > 0
+
+    def test_free_text_params_default_to_empty_string(self):
+        tools = {tool.name: tool for tool in _tools()}
+        for tool_name, name in FREE_TEXT_PARAMS:
+            prop = tools[tool_name].inputSchema["properties"][name]
+            assert prop.get("type") == "string" and prop.get("default") == "", f"{tool_name}.{name}: {prop}"
+            # JSON-looking text stays text instead of being decoded.
+            parsed = _validate(tool_name, tools[tool_name].inputSchema.get("required", []), {name: '["Giuseppe"]'})
+            assert getattr(parsed, name) == '["Giuseppe"]'
 
