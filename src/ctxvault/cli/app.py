@@ -343,6 +343,8 @@ def _print_episode(e, index: int | None = None, show_score: bool = False):
         typer.secho(f"     entities: {', '.join(e.entities)}", fg=typer.colors.CYAN)
     if e.superseded_by:
         typer.secho(f"     superseded by: {e.superseded_by}", fg=typer.colors.YELLOW)
+    if e.revised_by:
+        typer.secho(f"     revised by: {e.revised_by}", fg=typer.colors.YELLOW)
     if e.disputed_with:
         typer.secho(f"     disputed with: {', '.join(e.disputed_with)}", fg=typer.colors.YELLOW)
 
@@ -504,6 +506,31 @@ def supersede(
         _print_episode(episode)
     except Exception as e:
         typer.secho(f"Error superseding episode: {e}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+
+@app.command()
+def revise(
+    name: str = typer.Argument("my-vault"),
+    episode_id: str = typer.Argument(...),
+    content: str = typer.Argument(...),
+    entity: list[str] = typer.Option([], "--entity", "-e"),
+    source: str = typer.Option(None, "--source"),
+    salience: float = typer.Option(None, "--salience"),
+):
+    """Restate an episode more precisely; it keeps its attestations."""
+    try:
+        episode = vault_router.revise_episode(
+            vault_name=name,
+            episode_id=episode_id,
+            content=content,
+            entities=list(entity) or None,
+            source=source,
+            salience=salience,
+        )
+        typer.secho("Episode revised.", fg=typer.colors.GREEN, bold=True)
+        _print_episode(episode)
+    except Exception as e:
+        typer.secho(f"Error revising episode: {e}", fg=typer.colors.RED, bold=True)
         raise typer.Exit(1)
 
 @app.command()

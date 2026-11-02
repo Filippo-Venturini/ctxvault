@@ -37,6 +37,10 @@ class Episode(BaseModel):
         description="When the vault stopped believing this. None means still believed.",
     )
     superseded_by: str | None = None
+    # Set when the statement was restated more precisely: the world did not
+    # change, the wording did. The revision opens where this one did and
+    # carries its attestations.
+    revised_by: str | None = None
 
     recall_count: int = 0
     last_recalled_at: str | None = None

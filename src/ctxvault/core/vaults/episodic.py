@@ -81,6 +81,7 @@ class EpisodicVault(BaseVault):
         VaultOperation.QUERY_EPISODES,
         VaultOperation.INVALIDATE_EPISODE,
         VaultOperation.SUPERSEDE_EPISODE,
+        VaultOperation.REVISE_EPISODE,
     })
 
     def index_files(self, path: str | None = None) -> tuple[list[str], list[str]]:
@@ -177,6 +178,33 @@ class EpisodicVault(BaseVault):
             salience=salience,
             occurred_at=occurred_at,
             valid_from=valid_from,
+            metadata=metadata,
+            embedding=self._embed(content),
+        )
+        return self._to_episode(data)
+
+    def revise_episode(
+        self,
+        episode_id: str,
+        content: str,
+        *,
+        entities: list[str] | None = None,
+        source: str | None = None,
+        confidence: float | None = None,
+        salience: float | None = None,
+        metadata: dict | None = None,
+    ) -> Episode:
+        if not content.strip():
+            raise ValueError("Episode content cannot be empty.")
+
+        data = sqlite_store.revise_episode(
+            self.config,
+            episode_id,
+            content=content,
+            entities=entities,
+            source=source,
+            confidence=confidence,
+            salience=salience,
             metadata=metadata,
             embedding=self._embed(content),
         )

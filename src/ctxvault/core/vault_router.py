@@ -150,6 +150,11 @@ def supersede_episode(vault_name: str, episode_id: str, content: str, **kwargs)-
     vault._require_operation(VaultOperation.SUPERSEDE_EPISODE)
     return vault.supersede_episode(episode_id=episode_id, content=content, **kwargs)
 
+def revise_episode(vault_name: str, episode_id: str, content: str, **kwargs)-> Episode:
+    vault = _get_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.REVISE_EPISODE)
+    return vault.revise_episode(episode_id=episode_id, content=content, **kwargs)
+
 def episode_history(vault_name: str, episode_id: str)-> EpisodeHistory:
     vault = _get_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.READ_EPISODE)

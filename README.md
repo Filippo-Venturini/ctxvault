@@ -86,7 +86,7 @@ Found 3 vaults
 
 Agents lose all context when a session ends. CtxVault gives them a knowledge base that persists across conversations, queryable by meaning rather than exact match. Context written in one session is retrievable days later using semantically related language.
 
-What persists for months rather than days also has to change. An episodic vault keeps that kind of memory: facts are superseded instead of overwritten, so a correction closes the old statement and opens the new one without losing either, and retrieval returns what holds today unless asked for a past instant.
+What persists for months rather than days also has to change. An episodic vault keeps that kind of memory: facts are superseded instead of overwritten, so a correction closes the old statement and opens the new one without losing either; a statement said better is revised, keeping what attested it; and retrieval returns what holds today unless asked for a past instant.
 
 <div align="center">
   <img 
@@ -676,6 +676,36 @@ ctxvault supersede memories 6f1c... "Anna studies literature in Milan" -e Anna -
 
 ---
 
+#### `revise`
+Restate an open episode more precisely, when the world did not change but
+the wording can be said better: "lives in Padova" becomes "lives in Padova,
+in the Arcella". Unlike `supersede`, nothing changes in valid time: the
+revision opens where the original did and inherits its attestations, its
+entities, its salience and its metadata, and any dispute still open against
+it. The original is closed in transaction time only, with
+`invalidation_reason: revised`: it is no longer what the vault states, it
+stays in the history, and a query with `--known-at` before the revision
+still finds it.
+
+```bash
+ctxvault revise <vault> <episode_id> <content> [--entity <name>]... [--source <who>] [--salience <0-1>]
+```
+
+**Arguments:**
+- `<vault>` - Vault name (required)
+- `<episode_id>` - Episode being restated (required); must still be open
+- `<content>` - The more precise statement (required)
+- `--entity <name>`, `-e <name>` - Entities of the revision; repeatable. Defaults to the original's
+- `--source <who>` - Who restated it. Defaults to the original's source
+- `--salience <0-1>` - Defaults to the original's salience
+
+**Example:**
+```bash
+ctxvault revise memories 6f1c... "Anna studies literature in Milan, at the Statale"
+```
+
+---
+
 #### `confirm`
 Record that an open statement was asserted again. The episode is left as it
 is and gains one attestation; `confirmed_count` and `last_confirmed_at` are
@@ -705,7 +735,8 @@ Record that two open statements cannot both hold, when nobody can yet say
 which is wrong. Neither is closed: both keep coming back from queries, each
 listing the other in `disputed_with`. The dispute lasts exactly as long as
 both episodes stay open, so it is resolved by `invalidate` or `supersede` on
-one of them and needs no command of its own to end. `episodes --disputed`
+one of them and needs no command of its own to end; a `revise` of either
+side carries the dispute over to the revision. `episodes --disputed`
 lists what is still unsettled.
 
 ```bash

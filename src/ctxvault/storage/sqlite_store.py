@@ -27,7 +27,7 @@ from pathlib import Path
 
 from ctxvault.core.exceptions import EpisodeAlreadyClosedError, EpisodeNotFoundError, SchemaVersionError
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # A connection is reused per database file: SQLite serialises writers itself,
 # and the vault is a single-process store. check_same_thread is off because the
@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS episodes (
     recorded_at     TEXT NOT NULL,
     invalidated_at  TEXT,
     superseded_by   TEXT REFERENCES episodes(id),
+    revised_by      TEXT REFERENCES episodes(id),
     recall_count    INTEGER NOT NULL DEFAULT 0,
     last_recalled_at TEXT,
     metadata        TEXT NOT NULL DEFAULT '{}',
@@ -107,6 +108,9 @@ CREATE INDEX IF NOT EXISTS idx_disputes_b ON episode_disputes(episode_b);
 # older ctxvault refuses the file instead of ignoring what it cannot see.
 _MIGRATIONS: dict[int, list[str]] = {
     1: [],   # v2: episode_attestations and episode_disputes, created by _SCHEMA
+    2: [     # v3: a statement can be revised, not only superseded
+        "ALTER TABLE episodes ADD COLUMN revised_by TEXT REFERENCES episodes(id)",
+    ],
 }
 
 def now_iso() -> str:
@@ -127,6 +131,13 @@ def decode_embedding(blob: bytes | None) -> list[float] | None:
     vector.frombytes(blob)
     return vector.tolist()
 
+# Indexes on columns added by a migration cannot sit in _SCHEMA: on an old
+# file the CREATE TABLE IF NOT EXISTS leaves the table as it was, and the
+# index would name a column that is not there yet. Created after migrating.
+_LATE_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_episodes_revised ON episodes(revised_by)",
+]
+
 def _apply_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
     row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
@@ -136,6 +147,8 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
             "INSERT INTO meta (key, value) VALUES ('schema_version', ?)",
             (str(SCHEMA_VERSION),),
         )
+        for statement in _LATE_INDEXES:
+            conn.execute(statement)
         conn.commit()
         return
 
@@ -153,6 +166,8 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
         version += 1
         conn.execute("UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(version),))
 
+    for statement in _LATE_INDEXES:
+        conn.execute(statement)
     conn.commit()
 
 def get_connection(config: dict) -> sqlite3.Connection:
@@ -251,6 +266,7 @@ def _row_to_dict(conn: sqlite3.Connection, row: sqlite3.Row, with_embedding: boo
         "recorded_at": row["recorded_at"],
         "invalidated_at": row["invalidated_at"],
         "superseded_by": row["superseded_by"],
+        "revised_by": row["revised_by"],
         "recall_count": row["recall_count"],
         "last_recalled_at": row["last_recalled_at"],
         "confirmed_count": confirmed_count,
@@ -462,6 +478,83 @@ def supersede_episode(
 
     return get_episode(config, new_id)
 
+def revise_episode(
+    config: dict,
+    episode_id: str,
+    *,
+    content: str,
+    entities: list[str] | None = None,
+    source: str | None = None,
+    confidence: float | None = None,
+    salience: float | None = None,
+    metadata: dict | None = None,
+    embedding: list[float] | None = None,
+) -> dict:
+    """Restate an episode more precisely, keeping its identity in the world.
+
+    A supersession says the world changed: the old statement stops holding
+    where the new one starts. A revision says the statement was right and is
+    now said better ("lives in Padova" -> "lives in Padova, in the Arcella"):
+    nothing changes in valid time. So the revision opens where the original
+    did, inherits what attested the original (those attestations attest the
+    fact, not its wording) and the disputes still open against it, and the
+    original is closed in transaction time only: it stays reconstructable
+    at any `known_at` before the revision, and is never returned as what
+    the vault states today.
+
+    Entities, salience, confidence and metadata carry over unless given;
+    metadata given is merged over the inherited one.
+    """
+    conn = get_connection(config)
+    new_id = new_episode_id()
+    recorded_at = now_iso()
+
+    with _write_lock, conn:
+        row = conn.execute("SELECT * FROM episodes WHERE id = ?", (episode_id,)).fetchone()
+        if row is None:
+            raise EpisodeNotFoundError(f"Episode '{episode_id}' not found.")
+        if row["invalidated_at"] is not None:
+            raise EpisodeAlreadyClosedError(
+                f"Episode '{episode_id}' was already closed at {row['invalidated_at']}; "
+                "revise its successor instead."
+            )
+
+        inherited = json.loads(row["metadata"] or "{}")
+        inherited.update(metadata or {})
+        inherited["revision_of"] = episode_id
+
+        _insert(
+            conn,
+            episode_id=new_id,
+            content=content,
+            entities=_get_entities(conn, episode_id) if entities is None else entities,
+            source=source if source is not None else row["source"],
+            confidence=row["confidence"] if confidence is None else confidence,
+            salience=row["salience"] if salience is None else salience,
+            occurred_at=row["occurred_at"],
+            valid_from=row["valid_from"],
+            valid_to=None,
+            recorded_at=recorded_at,
+            metadata=inherited,
+            embedding=embedding,
+        )
+        conn.execute(
+            "INSERT INTO episode_attestations (episode_id, at, source) "
+            "SELECT ?, at, source FROM episode_attestations WHERE episode_id = ?",
+            (new_id, episode_id),
+        )
+        conn.execute("UPDATE episode_disputes SET episode_a = ? WHERE episode_a = ?", (new_id, episode_id))
+        conn.execute("UPDATE episode_disputes SET episode_b = ? WHERE episode_b = ?", (new_id, episode_id))
+
+        closed_meta = json.loads(row["metadata"] or "{}")
+        closed_meta["invalidation_reason"] = "revised"
+        conn.execute(
+            "UPDATE episodes SET invalidated_at = ?, revised_by = ?, metadata = ? WHERE id = ?",
+            (recorded_at, new_id, json.dumps(closed_meta), episode_id),
+        )
+
+    return get_episode(config, new_id)
+
 def mark_recalled(config: dict, episode_ids: list[str]) -> None:
     """Reinforce episodes that were actually used, so decay can favour them."""
     if not episode_ids:
@@ -563,7 +656,8 @@ def dispute_episodes(
     return get_episode(config, episode_id)
 
 def history(config: dict, episode_id: str) -> list[dict]:
-    """Return the whole supersession chain the episode belongs to, oldest first."""
+    """Return the whole chain the episode belongs to, supersessions and
+    revisions alike, oldest first."""
     conn = get_connection(config)
 
     if conn.execute("SELECT 1 FROM episodes WHERE id = ?", (episode_id,)).fetchone() is None:
@@ -575,7 +669,9 @@ def history(config: dict, episode_id: str) -> list[dict]:
     head = episode_id
     seen = {head}
     while True:
-        row = conn.execute("SELECT id FROM episodes WHERE superseded_by = ?", (head,)).fetchone()
+        row = conn.execute(
+            "SELECT id FROM episodes WHERE superseded_by = ? OR revised_by = ?", (head, head)
+        ).fetchone()
         if row is None or row["id"] in seen:
             break
         head = row["id"]
@@ -590,7 +686,7 @@ def history(config: dict, episode_id: str) -> list[dict]:
         if row is None:
             break
         chain.append(_row_to_dict(conn, row))
-        current = row["superseded_by"]
+        current = row["superseded_by"] or row["revised_by"]
 
     return chain
 
@@ -624,6 +720,12 @@ def select_episodes(
         instant = valid_at or now_iso()
         clauses.append("valid_from <= ? AND (valid_to IS NULL OR valid_to > ?)")
         params.extend([instant, instant])
+        # A revised wording is still valid in the world, it is just no longer
+        # how the vault states it: the revision is. Hidden unless the caller
+        # asks for the full history or reconstructs a past belief state, when
+        # the transaction-time clause below decides.
+        if not known_at:
+            clauses.append("revised_by IS NULL")
     elif valid_at:
         clauses.append("valid_from <= ? AND (valid_to IS NULL OR valid_to > ?)")
         params.extend([valid_at, valid_at])

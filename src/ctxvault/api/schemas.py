@@ -157,6 +157,15 @@ class SupersedeEpisodeRequest(BaseModel):
     valid_from: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+class ReviseEpisodeRequest(BaseModel):
+    vault_name: str
+    content: str
+    entities: list[str] = Field(default_factory=list)
+    source: str | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    salience: float | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
 class ConfirmEpisodeRequest(BaseModel):
     vault_name: str
     at: str | None = None

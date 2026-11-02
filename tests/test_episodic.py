@@ -710,6 +710,11 @@ class TestSchemaVersioning:
         assert confirm("old1").confirmed_count == 1
         new = write("Written under schema v2")
         assert dispute("old1", new.id).disputed_with == [new.id]
+        # v3: the migrated row can be revised, and the revision keeps the attestation
+        revised = vault_router.revise_episode(vault_name=VAULT, episode_id="old1",
+                                              content="Written under schema v1, said better")
+        assert revised.confirmed_count == 1
+        assert vault_router.get_episode(vault_name=VAULT, episode_id="old1").revised_by == revised.id
 
         conn = sqlite3.connect(db_path)
         stored = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0]
@@ -746,3 +751,93 @@ class TestReindexMetadata:
 
     def test_built_in_only_metadata_yields_nothing(self):
         assert _extract_agent_metadata([{"doc_id": "1", "chunk_index": 0, "source": "a", "filetype": ".md"}]) is None
+
+class TestRevise:
+    """The world did not change, the wording did."""
+
+    def test_a_revision_keeps_the_validity_and_the_attestations(self, mock_episodic_vault_config):
+        first = write("Anna lives in Padova", entities=["Anna"], salience=0.7,
+                      valid_from="2026-01-01T00:00:00+00:00", metadata={"card": "anna", "slot": "dove"})
+        vault_router.confirm_episode(vault_name=VAULT, episode_id=first.id, at="2026-02-01T00:00:00+00:00")
+        vault_router.confirm_episode(vault_name=VAULT, episode_id=first.id, at="2026-03-01T00:00:00+00:00")
+
+        revised = vault_router.revise_episode(
+            vault_name=VAULT, episode_id=first.id, content="Anna lives in Padova, in the Arcella")
+
+        assert revised.valid_from == first.valid_from          # nothing changed in the world
+        assert revised.valid_to is None and revised.is_open
+        assert revised.confirmed_count == 2                      # what attested the fact attests its wording
+        assert revised.last_confirmed_at == "2026-03-01T00:00:00+00:00"
+        assert revised.entities == ["Anna"] and revised.salience == 0.7
+        assert revised.metadata == {"card": "anna", "slot": "dove", "revision_of": first.id}
+
+        original = vault_router.get_episode(vault_name=VAULT, episode_id=first.id)
+        assert original.revised_by == revised.id
+        assert original.superseded_by is None
+        assert original.valid_to is None                         # still true in the world
+        assert original.invalidated_at is not None               # no longer how the vault says it
+        assert original.metadata["invalidation_reason"] == "revised"
+
+    def test_only_the_revision_is_what_the_vault_states(self, mock_episodic_vault_config):
+        first = write("Anna lives in Padova", entities=["Anna"])
+        revised = vault_router.revise_episode(vault_name=VAULT, episode_id=first.id,
+                                              content="Anna lives in Padova, in the Arcella")
+
+        assert [e.id for e in query(entities=["Anna"])] == [revised.id]
+        assert {e.id for e in query(entities=["Anna"], include_closed=True)} == {first.id, revised.id}
+        # Before the revision was recorded, the original was the belief.
+        before = query(entities=["Anna"], known_at=first.recorded_at)
+        assert [e.id for e in before] == [first.id]
+        assert vault_router.episode_stats(vault_name=VAULT) == {"total": 2, "open": 1, "closed": 1}
+
+    def test_an_open_dispute_follows_the_revision(self, mock_episodic_vault_config):
+        bologna = write("Anna lives in Bologna", entities=["Anna"])
+        padova = write("Anna lives in Padova", entities=["Anna"])
+        vault_router.dispute_episodes(vault_name=VAULT, episode_id=bologna.id, other_id=padova.id)
+
+        revised = vault_router.revise_episode(vault_name=VAULT, episode_id=padova.id,
+                                              content="Anna lives in Padova, in the Arcella")
+
+        assert revised.disputed_with == [bologna.id]
+        assert vault_router.get_episode(vault_name=VAULT, episode_id=bologna.id).disputed_with == [revised.id]
+
+    def test_the_history_walks_through_revisions_and_supersessions(self, mock_episodic_vault_config):
+        first = write("Anna lives in Padova", entities=["Anna"], valid_from="2026-01-01T00:00:00+00:00")
+        revised = vault_router.revise_episode(vault_name=VAULT, episode_id=first.id,
+                                              content="Anna lives in Padova, in the Arcella")
+        moved = vault_router.supersede_episode(vault_name=VAULT, episode_id=revised.id,
+                                               content="Anna lives in Milan",
+                                               valid_from="2026-09-01T00:00:00+00:00")
+
+        chain = vault_router.episode_history(vault_name=VAULT, episode_id=first.id).chain
+        assert [e.id for e in chain] == [first.id, revised.id, moved.id]
+        assert [e.id for e in vault_router.episode_history(vault_name=VAULT, episode_id=moved.id).chain] == \
+            [first.id, revised.id, moved.id]
+
+    def test_a_closed_episode_cannot_be_revised(self, mock_episodic_vault_config):
+        first = write("Anna lives in Padova")
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=first.id)
+
+        with pytest.raises(EpisodeAlreadyClosedError):
+            vault_router.revise_episode(vault_name=VAULT, episode_id=first.id, content="Anna lives in Padova, Arcella")
+
+    def test_endpoint_revises(self, mock_episodic_vault_config):
+        from fastapi.testclient import TestClient
+
+        from ctxvault.api.app import app, ctxvault_router
+
+        app.include_router(ctxvault_router)
+        client = TestClient(app)
+        episode = write("Giuseppe likes coffee", entities=["Giuseppe"])
+        client.post(f"/ctxvault/episodes/{episode.id}/confirm", json={"vault_name": VAULT})
+
+        response = client.post(f"/ctxvault/episodes/{episode.id}/revise",
+                               json={"vault_name": VAULT, "content": "Giuseppe likes his coffee long"})
+
+        assert response.status_code == 200
+        body = response.json()["episode"]
+        assert body["content"] == "Giuseppe likes his coffee long"
+        assert body["confirmed_count"] == 1 and body["metadata"]["revision_of"] == episode.id
+        again = client.post(f"/ctxvault/episodes/{episode.id}/revise",
+                            json={"vault_name": VAULT, "content": "twice"})
+        assert again.status_code == 409

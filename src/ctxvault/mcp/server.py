@@ -264,6 +264,26 @@ def supersede_episode(vault_name: str, episode_id: str, content: str, entities: 
     except UnsupportedVaultOperationError as e:
         raise ValueError(e)
 
+@mcp.tool(description="Restate an episode more precisely, when the world did not change but you can now say it better ('lives in Padova' -> 'lives in Padova, in the Arcella'). The revision opens where the original did and inherits its attestations and open disputes; the original stays in the history but is no longer what the vault states. Use supersede_episode instead when the world changed.")
+def revise_episode(vault_name: str, episode_id: str, content: str, entities: list[str] = [], source: str = None, salience: float = None) -> EpisodeResponse:
+    try:
+        check_access(vault_name, AGENT_ID)
+        episode = vault_router.revise_episode(
+            vault_name=vault_name,
+            episode_id=episode_id,
+            content=content,
+            entities=entities or None,
+            source=source or AGENT_ID,
+            salience=salience,
+        )
+        return EpisodeResponse(vault_name=vault_name, episode=episode)
+    except VaultNotFoundError:
+        raise ValueError(f"Vault '{vault_name}' does not exist.")
+    except (EpisodeNotFoundError, EpisodeAlreadyClosedError) as e:
+        raise ValueError(e)
+    except UnsupportedVaultOperationError as e:
+        raise ValueError(e)
+
 @mcp.tool(description="Record that a statement already in the vault was asserted again. Use this when you hear something the vault already holds, instead of writing it a second time: the episode stays as it is and gains one attestation, so a fact heard once can be told from one heard many times.")
 def confirm_episode(vault_name: str, episode_id: str, at: str = None, source: str = None) -> EpisodeResponse:
     try:
