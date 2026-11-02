@@ -301,6 +301,7 @@ async def query_episodes(query_request: QueryEpisodesRequest, request: Request)-
             known_at=query_request.known_at,
             include_closed=query_request.include_closed,
             metadata_filters=query_request.metadata_filters or None,
+            disputed=query_request.disputed,
             order_by=query_request.order_by,
             limit=query_request.limit,
             half_life_days=query_request.half_life_days,
@@ -431,6 +432,43 @@ async def invalidate_episode(episode_id: str, invalidate_request: InvalidateEpis
         raise HTTPException(status_code=400, detail=str(e))
     except VaultAccessDeniedError as e:
         raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        # A valid_to before the episode's own start, refused by the store.
+        raise HTTPException(status_code=400, detail=str(e))
+
+@ctxvault_router.post(
+    "/episodes/{episode_id}/revise",
+    summary="Restate an episode more precisely",
+    description="The world did not change, the wording did: the revision opens where the original did, inherits its attestations and open disputes, and the original is closed in transaction time only."
+)
+async def revise_episode(episode_id: str, revise_request: ReviseEpisodeRequest, request: Request)-> EpisodeResponse:
+    try:
+        check_vault_access(vault_name=revise_request.vault_name, request=request)
+
+        episode = vault_router.revise_episode(
+            vault_name=revise_request.vault_name,
+            episode_id=episode_id,
+            content=revise_request.content,
+            entities=revise_request.entities or None,
+            source=revise_request.source,
+            confidence=revise_request.confidence,
+            salience=revise_request.salience,
+            metadata=revise_request.metadata,
+        )
+
+        return EpisodeResponse(vault_name=revise_request.vault_name, episode=episode)
+    except EpisodeNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except EpisodeAlreadyClosedError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except VaultNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except UnsupportedVaultOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except VaultAccessDeniedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @ctxvault_router.post(
     "/episodes/{episode_id}/supersede",
@@ -455,6 +493,71 @@ async def supersede_episode(episode_id: str, supersede_request: SupersedeEpisode
         )
 
         return EpisodeResponse(vault_name=supersede_request.vault_name, episode=episode)
+    except EpisodeNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except EpisodeAlreadyClosedError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except VaultNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except UnsupportedVaultOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except MissingAgentNameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except VaultAccessDeniedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@ctxvault_router.post(
+    "/episodes/{episode_id}/confirm",
+    summary="Record that a statement was asserted again",
+    description="Count a repetition as evidence for an open episode instead of writing it twice or superseding it."
+)
+async def confirm_episode(episode_id: str, confirm_request: ConfirmEpisodeRequest, request: Request)-> EpisodeResponse:
+    try:
+        check_vault_access(vault_name=confirm_request.vault_name, request=request)
+
+        episode = vault_router.confirm_episode(
+            vault_name=confirm_request.vault_name,
+            episode_id=episode_id,
+            at=confirm_request.at,
+            source=confirm_request.source,
+        )
+
+        return EpisodeResponse(vault_name=confirm_request.vault_name, episode=episode)
+    except EpisodeNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except EpisodeAlreadyClosedError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except VaultNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except UnsupportedVaultOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except MissingAgentNameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except VaultAccessDeniedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@ctxvault_router.post(
+    "/episodes/{episode_id}/dispute",
+    summary="Record that two open statements cannot both hold",
+    description="Neither is closed: both stay open and come back flagged with the other, until one of them is invalidated or superseded."
+)
+async def dispute_episodes(episode_id: str, dispute_request: DisputeEpisodeRequest, request: Request)-> EpisodeResponse:
+    try:
+        check_vault_access(vault_name=dispute_request.vault_name, request=request)
+
+        episode = vault_router.dispute_episodes(
+            vault_name=dispute_request.vault_name,
+            episode_id=episode_id,
+            other_id=dispute_request.other_id,
+            at=dispute_request.at,
+            note=dispute_request.note,
+        )
+
+        return EpisodeResponse(vault_name=dispute_request.vault_name, episode=episode)
     except EpisodeNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except EpisodeAlreadyClosedError as e:

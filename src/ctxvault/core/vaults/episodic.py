@@ -81,6 +81,7 @@ class EpisodicVault(BaseVault):
         VaultOperation.QUERY_EPISODES,
         VaultOperation.INVALIDATE_EPISODE,
         VaultOperation.SUPERSEDE_EPISODE,
+        VaultOperation.REVISE_EPISODE,
     })
 
     def index_files(self, path: str | None = None) -> tuple[list[str], list[str]]:
@@ -182,6 +183,45 @@ class EpisodicVault(BaseVault):
         )
         return self._to_episode(data)
 
+    def revise_episode(
+        self,
+        episode_id: str,
+        content: str,
+        *,
+        entities: list[str] | None = None,
+        source: str | None = None,
+        confidence: float | None = None,
+        salience: float | None = None,
+        metadata: dict | None = None,
+    ) -> Episode:
+        if not content.strip():
+            raise ValueError("Episode content cannot be empty.")
+
+        data = sqlite_store.revise_episode(
+            self.config,
+            episode_id,
+            content=content,
+            entities=entities,
+            source=source,
+            confidence=confidence,
+            salience=salience,
+            metadata=metadata,
+            embedding=self._embed(content),
+        )
+        return self._to_episode(data)
+
+    def confirm_episode(self, episode_id: str, *, at: str | None = None,
+                        source: str | None = None) -> Episode:
+        return self._to_episode(
+            sqlite_store.confirm_episode(self.config, episode_id, at=at, source=source)
+        )
+
+    def dispute_episodes(self, episode_id: str, other_id: str, *, at: str | None = None,
+                         note: str | None = None) -> Episode:
+        return self._to_episode(
+            sqlite_store.dispute_episodes(self.config, episode_id, other_id, at=at, note=note)
+        )
+
     def history(self, episode_id: str) -> EpisodeHistory:
         chain = [self._to_episode(item) for item in sqlite_store.history(self.config, episode_id)]
         return EpisodeHistory(episode_id=episode_id, chain=chain)
@@ -225,6 +265,7 @@ class EpisodicVault(BaseVault):
         known_at: str | None = None,
         include_closed: bool = False,
         metadata_filters: dict | None = None,
+        disputed: bool | None = None,
         order_by: str | None = None,
         limit: int = DEFAULT_LIMIT,
         half_life_days: float = DEFAULT_HALF_LIFE_DAYS,
@@ -240,6 +281,7 @@ class EpisodicVault(BaseVault):
             known_at=known_at,
             include_closed=include_closed,
             metadata_filters=metadata_filters,
+            disputed=disputed,
         )
 
         order = order_by or ("relevance" if text else "recency")

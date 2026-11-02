@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 370" width="720" height="370">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 370" width="1080" height="370">
   <defs>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&amp;display=swap');
@@ -6,8 +6,10 @@
 
       .flow  { stroke-dasharray: 8 4; animation: flow 1.4s linear infinite 0.00s; }
       .flow2 { stroke-dasharray: 8 4; animation: flow 1.4s linear infinite 0.40s; }
+      .flow3 { stroke-dasharray: 8 4; animation: flow 1.4s linear infinite 0.80s; }
       .ret   { stroke-dasharray: 4 4; animation: retflow 1.4s linear infinite 0.00s; }
       .ret2  { stroke-dasharray: 4 4; animation: retflow 1.4s linear infinite 0.60s; }
+      .ret3  { stroke-dasharray: 4 4; animation: retflow 1.4s linear infinite 0.90s; }
       .out   { stroke-dasharray: 4 4; animation: retflow 1.4s linear infinite 0.30s; }
 
       @keyframes flow {
@@ -20,52 +22,66 @@
       }
     </style>
 
-    <marker id="arr-blue" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0.5 L0,6.5 L6.5,3.5 Z" fill="#7a9bb5"/>
+    <marker id="arr-blue" markerWidth="10.5" markerHeight="10.5" refX="9" refY="5.25" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0.75 L0,9.75 L9.75,5.25 Z" fill="#7a9bb5"/>
     </marker>
-    <marker id="arr-amber" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0.5 L0,6.5 L6.5,3.5 Z" fill="#b5946a"/>
+    <marker id="arr-amber" markerWidth="10.5" markerHeight="10.5" refX="9" refY="5.25" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0.75 L0,9.75 L9.75,5.25 Z" fill="#b5946a"/>
     </marker>
-    <marker id="arr-green" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0.5 L0,6.5 L6.5,3.5 Z" fill="#4a9e6b"/>
+    <marker id="arr-violet" markerWidth="10.5" markerHeight="10.5" refX="9" refY="5.25" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0.75 L0,9.75 L9.75,5.25 Z" fill="#8b7fa8"/>
+    </marker>
+    <marker id="arr-green" markerWidth="10.5" markerHeight="10.5" refX="9" refY="5.25" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0.75 L0,9.75 L9.75,5.25 Z" fill="#4a9e6b"/>
     </marker>
   </defs>
 
-  <rect width="720" height="370" rx="14" fill="#f5f4f0"/>
+  <rect width="1080" height="370" rx="14" fill="#f5f4f0"/>
 
   <!-- OUTPUT (rounded pill) -->
-  <rect x="280" y="20" width="160" height="36" rx="18" fill="#fff" stroke="#dddbd6" stroke-width="1.5"/>
-  <text x="360" y="43" text-anchor="middle" fill="#1a1a1a" font-size="9.5" font-weight="500">output</text>
+  <rect x="460" y="20" width="160" height="36" rx="18" fill="#fff" stroke="#dddbd6" stroke-width="1.5"/>
+  <text x="540" y="43" text-anchor="middle" fill="#1a1a1a" font-size="9.5" font-weight="500">output</text>
 
   <!-- Arrow: agent → output (upward) -->
-  <line x1="360" y1="92" x2="360" y2="58"
+  <line x1="540" y1="92" x2="540" y2="58"
         stroke="#4a9e6b" stroke-width="1.5" marker-end="url(#arr-green)" class="out"/>
 
   <!-- AGENT -->
-  <rect x="240" y="94" width="240" height="48" rx="8" fill="#fff" stroke="#dddbd6" stroke-width="1.5"/>
-  <text x="360" y="124" text-anchor="middle" fill="#1a1a1a" font-size="11" font-weight="500">agent</text>
+  <rect x="420" y="94" width="240" height="48" rx="8" fill="#fff" stroke="#dddbd6" stroke-width="1.5"/>
+  <text x="540" y="124" text-anchor="middle" fill="#1a1a1a" font-size="11" font-weight="500">agent</text>
 
-  <!-- LEFT SIDE: semantic vault -->
-  <!-- Down: query vertical from agent (x=320) to vault (x=320) -->
-  <line x1="320" y1="142" x2="320" y2="210"
+  <!-- LEFT: semantic vault -->
+  <!-- Down: query -->
+  <path d="M 460 142 L 460 180 L 225 180 L 225 210" fill="none"
         stroke="#7a9bb5" stroke-width="1.5" marker-end="url(#arr-blue)" class="flow"/>
-  <text x="315" y="180" text-anchor="end" fill="#7a9bb5" font-size="8" font-weight="500">query</text>
+  <text x="238" y="201" fill="#7a9bb5" font-size="8" font-weight="500">query</text>
 
-  <!-- Up: knowledge vertical from vault (x=260) to agent (x=260) -->
-  <line x1="260" y1="210" x2="260" y2="142"
+  <!-- Up: knowledge -->
+  <path d="M 165 210 L 165 160 L 430 160 L 430 142" fill="none"
         stroke="#7a9bb5" stroke-width="1.2" marker-end="url(#arr-blue)" class="ret"/>
-  <text x="255" y="180" text-anchor="end" fill="#7a9bb5" font-size="8" font-weight="500">knowledge</text>
+  <text x="158" y="201" text-anchor="end" fill="#7a9bb5" font-size="8" font-weight="500">knowledge</text>
 
-  <!-- RIGHT SIDE: skill vault -->
-  <!-- Down: read_skill vertical from agent (x=400) to vault (x=400) -->
-  <line x1="400" y1="142" x2="400" y2="210"
+  <!-- MIDDLE: skill vault -->
+  <!-- Down: read_skill -->
+  <line x1="520" y1="142" x2="520" y2="210"
         stroke="#b5946a" stroke-width="1.5" marker-end="url(#arr-amber)" class="flow2"/>
-  <text x="405" y="180" fill="#b5946a" font-size="8" font-weight="500">read_skill</text>
+  <text x="508" y="201" text-anchor="end" fill="#b5946a" font-size="8" font-weight="500">read_skill</text>
 
-  <!-- Up: instructions vertical from vault (x=460) to agent (x=460) -->
-  <line x1="460" y1="210" x2="460" y2="142"
+  <!-- Up: instructions -->
+  <line x1="560" y1="210" x2="560" y2="142"
         stroke="#b5946a" stroke-width="1.2" marker-end="url(#arr-amber)" class="ret2"/>
-  <text x="465" y="180" fill="#b5946a" font-size="8" font-weight="500">instructions</text>
+  <text x="567" y="201" fill="#b5946a" font-size="8" font-weight="500">instructions</text>
+
+  <!-- RIGHT: episodic vault -->
+  <!-- Down: query_episodes -->
+  <path d="M 620 142 L 620 180 L 855 180 L 855 210" fill="none"
+        stroke="#8b7fa8" stroke-width="1.5" marker-end="url(#arr-violet)" class="flow3"/>
+  <text x="842" y="201" text-anchor="end" fill="#8b7fa8" font-size="8" font-weight="500">query_episodes</text>
+
+  <!-- Up: episodes -->
+  <path d="M 915 210 L 915 160 L 650 160 L 650 142" fill="none"
+        stroke="#8b7fa8" stroke-width="1.2" marker-end="url(#arr-violet)" class="ret3"/>
+  <text x="922" y="201" fill="#8b7fa8" font-size="8" font-weight="500">episodes</text>
 
   <!-- SEMANTIC VAULT -->
   <rect x="60" y="212" width="270" height="130" rx="8" fill="#f0f4f8" stroke="#c8c8c4" stroke-width="1.5"/>
@@ -83,18 +99,33 @@
   <text x="279" y="307" text-anchor="middle" fill="#5a819e" font-size="7.5" font-weight="500">knowledge</text>
 
   <!-- SKILL VAULT -->
-  <rect x="390" y="212" width="270" height="130" rx="8" fill="#f7f3ee" stroke="#c8c8c4" stroke-width="1.5"/>
-  <text x="525" y="252" text-anchor="middle" fill="#b5946a" font-size="10.5" font-weight="600" letter-spacing="0.1em">PROCEDURAL MEMORY</text>
-  <text x="525" y="276" text-anchor="middle" fill="#1a1a1a" font-size="10.5" font-weight="600">skill-vault</text>
+  <rect x="405" y="212" width="270" height="130" rx="8" fill="#f7f3ee" stroke="#c8c8c4" stroke-width="1.5"/>
+  <text x="540" y="252" text-anchor="middle" fill="#b5946a" font-size="10.5" font-weight="600" letter-spacing="0.1em">PROCEDURAL MEMORY</text>
+  <text x="540" y="276" text-anchor="middle" fill="#1a1a1a" font-size="10.5" font-weight="600">skill-vault</text>
 
   <!-- Skill vault pills -->
-  <rect x="408" y="294" width="50" height="20" rx="10" fill="#efe8dd" stroke="#ddd2c2" stroke-width="0.8"/>
-  <text x="433" y="307" text-anchor="middle" fill="#9e7d58" font-size="7.5" font-weight="500">skills</text>
+  <rect x="423" y="294" width="50" height="20" rx="10" fill="#efe8dd" stroke="#ddd2c2" stroke-width="0.8"/>
+  <text x="448" y="307" text-anchor="middle" fill="#9e7d58" font-size="7.5" font-weight="500">skills</text>
 
-  <rect x="466" y="294" width="72" height="20" rx="10" fill="#efe8dd" stroke="#ddd2c2" stroke-width="0.8"/>
-  <text x="502" y="307" text-anchor="middle" fill="#9e7d58" font-size="7.5" font-weight="500">procedures</text>
+  <rect x="481" y="294" width="72" height="20" rx="10" fill="#efe8dd" stroke="#ddd2c2" stroke-width="0.8"/>
+  <text x="517" y="307" text-anchor="middle" fill="#9e7d58" font-size="7.5" font-weight="500">procedures</text>
 
-  <rect x="546" y="294" width="96" height="20" rx="10" fill="#efe8dd" stroke="#ddd2c2" stroke-width="0.8"/>
-  <text x="594" y="307" text-anchor="middle" fill="#9e7d58" font-size="7.5" font-weight="500">behavioral rules</text>
+  <rect x="561" y="294" width="96" height="20" rx="10" fill="#efe8dd" stroke="#ddd2c2" stroke-width="0.8"/>
+  <text x="609" y="307" text-anchor="middle" fill="#9e7d58" font-size="7.5" font-weight="500">behavioral rules</text>
+
+  <!-- EPISODIC VAULT -->
+  <rect x="750" y="212" width="270" height="130" rx="8" fill="#f4f2f7" stroke="#c8c8c4" stroke-width="1.5"/>
+  <text x="885" y="252" text-anchor="middle" fill="#8b7fa8" font-size="10.5" font-weight="600" letter-spacing="0.1em">EPISODIC MEMORY</text>
+  <text x="885" y="276" text-anchor="middle" fill="#1a1a1a" font-size="10.5" font-weight="600">episodic-vault</text>
+
+  <!-- Episodic vault pills -->
+  <rect x="768" y="294" width="60" height="20" rx="10" fill="#e6e1ef" stroke="#cdc4de" stroke-width="0.8"/>
+  <text x="798" y="307" text-anchor="middle" fill="#746a8e" font-size="7.5" font-weight="500">episodes</text>
+
+  <rect x="836" y="294" width="98" height="20" rx="10" fill="#e6e1ef" stroke="#cdc4de" stroke-width="0.8"/>
+  <text x="885" y="307" text-anchor="middle" fill="#746a8e" font-size="7.5" font-weight="500">validity windows</text>
+
+  <rect x="942" y="294" width="60" height="20" rx="10" fill="#e6e1ef" stroke="#cdc4de" stroke-width="0.8"/>
+  <text x="972" y="307" text-anchor="middle" fill="#746a8e" font-size="7.5" font-weight="500">entities</text>
 
 </svg>
