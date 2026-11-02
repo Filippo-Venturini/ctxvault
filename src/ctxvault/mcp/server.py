@@ -265,7 +265,7 @@ def supersede_episode(vault_name: str, episode_id: str, content: str, entities: 
         raise ValueError(e)
 
 @mcp.tool(description="Restate an episode more precisely, when the world did not change but you can now say it better ('lives in Padova' -> 'lives in Padova, in the Arcella'). The revision opens where the original did and inherits its attestations and open disputes; the original stays in the history but is no longer what the vault states. Use supersede_episode instead when the world changed.")
-def revise_episode(vault_name: str, episode_id: str, content: str, entities: list[str] = [], source: str = None, salience: float = None) -> EpisodeResponse:
+def revise_episode(vault_name: str, episode_id: str, content: str, entities: list[str] = [], source: str | None = None, salience: float | None = None) -> EpisodeResponse:
     try:
         check_access(vault_name, AGENT_ID)
         episode = vault_router.revise_episode(
@@ -285,7 +285,7 @@ def revise_episode(vault_name: str, episode_id: str, content: str, entities: lis
         raise ValueError(e)
 
 @mcp.tool(description="Record that a statement already in the vault was asserted again. Use this when you hear something the vault already holds, instead of writing it a second time: the episode stays as it is and gains one attestation, so a fact heard once can be told from one heard many times.")
-def confirm_episode(vault_name: str, episode_id: str, at: str = None, source: str = None) -> EpisodeResponse:
+def confirm_episode(vault_name: str, episode_id: str, at: str | None = None, source: str | None = None) -> EpisodeResponse:
     try:
         check_access(vault_name, AGENT_ID)
         episode = vault_router.confirm_episode(
@@ -300,11 +300,11 @@ def confirm_episode(vault_name: str, episode_id: str, at: str = None, source: st
         raise ValueError(e)
 
 @mcp.tool(description="Record that two open statements cannot both hold, when you cannot tell which one is wrong. Neither is closed: both keep coming back from queries, each flagged with the other in disputed_with, so you can ask instead of assert. The dispute ends by itself when one side is invalidated or superseded. If you do know which one is wrong, use supersede_episode or invalidate_episode instead.")
-def dispute_episodes(vault_name: str, episode_id: str, other_id: str, note: str = None) -> EpisodeResponse:
+def dispute_episodes(vault_name: str, episode_id: str, other_id: str, note: str = "") -> EpisodeResponse:
     try:
         check_access(vault_name, AGENT_ID)
         episode = vault_router.dispute_episodes(
-            vault_name=vault_name, episode_id=episode_id, other_id=other_id, note=note
+            vault_name=vault_name, episode_id=episode_id, other_id=other_id, note=note or None
         )
         return EpisodeResponse(vault_name=vault_name, episode=episode)
     except VaultNotFoundError:
