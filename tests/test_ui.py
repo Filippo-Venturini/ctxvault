@@ -202,8 +202,9 @@ def test_export_is_one_self_contained_file(mock_episodic_vault_config, tmp_path)
     assert "const CV = " in html and "liveSource" in html       # the app, inlined
     assert "const MD = " in html                                # the markdown reader, inlined
     assert "data:font/woff2;base64," in html                    # the fonts, inlined
+    assert 'rel="icon" type="image/png" href="data:image/png;base64,' in html  # the tab icon, inlined
     assert "window.CTXVAULT_ASSETS = " in html and "data:image/svg+xml;base64," in html  # the logos, inlined
-    assert not re.search(r'(?:src|href)="(?!#)[^"]+"', html)   # nothing left to fetch
+    assert not re.search(r'(?:src|href)="(?!#|data:)[^"]+"', html)   # nothing left to fetch
     assert "preload" not in html
 
 def test_export_can_carry_a_note_for_whoever_opens_it(mock_episodic_vault_config, tmp_path):

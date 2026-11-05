@@ -415,6 +415,7 @@ def export_html(data: dict | None = None, note: str | None = None) -> str:
     html = "\n".join(line for line in html.splitlines() if 'rel="preload"' not in line)  # fonts are inlined below
     css = _inline_fonts((STATIC / "styles.css").read_text(encoding="utf-8"))
     html = html.replace('<link rel="stylesheet" href="static/styles.css">', f"<style>\n{css}\n</style>")
+    html = html.replace('href="static/favicon.png"', f'href="{_data_uri(STATIC / "favicon.png")}"')
 
     scripts = []
     for line in html.splitlines():
