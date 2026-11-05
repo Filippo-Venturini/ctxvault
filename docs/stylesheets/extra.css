@@ -1,0 +1,67 @@
+/* The memory viewer's palette, so the docs and the demo read as one product. */
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: #0b0c12;
+  --md-default-fg-color: #eef0f6;
+  --md-default-fg-color--light: #848aa0;
+  --md-default-fg-color--lighter: rgba(238, 240, 246, .32);
+  --md-default-fg-color--lightest: rgba(238, 240, 246, .1);
+  --md-code-bg-color: #12141d;
+  --md-typeset-a-color: #b48cf5;
+  --md-primary-fg-color: #0b0c12;
+  --md-primary-bg-color: #eef0f6;
+  --md-accent-fg-color: #c9a6ff;
+  --md-footer-bg-color: #0b0c12;
+  --md-footer-bg-color--dark: #08090d;
+}
+.md-header, .md-tabs { border-bottom: 1px solid rgba(238, 240, 246, .1); }
+.md-typeset h1, .md-typeset h2, .md-typeset h3 { letter-spacing: -.02em; font-weight: 500; }
+.md-typeset table:not([class]) { border-color: rgba(238, 240, 246, .1); }
+.md-typeset .md-button--primary { background: #b48cf5; border-color: #b48cf5; color: #0b0c12; }
+.md-typeset .md-button--primary:hover { background: #c9a6ff; border-color: #c9a6ff; }
+.md-typeset img { border-radius: 8px; }
+
+/* home */
+.cv-hero { text-align: center; padding: 2rem 0 1rem; }
+.cv-hero .cv-logo { width: 340px; max-width: 80%; border-radius: 0; }
+.cv-hero h1.cv-tagline { margin: 1.2rem 0 .4rem; font-size: 2rem; color: var(--md-default-fg-color); }
+.cv-hero p { color: var(--md-default-fg-color--light); }
+
+.md-typeset h1 { color: var(--md-default-fg-color); }
+.md-typeset .md-button { color: #eef0f6; border-color: rgba(238, 240, 246, .3); }
+.md-typeset .md-button:hover { color: #0b0c12; background: #eef0f6; border-color: #eef0f6; }
+.md-typeset .md-button--primary { color: #0b0c12; }
+.md-typeset .md-button--primary:hover { color: #0b0c12; }
+.md-header__button.md-logo img { height: 1.6rem; }
+
+/* header: the same logo as the memory viewer, wordmark included, so the
+   site name next to it would say it twice */
+.md-header__button.md-logo { padding: .2rem .4rem; }
+.md-header__button.md-logo img { height: 2rem; width: auto; }
+.md-header__title .md-header__topic:first-child { visibility: hidden; }
+@media screen and (max-width: 76.234375em) {
+  .md-header__title .md-header__topic:first-child { visibility: visible; }
+}
+
+/* home: the two actions side by side, the same width; the install line under them */
+.cv-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: .8rem; margin-top: 1.8rem; }
+.cv-actions .md-button { margin: 0; min-width: 12rem; text-align: center; }
+.cv-install { display: flex; justify-content: center; align-items: baseline; gap: .6rem; margin: 1.4rem auto 0;
+  width: max-content; max-width: 100%; padding: .55rem 1.1rem; border: 1px solid rgba(238, 240, 246, .1); border-radius: 6px;
+  background: var(--md-code-bg-color); font-family: var(--md-code-font-family); font-size: .8rem; }
+.cv-install .cv-prompt { color: var(--md-default-fg-color--light); user-select: none; }
+.md-typeset .cv-install code { background: none; padding: 0; font-size: inherit; color: var(--md-default-fg-color); }
+
+/* home: the tour video under the actions */
+.cv-tour { margin: 2.6rem auto 2.4rem; max-width: 1080px; text-align: center; }
+.cv-tour video { display: block; width: 100%; aspect-ratio: 16 / 10; border-radius: 10px; border: 1px solid rgba(238, 240, 246, .1); background: #0b0c12; }
+.cv-tour video::cue { background: rgba(11, 12, 18, .8); color: #eef0f6; font-family: 'Space Grotesk', sans-serif; }
+.cv-frame { position: relative; border-radius: 10px; overflow: hidden; }
+.cv-play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 1; width: 64px; height: 64px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; color: #0b0c12;
+  background: rgba(238, 240, 246, .92); border: 0; box-shadow: 0 6px 24px rgba(0, 0, 0, .35); transition: background .2s, transform .2s; }
+.cv-play:hover { background: #fff; transform: translate(-50%, -50%) scale(1.04); }
+.cv-frame.is-playing .cv-play { display: none; }
+
+/* home: the four principles, two by two */
+.md-typeset .grid.cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media screen and (max-width: 44.984375em) { .md-typeset .grid.cards { grid-template-columns: minmax(0, 1fr); } }

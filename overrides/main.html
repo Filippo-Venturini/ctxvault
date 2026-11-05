@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block extrahead %}
+  <meta property="og:title" content="{% if page and page.title and not page.is_homepage %}{{ page.title }} · {% endif %}CtxVault · Local memory infrastructure for AI agents">
+  <meta property="og:description" content="{{ config.site_description }}">
+  <meta property="og:image" content="{{ config.site_url }}assets/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:url" content="{{ page.canonical_url }}">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+{% endblock %}
