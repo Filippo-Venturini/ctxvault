@@ -137,7 +137,7 @@ def main():
         return
     
     print("=" * 70)
-    print("Personal Research Assistant Demo")
+    print("Single-Vault RAG Demo")
     print("=" * 70)
     print()
     

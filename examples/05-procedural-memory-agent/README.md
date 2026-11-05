@@ -1,4 +1,4 @@
-# 05 · Procedural Memory Agent
+# 05 · Procedural Memory
 
 One agent, two vault types: semantic and skill. The same facts,
 written three different ways, because three different procedures

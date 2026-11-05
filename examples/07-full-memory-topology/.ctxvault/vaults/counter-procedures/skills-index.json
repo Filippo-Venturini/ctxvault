@@ -1,0 +1,17 @@
+{
+  "closing checklist": {
+    "name": "Closing checklist",
+    "file": "closing-checklist.md",
+    "description": "The steps to close the shop at the end of the day, in order"
+  },
+  "take a cake order": {
+    "name": "Take a cake order",
+    "file": "take-a-cake-order.md",
+    "description": "How to take a custom cake order at the counter, from the first question to the pickup slip"
+  },
+  "handle a return": {
+    "name": "Handle a return",
+    "file": "handle-a-return.md",
+    "description": "What to do when a customer brings something back or says something was wrong"
+  }
+}

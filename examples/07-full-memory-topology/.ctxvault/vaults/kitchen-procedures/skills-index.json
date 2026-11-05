@@ -1,0 +1,17 @@
+{
+  "sourdough schedule": {
+    "name": "Sourdough schedule",
+    "file": "sourdough-schedule.md",
+    "description": "The two-day rhythm of the house loaf, from feeding the starter to the morning bake"
+  },
+  "start the ovens": {
+    "name": "Start the ovens",
+    "file": "start-the-ovens.md",
+    "description": "Morning start-up of the deck oven and the convection oven, so the first bake is on time"
+  },
+  "allergen handling": {
+    "name": "Allergen handling",
+    "file": "allergen-handling.md",
+    "description": "How the kitchen keeps nuts, sesame and soy from ending up where they should not"
+  }
+}
