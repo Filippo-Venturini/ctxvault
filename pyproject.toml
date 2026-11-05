@@ -106,6 +106,9 @@ package-dir = {"" = "src"}
 where = ["src"]
 include = ["ctxvault*"]
 
+[tool.setuptools.package-data]
+ctxvault = ["ui/static/*", "ui/static/vendor/*", "ui/static/fonts/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
