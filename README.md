@@ -13,7 +13,7 @@
 ![Python](https://img.shields.io/pypi/pyversions/ctxvault)
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/ctxvault)
 
-[Installation](#installation) • [Quick Start](#quick-start) • [Examples](#examples) • [Documentation](#documentation) • [API Reference](#api-reference)
+[Live demo](https://filippo-venturini.github.io/ctxvault/demo.html) • [Docs](https://filippo-venturini.github.io/ctxvault/) • [Quick Start](#quick-start) • [Examples](#examples) • [Roadmap](#roadmap) • [Contributing](#contributing)
 
 </div>
 
@@ -23,7 +23,7 @@
 
 Most agent frameworks treat memory as an afterthought: a shared vector store where isolation depends on configuration staying correct and everything, facts and procedures alike, gets embedded into the same undifferentiated index. The agent cannot tell what it knows from how it should act.
 
-CtxVault is built around a different primitive. Memory is organized into **vaults**: self-contained, directory-backed units with explicit types. A semantic vault holds documents and a vector index, queryable by meaning: the agent's **semantic memory**. A skill vault holds skills that shape how the agent behaves: its **procedural memory**. An episodic vault holds statements with a validity window, so the agent can tell what still holds from what used to: its **episodic memory**. Isolation is structural, the topology is defined explicitly (one vault per agent, a shared knowledge base, private skills for a specific role, or any combination), with access control that determines exactly which agents can reach which vault.
+CtxVault is built around a different primitive. Memory is organized into **vaults**: self-contained, directory-backed units with explicit types, one for each kind of memory an agent has. Isolation is structural, the topology is defined explicitly (one vault per agent, a shared knowledge base, private skills for a specific role, or any combination), with access control that determines exactly which agents can reach which vault.
 
 The result is a memory layer that behaves like real infrastructure: typed, composable, observable, persistent and entirely local.
 
@@ -41,15 +41,15 @@ The result is a memory layer that behaves like real infrastructure: typed, compo
 
 ### Typed memory: semantic, procedural and episodic
 
-Classical cognitive architectures, from [ACT-R (Anderson et al., 2004)](https://en.wikipedia.org/wiki/ACT-R) to [CoALA (Sumers et al., 2024)](https://arxiv.org/abs/2309.02427), separate an agent's long-term memory into distinct modules: semantic memory for world knowledge, and procedural memory for skills and behavioral rules. Most agent frameworks ignore this distinction and store everything in a single vector index.
+Classical cognitive architectures, from [ACT-R (Anderson et al., 2004)](https://en.wikipedia.org/wiki/ACT-R) to [CoALA (Sumers et al., 2024)](https://arxiv.org/abs/2309.02427), separate an agent's long-term memory into distinct modules: what it knows, how it acts, and what happened. Most agent frameworks ignore the distinction and store everything in a single vector index. In CtxVault each kind of memory is a vault type:
 
-In CtxVault, the separation is structural. A **semantic vault** holds documents, indexes them into a vector store, and supports retrieval by meaning: it is the agent's knowledge base. A **skill vault** holds natural-language procedures with explicit names and descriptions, the agent's behavioral repertoire. An **episodic vault** holds individual statements that have a lifetime: what happened, when, and whether it still holds. The agent queries the first to know *what*, reads the second to know *how*, and consults the third to know *when*.
+| Vault | Memory | What it holds | How the agent reads it |
+|-------|--------|---------------|------------------------|
+| **Semantic** | Semantic: *what* the agent knows | Documents (PDF, DOCX, MD, TXT), chunked and embedded into a local vector index | By meaning: a query returns the closest chunks, with their source |
+| **Skill** | Procedural: *how* the agent acts | Procedures in markdown, each with a name and a description | By name: the agent lists the skills and reads the one it needs |
+| **Episodic** | Episodic: *when* something was true | Statements with two timelines: when they hold in the world, and when the vault learned it | By entity, validity and source, as of today or any past instant |
 
-Episodic memory is the one an agent needs to stay coherent across sessions, and the one a vector index handles worst: similarity cannot tell a fact from the fact that replaced it. So episodes are stored **bi-temporally**: each one records the window in which it is true in the world (`valid_from` / `valid_to`) and the window in which the vault believed it (`recorded_at` / `invalidated_at`). Correcting a statement closes the old one exactly where its successor opens, in a single transaction, and links the two. Nothing is deleted: `valid_at` reconstructs what was true at any past moment, `known_at` reconstructs what the agent had learned by then, and the supersession chain explains how a belief got where it is. Hearing a statement again is neither a new episode nor a correction: confirming it keeps the one episode and records one more attestation, so a fact heard once can be told from one heard fifty times. And two statements that cannot both hold, when nobody can yet say which is wrong, are put in dispute rather than one of them being guessed away: both stay open and come back flagged with each other, until closing or superseding one settles it.
-
-Retrieval in an episodic vault is structured first, by entity, validity and source, because that is what most questions to an episodic memory actually are. Semantic similarity is an optional second path that only switches on when the vault is created with an embedding model, so episodic memory costs nothing to anyone who does not want vectors.
-
-All three vault types share the same infrastructure primitives: public or restricted, local or global, composable in any topology. The difference is what they store and how the agent uses it.
+All three types share the same primitives: public or restricted, local or global, composable in any topology. [How each type works →](https://filippo-venturini.github.io/ctxvault/how-it-works/memory-types/)
 
 <div align="center">
   <img 
@@ -80,13 +80,9 @@ Found 3 vaults
   agents:  agent-c
 ```
 
----
-
 ### Persistent memory across sessions
 
 Agents lose all context when a session ends. CtxVault gives them a knowledge base that persists across conversations, queryable by meaning rather than exact match. Context written in one session is retrievable days later using semantically related language.
-
-What persists for months rather than days also has to change. An episodic vault keeps that kind of memory: facts are superseded instead of overwritten, so a correction closes the old statement and opens the new one without losing either; a statement said better is revised, keeping what attested it; and retrieval returns what holds today unless asked for a past instant.
 
 <div align="center">
   <img 
@@ -97,29 +93,42 @@ What persists for months rather than days also has to change. An episodic vault 
   <p><sub>Persistent memory across sessions, shown with Claude Desktop, works with any MCP-compatible client.</sub></p>
 </div>
 
----
-
 ### Observable and human-controllable
 
-When agents write to memory autonomously, visibility into what they write is not a debugging feature: it is the foundation of a trustworthy system.
+When agents write to memory autonomously, visibility into what they write is not a debugging feature: it is the foundation of a trustworthy system. Whatever an agent wrote, through any interface, you can look at it three ways, and add to it yourself.
 
-Every vault is a plain directory on your machine. You can read it, edit it, and query it directly through the CLI at any point, independent of what any agent is doing. You also contribute to the same memory layer directly: drop documents into a vault, index with one command, and the agent queries that knowledge alongside what it has written on its own.
+**On disk.** Every vault is a plain directory on your machine, readable and editable with any tool. Drop a document into a semantic vault or a skill into a skill vault, index it, and the agent sees it next to what it wrote on its own.
 
-```bash
-# Inspect what your agent has written in the vault
-ctxvault docs my-vault
-
-# Query its knowledge base directly  
-ctxvault query my-vault "what decisions were made last week?"
-
-# Add your own documents and index them
-ctxvault index my-vault
-
-# On an episodic vault, read the statements instead
-ctxvault episodes my-vault --all
+```
+.ctxvault/
+├── config.json              # the registry: every vault, its type, who can reach it
+└── vaults/
+    ├── product-sheets/      # semantic: your documents, and the chroma/ index
+    ├── counter-procedures/  # skill: one markdown file per skill
+    └── store-facts/         # episodic: episodes.db, a SQLite file
 ```
 
----
+**From the CLI.** The same vaults, queried directly, independent of what any agent is doing.
+
+```bash
+ctxvault docs my-vault                                   # what the agent has written
+ctxvault query my-vault "what decisions were made last week?"
+ctxvault index my-vault                                  # add your own documents
+ctxvault episodes my-vault --all                         # an episodic vault's statements
+```
+
+**In the browser.** `ctxvault ui` opens the memory viewer: a map of every vault, its type and the agents that can reach it, and a page per vault. Semantic documents show their chunks as the agent receives them, skills are rendered from their markdown, and an episodic vault has a time cursor that rewinds it to any past day. It is read-only and entirely local, and `--export` writes it to one self-contained HTML file. Try the [live demo](https://filippo-venturini.github.io/ctxvault/demo.html), no install needed: the bakery of [example 07](https://github.com/Filippo-Venturini/ctxvault/tree/main/examples/07-full-memory-topology/), three agents, six vaults, a year of facts.
+
+<div align="center">
+  <a href="https://filippo-venturini.github.io/ctxvault/demo.html">
+    <img
+      src="https://raw.githubusercontent.com/Filippo-Venturini/ctxvault/main/assets/ui-topology.gif"
+      alt="The ctxvault ui map: hovering a semantic, a skill and an episodic vault, then an agent and the vaults it can reach"
+      width="1200"
+    >
+  </a>
+  <p><sub>The map of the live demo: three memory types, three agents, and what each agent can reach.</sub></p>
+</div>
 
 ### Local-first
 
@@ -131,13 +140,15 @@ No cloud, no telemetry, no external services. Vaults are plain directories on yo
 
 CtxVault exposes the same vault layer through four interfaces. Use whichever fits your context, or combine them freely.
 
-**Python client**: In-process. Import `Client`, open a vault by name and call it directly, with no server to start: for scripts, tests, pipelines and agents that own their memory.
+**[Python client](https://filippo-venturini.github.io/ctxvault/connect/python/)**: In-process. Import `Client`, open a vault by name and call it directly, with no server to start: for scripts, tests, pipelines and agents that own their memory.
 
 **CLI**: Human-facing. Monitor vaults, inspect agent-written content, add your own documents, query knowledge bases directly.
 
-**HTTP API**: Programmatic integration. Connect LangChain, LangGraph, or any custom pipeline to vaults via REST. Full CRUD, semantic search, and agent write support.
+**[HTTP API](https://filippo-venturini.github.io/ctxvault/connect/http/)**: Programmatic integration. Connect LangChain, LangGraph, or any custom pipeline to vaults via REST. Full CRUD, semantic search, and agent write support.
 
-**MCP server**: For autonomous agents. Give any MCP-compatible client direct vault access with no integration code required. The agent handles `list_vaults`, `query`, `write`, and `list_docs` on its own, and on an episodic vault it records and corrects facts with `write_episode`, `query_episodes`, `supersede_episode` and `invalidate_episode`, counts repetitions with `confirm_episode`, holds contradictions open with `dispute_episodes`, and discovers what the vault is about with `list_entities`.
+**[MCP server](https://filippo-venturini.github.io/ctxvault/connect/mcp/)**: For autonomous agents. Give any MCP-compatible client direct vault access with no integration code required. The agent handles `list_vaults`, `query`, `write_doc`, and `list_docs` on its own, and on an episodic vault it records and corrects facts with `write_episode`, `query_episodes`, `supersede_episode` and `invalidate_episode`, counts repetitions with `confirm_episode`, holds contradictions open with `dispute_episodes`, and discovers what the vault is about with `list_entities`.
+
+Whichever door wrote it, `ctxvault ui` shows it: the viewer reads the same vaults, so what an agent recorded over MCP is on the page next to what you indexed from the CLI.
 
 ---
 
@@ -153,21 +164,25 @@ CtxVault exposes the same vault layer through four interfaces. Use whichever fit
 | Human CLI observability | ✓ | ✗ | ✗ | ✗ |
 | Local-first | ✓ | ✓ | ✓ | ✓ (self-hosted) |
 | MCP server | ✓ | ✗ (you build it) | ✗ | ✓ (hosted) |
+| Memory viewer (topology, time travel), local | ✓ | ✗ | ✗ | ✓ (hosted dashboard) |
 
 ---
 
 ## Examples
 
-Six scenarios, each with full code and setup instructions.
+Seven scenarios, each with full code and setup instructions.
 
-| | Example | What it shows |
-|--|---------|---------------|
-| 🟢 | [**Personal Research Assistant**](examples/01-simple-rag/) | Single vault, single agent. Semantic RAG over PDF, MD, TXT, DOCX with source attribution. ~100 lines.  |
-| 🔴 | [**Multi-Agent Isolation**](examples/02-multi-agent-isolation/) | Two agents, two vaults. Each agent has no retrieval path to the other's vault: isolation enforced at the infrastructure layer, not through metadata filtering. ~200 lines.|
-| 🔵 | [**Persistent Memory Agent**](examples/03-persistent-memory/) | An agent that recalls context across sessions using semantic queries. "financial constraints" retrieves "cut cloud costs by 15%" written three days prior. |
-| 🟡 | [**Composed Topology**](examples/04-composed-topology/) | Three agents, five vaults: private, shared between a subset, and public. A tiered support system where access boundaries reflect organizational boundaries. |
-| 🟣 | [**Procedural Memory Agent**](examples/05-procedural-memory-agent/) | One agent, two vault types, semantic and skill, integrated via MCP. Retrieves knowledge for *what* to say and skills for *how* to say it. | |
-| 🟠 | [**Episodic Memory Agent**](examples/06-episodic-memory/) | One account followed across six months. Facts are superseded instead of overwritten, so the briefing uses only what holds today while April is still reconstructable. | |
+<!-- --8<-- [start:examples] -->
+| # | Example | What it shows |
+|---|---------|---------------|
+| 01 | [**Single-Vault RAG**](https://github.com/Filippo-Venturini/ctxvault/tree/main/examples/01-simple-rag/) | Single vault, single agent. Semantic RAG over PDF, MD, TXT, DOCX with source attribution. ~100 lines. |
+| 02 | [**Multi-Agent Isolation**](https://github.com/Filippo-Venturini/ctxvault/tree/main/examples/02-multi-agent-isolation/) | Two agents, two vaults. Each agent has no retrieval path to the other's vault: isolation enforced at the infrastructure layer, not through metadata filtering. ~200 lines. |
+| 03 | [**Persistent Memory**](https://github.com/Filippo-Venturini/ctxvault/tree/main/examples/03-persistent-memory/) | An agent that recalls context across sessions using semantic queries. "financial constraints" retrieves "cut cloud costs by 15%" written three days prior. |
+| 04 | [**Access Control**](https://github.com/Filippo-Venturini/ctxvault/tree/main/examples/04-composed-topology/) | Three agents, five vaults: private, shared between a subset, and public. A tiered support system where access boundaries reflect organizational boundaries. |
+| 05 | [**Procedural Memory**](https://github.com/Filippo-Venturini/ctxvault/tree/main/examples/05-procedural-memory-agent/) | One agent, two vault types, semantic and skill, integrated via MCP. Retrieves knowledge for *what* to say and skills for *how* to say it. |
+| 06 | [**Episodic Memory**](https://github.com/Filippo-Venturini/ctxvault/tree/main/examples/06-episodic-memory/) | One account followed across six months. Facts are superseded instead of overwritten, so the briefing uses only what holds today while April is still reconstructable. |
+| 07 | [**Full Memory Topology**](https://github.com/Filippo-Venturini/ctxvault/tree/main/examples/07-full-memory-topology/) | Everything in one place: three agents, six vaults, all three memory types, access rules, a year of facts replayed with their dates. The capstone example, a small bakery, and the dataset behind the [live demo](https://filippo-venturini.github.io/ctxvault/demo.html). |
+<!-- --8<-- [end:examples] -->
 
 ---
 
@@ -175,12 +190,12 @@ Six scenarios, each with full code and setup instructions.
 
 **Requirements:** Python 3.10+
 
-### From PyPI
 ```bash
 pip install ctxvault
 ```
 
-### From source (uv, recommended)
+From source, with [uv](https://docs.astral.sh/uv/):
+
 ```bash
 git clone https://github.com/Filippo-Venturini/ctxvault
 cd ctxvault
@@ -188,809 +203,67 @@ uv sync            # creates .venv and installs all dependencies
 uv run ctxvault    # run the CLI
 ```
 
-### From source (pip)
-```bash
-git clone https://github.com/Filippo-Venturini/ctxvault
-cd ctxvault
-python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -e .
-```
-
 ---
 
 ## Quick Start
 
-CLI, Python client and API follow the same workflow: create a vault → add documents → index → query. Episodic vaults skip the middle two steps and record statements one at a time instead. Choose CLI for manual use, API for programmatic integration.
+<!-- --8<-- [start:quickstart] -->
+Five minutes from nothing to an agent that remembers. Run these from your project's root.
 
-### CLI Usage
-
-```bash
-# 1. Initialize a vault (run from your project root)
-ctxvault init my-vault
-
-# 2. Add your documents to the vault folder
-# Default location: .ctxvault/vaults/my-vault/
-# Drop your .txt, .md, .pdf or .docx files there
-
-# 3. Index documents
-ctxvault index my-vault
-
-# 4. Query semantically
-ctxvault query my-vault "transformer architecture"
-
-# 5. List indexed documents
-ctxvault docs my-vault
-
-# 6. List all your vaults
-ctxvault vaults
-
-# For a machine-wide vault available everywhere
-ctxvault init my-vault --global
-```
-
-An episodic vault follows a different workflow: there are no files to
-index, statements are written one at a time and corrected as they change.
+**1. Create a vault.** It is a folder, registered in `.ctxvault/config.json` next to you, like `git init`.
 
 ```bash
-# 1. Initialize an episodic vault
-ctxvault init account-memory --type episodic
-
-# 2. Record a statement, open ended until something closes it
-ctxvault write-episode account-memory "Sarah Klein is the main contact" -e "Sarah Klein" --salience 0.9
-
-# 3. Retrieve what currently holds
-ctxvault episodes account-memory --entity "Sarah Klein"
-
-# 4. Correct it when reality changes, keeping both versions linked
-ctxvault supersede account-memory <episode_id> "Marco Rossi is the main contact"
-
-# 5. Ask what was true at a past instant
-ctxvault episodes account-memory --valid-at 2026-04-10T00:00:00+00:00
-
-# 6. Follow how a statement changed over time
-ctxvault episode account-memory <episode_id> --history
+ctxvault init notes
 ```
 
-### Python Client
+**2. Give it something to know.** Drop `.md`, `.txt`, `.pdf` or `.docx` files into `.ctxvault/vaults/notes/` and index them.
 
-The same vaults, from code in the same process. Nothing to start: the client opens the vault the CLI registered and returns the same typed models the API serializes.
-
-```python
-from ctxvault import Client
-
-memory = Client(agent="briefing-bot")
-
-# Episodic memory: record, correct, ask as of any moment
-facts = memory.episodic("account-memory")
-contact = facts.write_episode("Sarah Klein is the main contact", entities=["Sarah Klein"], salience=0.9)
-facts.supersede_episode(contact.id, "Marco Rossi is the main contact", entities=["Marco Rossi"])
-facts.query_episodes(entities=["Marco Rossi"]).results        # what holds now
-facts.query_episodes(valid_at="2026-04-10T00:00:00+00:00")    # what held then
-facts.history(contact.id).chain                               # how the belief changed
-
-# Semantic and procedural memory, from the same client
-memory.semantic("knowledge").query("transformer architecture", n_results=3).results
-memory.skills("procedures").read_skill("Deploy Service").instructions
-
-# The registry, as the CLI sees it
-memory.init("notes", "episodic")
-memory.vaults()
-```
-
-`vault(name)` returns whatever type the name resolves to; `semantic`, `skills` and `episodic` insist on one type and fail before a wrong method call would. The `agent` plays the part of the `X-CtxVault-Agent` header: a restricted vault opens only for an agent attached to it.
-
-The client is for the process that owns the vault. SQLite and Chroma are built for a single writer, so two processes that must share a vault (an agent writing while a consolidation job runs) go through one HTTP server instead.
-
-### Agent Integration
-
-Give your agent **persistent semantic memory** in minutes. Start the server:
 ```bash
-uvicorn ctxvault.api.app:app
+ctxvault index notes
 ```
-Then write, store, and recall context across sessions:
-```python
-import requests
-from langchain_openai import ChatOpenAI
 
-API = "http://127.0.0.1:8000/ctxvault"
+**3. Ask it.** Retrieval is by meaning, so the words do not have to match.
 
-# 1. Create a vault
-requests.post(f"{API}/init", json={"vault_name": "agent-memory"})
-
-# 2. Agent writes what it learns to memory
-requests.post(f"{API}/write", json={
-    "vault_name": "agent-memory",
-    "filename": "session_monday.md",
-    "content": "Discussed Q2 budget: need to cut cloud costs by 15%. "
-               "Competitor pricing is 20% lower than ours."
-})
-
-# 3. Days later: query with completely different words
-results = requests.post(f"{API}/query", json={
-    "vault_name": "agent-memory",
-    "query": "financial constraints from last week",  # ← never mentioned in the doc
-    "top_k": 3
-}).json()["results"]
-
-# 4. Ground your LLM in retrieved memory
-context = "\n".join(r["text"] for r in results)
-answer = ChatOpenAI().invoke(f"Context:\n{context}\n\nQ: What are our cost targets?")
-print(answer.content)
-# → "You mentioned a 15% cloud cost reduction target, with competitor pricing 20% lower."
-```
-> **Any LLM works**: swap `ChatOpenAI` for Ollama, Anthropic, or any provider.
-> Ready to go further? See the [examples](#examples) for full RAG pipelines and multi-agent architectures, or browse the [API Reference](#api-reference) and the interactive docs at `http://127.0.0.1:8000/docs`.
-
----
-
-### MCP Integration (Claude Desktop, Cursor, and any MCP-compatible client)
-
-Give any MCP-compatible AI client direct access to your vaults, no code required. The agent handles `list_vaults`, `query`, `write`, and `list_docs` autonomously, and on an episodic vault it also records and corrects facts with `write_episode`, `query_episodes`, `supersede_episode` and `invalidate_episode`, counts repetitions with `confirm_episode`, holds contradictions open with `dispute_episodes`, and discovers what the vault is about with `list_entities`.
-
-**Install:**
 ```bash
-uv tool install ctxvault
+ctxvault query notes "what did we decide about pricing?"
 ```
 
-**Add to your `mcp.json`** (Claude Desktop: `%APPDATA%\Claude\claude_desktop_config.json`; macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`):
+**4. Give it to your agent.** The quickest way is MCP: add the server to your client's config (Claude Desktop, Cursor, any MCP client) and restart it.
+
+```bash
+uv tool install ctxvault   # puts ctxvault-mcp on your PATH
+```
+
 ```json
 {
   "mcpServers": {
-    "ctxvault": {
-      "command": "ctxvault-mcp"
-    }
+    "ctxvault": { "command": "ctxvault-mcp" }
   }
 }
 ```
 
-Restart your client. The agent can now query your existing vaults, write new context, and list available knowledge, all locally and all under your control.
+The agent can now list your vaults, query them, and write what it learns back. From your own code instead, use the [Python client](https://filippo-venturini.github.io/ctxvault/connect/python/) in-process or the [HTTP server](https://filippo-venturini.github.io/ctxvault/connect/http/).
 
-**Restricted vaults:** if you are integrating programmatically and need to access a restricted vault, pass the agent name at startup:
-```json
-{
-  "mcpServers": {
-    "ctxvault": {
-      "command": "ctxvault-mcp",
-      "args": ["--agent", "my-agent"]
-    }
-  }
-}
+**5. See what it holds.**
+
+```bash
+ctxvault ui
 ```
 
-The `--agent` argument is optional and only required for restricted vaults.
+**Next:** a [skill vault](https://filippo-venturini.github.io/ctxvault/how-it-works/memory-types/#skill-vaults) for procedures (`ctxvault init procedures --type skill`), an [episodic vault](https://filippo-venturini.github.io/ctxvault/how-it-works/memory-types/#episodic-vaults) for facts that change (`ctxvault init facts --type episodic`), and [restricted vaults](https://filippo-venturini.github.io/ctxvault/how-it-works/access-control/) so each agent reaches only its own.
+<!-- --8<-- [end:quickstart] -->
 
 ---
 
 ## Documentation
 
-### CLI Commands
-
-All commands require a vault name. Default vault location: `~/.ctxvault/vaults/<name>/`
-
----
-
-#### `init`
-Initialize a new vault. Vaults are public by default: any agent can access them.
-Pass `--restricted` to create a restricted vault, accessible only to explicitly
-attached agents. Pass `--type skill` to create a skill vault for procedural memory, or
-`--type episodic` for a bi-temporal store of statements, instead of the default
-semantic vault.
-
-```bash
-ctxvault init <name> [--type <type>] [--path <path>] [--global] [--restricted] [--embedding-model <model>]
-```
-
-**Arguments:**
-- `<name>` - Vault name (required)
-- `--type <type>` - Vault type: `semantic`, `skill` or `episodic` (optional, default: `semantic`)
-- `--path <path>` - Custom vault location (optional, default: `~/.ctxvault/vaults/<name>`)
-- `--global` - Create a global vault in ~/.ctxvault, available from anywhere on the machine
-- `--restricted` - Create vault as restricted (optional, default: public)
-- `--embedding-model <model>` - sentence-transformers model for this vault (optional). The model is pinned at init time and used for all indexing and querying on the vault. Semantic vaults default to `all-MiniLM-L6-v2`; episodic vaults have no vectors at all unless a model is set, and fall back to structured retrieval and keyword scoring. Not supported on skill vaults.
-
-
-**Example:**
-```bash
-ctxvault init my-vault                          # semantic vault (default)
-ctxvault init my-vault --type skill             # skill vault for procedural memory
-ctxvault init my-vault --type episodic          # episodic vault for statements over time
-ctxvault init my-vault --global --type skill    # global skill vault
-ctxvault init my-vault --restricted
-ctxvault init my-vault --embedding-model all-mpnet-base-v2   # custom embedding model
-```
-
----
-
-#### `attach`
-Attach an agent to a vault, granting it access. If the vault is public, attaching
-an agent automatically makes it restricted: only explicitly attached agents will
-be able to access it from that point on.
-```bash
-ctxvault attach <vault> <agent>
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required)
-- `<agent>` - Agent name (required)
-
-**Example:**
-```bash
-ctxvault attach my-vault my-agent
-```
-
----
-
-#### `detach`
-Remove an agent's access from a restricted vault.
-```bash
-ctxvault detach <vault> <agent>
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required)
-- `<agent>` - Agent name (required)
-
-**Example:**
-```bash
-ctxvault detach my-vault my-agent
-```
-
----
-
-#### `publish`
-Make a restricted vault public, removing all access restrictions and granting
-access to any agent.
-```bash
-ctxvault publish <vault>
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required)
-
-**Example:**
-```bash
-ctxvault publish my-vault
-```
-
----
-
-#### `index`
-
-Index a vault. On a **semantic** vault, this parses documents, generates embeddings, and stores them in the vector index. On a **skill** vault, this scans all .md files, reads their frontmatter, and rebuilds the skill index. **Episodic** vaults have no files to index and reject the command.
-
-```bash
-ctxvault index <vault> [--path <path>]
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required)
-- `--path <path>` - Specific file or directory to index (optional, default: entire vault)
-
-**Example:**
-```bash
-ctxvault index my-vault
-ctxvault index my-vault --path docs/papers/
-```
-
----
-
-#### `query`
-Perform semantic search on a **semantic** vault.
-```bash
-ctxvault query <vault> <text> [--limit <n>]
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required)
-- `<text>` - Search query (required)
-- `--limit <n>`, `-n <n>` - Number of chunks to return (optional, default: `5`)
-
-**Example:**
-```bash
-ctxvault query my-vault "attention mechanisms"
-ctxvault query my-vault "attention mechanisms" --limit 20
-```
-
----
-
-#### `docs`
-List all indexed documents in a **semantic** vault.
-```bash
-ctxvault docs <vault>
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required)
-
-**Example:**
-```bash
-ctxvault docs my-vault
-```
-```
-Found 2 documents in 'my-vault'
-
-  1. paper.pdf
-     .pdf · 12 chunks
-
-  2. notes.md
-     .md · 3 chunks
-```
-
----
-
-#### `skills`
-
-List all indexed skills in a skill vault.
-
-```bash
-ctxvault skills <vault>
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required, must be a skill vault)
-
-**Example:**
-```bash
-ctxvault skills comms-skills
-```
-```
-Found 3 skills in 'comms-skills'
-
-  1. Weekly Engineering Update
-     Type: Skill (.md) · Last Mod: 2026-03-15T10:30:00
-     Description: How to write the weekly engineering status update for stakeholders
-
-  2. Company Newsletter Contribution
-     Type: Skill (.md) · Last Mod: 2026-03-15T10:30:00
-     Description: How to write an engineering section for the monthly company newsletter
-
-  3. FAQ Response
-     Type: Skill (.md) · Last Mod: 2026-03-15T10:30:00
-     Description: How to write answers to frequently asked questions from employees
-```
-
----
-
-#### `skill`
-
-Read a specific skill from a skill vault, displaying its name, description, metadata, and full instructions.
-
-```bash
-ctxvault skill <vault> <skill_name>
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required, must be a skill vault)
-- `<skill_name>` - Skill name as defined in the frontmatter (required)
-
-**Example:**
-```bash
-ctxvault skill comms-skills "Weekly Engineering Update"
-```
-```
-----------------------------------------------------------------------------------------------------
-SKILL: Weekly Engineering Update
-Description: How to write the weekly engineering status update for stakeholders
-----------------------------------------------------------------------------------------------------
-
-You are writing the weekly engineering update...
-
-## Required structure
-...
-
-## Hard rules
-- Never exceed 250 words.
-- Never start with a greeting.
-```
-
----
-
-#### `write-episode`
-Record a statement in an **episodic** vault. The episode is open-ended unless a
-`--valid-to` is given: it holds from now until something closes it.
-
-```bash
-ctxvault write-episode <vault> <content> [--entity <name>]... [--source <who>] [--salience <0-1>] [--confidence <0-1>] [--occurred-at <iso>] [--valid-from <iso>] [--valid-to <iso>]
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required)
-- `<content>` - The statement to record (required)
-- `--entity <name>`, `-e <name>` - An entity the statement is about; repeatable, and the main way episodes get looked up later
-- `--source <who>` - Who or what reported it
-- `--salience <0-1>` - How much this matters (optional, default: `0.5`)
-- `--confidence <0-1>` - How sure the writer is (optional, default: `1.0`)
-- `--occurred-at <iso>` - When the event happened, if it differs from when validity starts
-- `--valid-from <iso>` / `--valid-to <iso>` - Explicit validity window
-
-**Example:**
-```bash
-ctxvault write-episode memories "Anna studies literature in Bologna" -e Anna --source conversation --salience 0.8
-```
-
----
-
-#### `episodes`
-Query an **episodic** vault. By default only statements that still hold are
-returned, ranked by recency, or by relevance when a query text is given.
-
-```bash
-ctxvault episodes <vault> [text] [--entity <name>]... [--valid-at <iso>] [--known-at <iso>] [--all] [--disputed] [--order-by <mode>] [--limit <n>] [--stats] [--entities]
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required)
-- `[text]` - Optional query text; ranks results by similarity, or by keyword overlap on a vault without an embedding model
-- `--entity <name>`, `-e <name>` - Only episodes about this entity; repeatable
-- `--source <who>` - Only episodes from this source
-- `--valid-at <iso>` - What was true in the world at that instant
-- `--known-at <iso>` - What the vault had already recorded by that instant
-- `--all` - Include closed episodes
-- `--disputed` - Only episodes in an open dispute with another one (see `dispute`)
-- `--order-by <mode>` - `relevance`, `recency`, `salience` or `composite` (a blend of the three)
-- `--limit <n>`, `-n <n>` - Maximum results (optional, default: `10`)
-- `--stats` - Print counts instead of episodes
-- `--entities` - List the vault's entities and how often each is mentioned, instead of episodes. Honours `--all` and `--valid-at`
-- `--min-episodes <n>` - With `--entities`, hide entities mentioned fewer than `n` times
-
-**Example:**
-```bash
-ctxvault episodes memories --entity Anna
-ctxvault episodes memories --entity Anna --valid-at 2026-05-01T00:00:00+00:00   # what was true in May
-ctxvault episodes memories "university" --order-by composite
-ctxvault episodes memories --stats
-ctxvault episodes memories --entities                                       # what subjects exist at all
-```
-
----
-
-#### `episode`
-Read a single episode, or the whole chain of versions it belongs to.
-
-```bash
-ctxvault episode <vault> <episode_id> [--history]
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required)
-- `<episode_id>` - Episode id (required)
-- `--history` - Print every version of the statement, oldest first
-
-**Example:**
-```bash
-ctxvault episode memories 6f1c... --history
-```
-
----
-
-#### `invalidate`
-Close an episode: the statement stops holding, but is never deleted and stays
-reachable with `--all`, `--valid-at` or `--history`.
-
-```bash
-ctxvault invalidate <vault> <episode_id> [--valid-to <iso>] [--reason <text>]
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required)
-- `<episode_id>` - Episode id (required)
-- `--valid-to <iso>` - When it stopped holding (optional, default: now). Learning late that something ended in the past is the normal case
-- `--reason <text>` - Why it was closed; stored in the episode metadata
-
-**Example:**
-```bash
-ctxvault invalidate memories 6f1c... --valid-to 2026-07-12T00:00:00+00:00 --reason "the dog died"
-```
-
----
-
-#### `supersede`
-Replace an episode with a corrected version. The old statement closes exactly
-where the new one opens, in one transaction, and the two stay linked.
-
-```bash
-ctxvault supersede <vault> <episode_id> <content> [--entity <name>]... [--source <who>] [--salience <0-1>] [--valid-from <iso>]
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required)
-- `<episode_id>` - Episode being replaced (required)
-- `<content>` - The corrected statement (required)
-- `--entity <name>`, `-e <name>` - Entities of the new statement; repeatable. Defaults to the superseded episode's entities
-- `--source <who>` - Who reported the correction
-- `--salience <0-1>` - Defaults to the superseded episode's salience
-- `--valid-from <iso>` - The boundary between the two versions (optional, default: now)
-
-**Example:**
-```bash
-ctxvault supersede memories 6f1c... "Anna studies literature in Milan" -e Anna --valid-from 2026-09-01T00:00:00+00:00
-```
-
----
-
-#### `revise`
-Restate an open episode more precisely, when the world did not change but
-the wording can be said better: "lives in Padova" becomes "lives in Padova,
-in the Arcella". Unlike `supersede`, nothing changes in valid time: the
-revision opens where the original did and inherits its attestations, its
-entities, its salience and its metadata, and any dispute still open against
-it. The original is closed in transaction time only, with
-`invalidation_reason: revised`: it is no longer what the vault states, it
-stays in the history, and a query with `--known-at` before the revision
-still finds it.
-
-```bash
-ctxvault revise <vault> <episode_id> <content> [--entity <name>]... [--source <who>] [--salience <0-1>]
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required)
-- `<episode_id>` - Episode being restated (required); must still be open
-- `<content>` - The more precise statement (required)
-- `--entity <name>`, `-e <name>` - Entities of the revision; repeatable. Defaults to the original's
-- `--source <who>` - Who restated it. Defaults to the original's source
-- `--salience <0-1>` - Defaults to the original's salience
-
-**Example:**
-```bash
-ctxvault revise memories 6f1c... "Anna studies literature in Milan, at the Statale"
-```
-
----
-
-#### `confirm`
-Record that an open statement was asserted again. The episode is left as it
-is and gains one attestation; `confirmed_count` and `last_confirmed_at` are
-read from those, as of `--known-at` when a query asks for a past instant. Use
-it when you hear something the vault already holds, instead of writing it a
-second time.
-
-```bash
-ctxvault confirm <vault> <episode_id> [--at <iso>] [--source <who>]
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required)
-- `<episode_id>` - Episode id (required); must still be open
-- `--at <iso>` - When it was reasserted (optional, default: now); cannot precede the episode's `valid_from`
-- `--source <who>` - Who reasserted it (optional)
-
-**Example:**
-```bash
-ctxvault confirm memories 6f1c... --source conversation
-```
-
----
-
-#### `dispute`
-Record that two open statements cannot both hold, when nobody can yet say
-which is wrong. Neither is closed: both keep coming back from queries, each
-listing the other in `disputed_with`. The dispute lasts exactly as long as
-both episodes stay open, so it is resolved by `invalidate` or `supersede` on
-one of them and needs no command of its own to end; a `revise` of either
-side carries the dispute over to the revision. `episodes --disputed`
-lists what is still unsettled.
-
-```bash
-ctxvault dispute <vault> <episode_id> <other_id> [--note <text>]
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required)
-- `<episode_id>`, `<other_id>` - The two episodes (required); both must still be open
-- `--note <text>` - Why they cannot both hold (optional)
-
-**Example:**
-```bash
-ctxvault dispute memories 6f1c... 9a2d... --note "one says Bologna, the other Padova"
-ctxvault episodes memories --disputed
-```
-
----
-
-#### `delete`
-Remove documents from a vault or delete the vault entirely.
-```bash
-ctxvault delete <vault> [--path <path>] [--purge]
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required)
-- `--path <path>` - File or directory path to delete, relative to the vault root (optional, deletes all documents if omitted)
-- `--purge` - Permanently delete the vault, all its documents and indexes (cannot be used together with `--path`)
-
-**Examples:**
-```bash
-ctxvault delete my-vault                        # removes all documents and indexes
-ctxvault delete my-vault --path paper.pdf       # removes a specific document
-ctxvault delete my-vault --purge                # removes the vault entirely
-```
-
----
-
-#### `reindex`
-Re-index documents in a **semantic** vault.
-```bash
-ctxvault reindex <vault> [--path <path>]
-```
-
-**Arguments:**
-- `<vault>` - Vault name (required)
-- `--path <path>` - Specific file or directory to re-index (optional, default: entire vault)
-
-**Example:**
-```bash
-ctxvault reindex my-vault
-ctxvault reindex my-vault --path docs/
-```
-
----
-
-#### `vaults`
-List all vaults with their paths, types, and access configuration.
-
-```bash
-ctxvault vaults
-```
-
-**Example:**
-```bash
-ctxvault vaults
-```
-```
-Found 3 vaults (1 local, 2 global)
-
-── local ──────────────────────────
-  project-vault       [SEMANTIC] [PUBLIC]
-  path:               /my-project/.ctxvault/vaults/project-vault
-
-── global ─────────────────────────
-  atlas-vault         [SEMANTIC] [RESTRICTED]  agents: atlas-agent
-  path:               ~/.ctxvault/vaults/atlas-vault
-
-  comms-skills        [SKILL]    [PUBLIC]
-  path:               ~/.ctxvault/vaults/comms-skills
-
-  account-memory      [EPISODIC] [PUBLIC]
-  path:               ~/.ctxvault/vaults/account-memory
-```
-
----
-
-**Vault management:**
-- By default, `ctxvault init` creates a local vault pinned to the current directory,
-  similar to how `git init` works. A `.ctxvault/` folder is created in the current
-  directory containing `config.json` and the vault data. Commit `config.json` to make
-  the setup portable and reproducible across machines.
-- Use `--path` to store vault data in a custom location. The `.ctxvault/` config folder
-  always stays in the current directory regardless of `--path`.
-- Use `--global` for machine-wide vaults stored in `~/.ctxvault`, accessible from
-  anywhere without being tied to a project.
-- Config lookup: CtxVault searches for a local config from the current directory upward,
-  then falls back to `~/.ctxvault`. This means you can run any command from anywhere
-  inside a project and it will find your local vaults automatically.
-- Global vaults are always visible alongside local ones. If a local and global vault
-  share the same name, the local one takes precedence.
-
-**Access control:**
-- Vaults are public by default: any agent can access them
-- `init --restricted` or `attach` make a vault restricted
-- Once restricted, only explicitly attached agents can access it
-- `publish` reverts a restricted vault to public
-- Access is enforced server-side on every request, not in application code
-
-**Vault types:**
-- CtxVault supports three vault types, reflecting the distinction between semantic, procedural and episodic memory
-- A **semantic vault** (`--type semantic`, default) stores documents and a vector index for retrieval by meaning
-- A **skill vault** (`--type skill`) stores natural-language procedures that shape agent behavior
-- An **episodic vault** (`--type episodic`) stores statements with a validity window, superseded rather than overwritten when they change
-- All three types support the same access control and topology primitives
-
-| Command         | Semantic vault | Skill vault | Episodic vault |
-|-----------------|----------------|-------------|----------------|
-| `init`          | ✓              | ✓           | ✓              |
-| `index`         | ✓              | ✓           | ✗              |
-| `query`         | ✓              | ✗           | ✗              |
-| `docs`          | ✓              | ✗           | ✗              |
-| `skills`        | ✗              | ✓           | ✗              |
-| `skill`         | ✗              | ✓           | ✗              |
-| `write-episode` | ✗              | ✗           | ✓              |
-| `episodes`      | ✗              | ✗           | ✓              |
-| `episode`       | ✗              | ✗           | ✓              |
-| `invalidate`    | ✗              | ✗           | ✓              |
-| `supersede`     | ✗              | ✗           | ✓              |
-| `reindex`       | ✓              | ✗           | ✗              |
-| `delete`        | ✓              | ✗           | ✗              |
-| `vaults`        | ✓              | ✓           | ✓              |
-| `attach`        | ✓              | ✓           | ✓              |
-| `detach`        | ✓              | ✓           | ✓              |
-| `publish`       | ✓              | ✓           | ✓              |
-
-An episodic vault holds rows rather than files, so the file oriented commands
-do not apply to it: there is nothing to index, reindex or delete on disk.
-
-Skills are `.md` files with YAML frontmatter defining the skill's name and description, followed by the instructions in markdown. You can create them manually or let an agent write them via the API or MCP server.
-
-```markdown
----
-name: Weekly Engineering Update
-description: How to write the weekly engineering status update for stakeholders
----
-
-You are writing the weekly engineering update...
-
-## Required structure
-...
-
-## Hard rules
-- Never exceed 250 words.
-- Never start with a greeting.
-```
-
-Drop the file into a skill vault and run `ctxvault index <vault>` and the skill is immediately available to any agent that queries the vault.
-
----
-
----
-
-### API Reference
-
-**Base URL:** `http://127.0.0.1:8000/ctxvault`
-
-**Semantic vault endpoints:**
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/query` | POST | Semantic search on a semantic vault |
-| `/docs` | GET | List indexed documents in a semantic vault |
-| `/docs/write` | POST | Write and index a new document |
-| `/delete` | DELETE | Remove document from a semantic vault |
-| `/reindex` | PUT | Re-index documents in a semantic vault |
-
-**Skill vault endpoints:**
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/skills` | GET | List available skills in a skill vault |
-| `/skill` | GET | Read a skill's instructions |
-| `/skills/write` | POST | Write a new skill to a skill vault |
-
-**Episodic vault endpoints:**
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/episodes/write` | POST | Record an episode |
-| `/episodes/query` | POST | Retrieve episodes by entity, validity, source and ranking |
-| `/episodes` | GET | Episode counts for a vault |
-| `/episodes/entities` | GET | List the entities a vault knows, with their episode counts |
-| `/episodes/{episode_id}` | GET | Read a single episode |
-| `/episodes/{episode_id}/history` | GET | Read the supersession chain |
-| `/episodes/{episode_id}/invalidate` | POST | Close an episode |
-| `/episodes/{episode_id}/supersede` | POST | Replace an episode with a corrected one |
-
-**Shared endpoints:**
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/index` | PUT | Index entire vault or specific path |
-| `/vaults` | GET | List all initialized vaults |
-
-**Agent authorization:**
-
-Requests to restricted vaults require the `X-CtxVault-Agent` header. The value must match an agent name attached to that vault via `ctxvault attach`. Requests without the header, or with an unrecognized agent name, return `403`.
-```http
-X-CtxVault-Agent: my-agent
-```
-```python
-requests.post("http://127.0.0.1:8000/ctxvault/query",
-    headers={"X-CtxVault-Agent": "my-agent"},
-    json={"vault_name": "my-vault", "query": "attention mechanisms", "top_k": 3}
-)
-```
-
-Requests to public vaults do not require the header. `/index` and `/vaults` never require it.
-
-**Interactive documentation:** Start the server and visit `http://127.0.0.1:8000/docs`
+The full reference lives on the [documentation site](https://filippo-venturini.github.io/ctxvault/):
+
+- [Quick start](https://filippo-venturini.github.io/ctxvault/get-started/quick-start/): from nothing to an agent that remembers.
+- Connect an agent [from Python](https://filippo-venturini.github.io/ctxvault/connect/python/), [over HTTP](https://filippo-venturini.github.io/ctxvault/connect/http/) or [through MCP](https://filippo-venturini.github.io/ctxvault/connect/mcp/): the three setups, each with its own configuration.
+- How it works: [memory types](https://filippo-venturini.github.io/ctxvault/how-it-works/memory-types/), [local and global vaults](https://filippo-venturini.github.io/ctxvault/how-it-works/local-and-global/) and [access control](https://filippo-venturini.github.io/ctxvault/how-it-works/access-control/).
+- [Memory viewer](https://filippo-venturini.github.io/ctxvault/memory-viewer/): what `ctxvault ui` shows, snapshots, and who can open it.
+- Reference: the [CLI](https://filippo-venturini.github.io/ctxvault/reference/cli/), the [HTTP API](https://filippo-venturini.github.io/ctxvault/reference/http-api/) and the [MCP tools](https://filippo-venturini.github.io/ctxvault/reference/mcp/).
 
 ---
 
@@ -1054,13 +327,12 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## Security
 
 [![MseeP.ai Security Assessment](https://mseep.net/pr/filippo-venturini-ctxvault-badge.png)](https://mseep.ai/app/filippo-venturini-ctxvault)
-[![Verified on MseeP](https://mseep.ai/badge.svg)](https://mseep.ai/app/2f4c1ef5-2f5d-4b22-af46-259206879fc0)
 
 ---
 
 ## Acknowledgments
 
-Built with [ChromaDB](https://www.trychroma.com/), [LangChain](https://www.langchain.com/) and [FastAPI](https://fastapi.tiangolo.com/).
+Built on [Chroma](https://www.trychroma.com/) for vector storage, [Sentence Transformers](https://www.sbert.net/) for embeddings, [FastAPI](https://fastapi.tiangolo.com/) for the HTTP API, the [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) for the MCP server and [Typer](https://typer.tiangolo.com/) for the CLI. The memory viewer is built with [Preact](https://preactjs.com/) and [htm](https://github.com/developit/htm), and the documentation with [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/). The examples use [LangChain](https://www.langchain.com/).
 
 ---
 
