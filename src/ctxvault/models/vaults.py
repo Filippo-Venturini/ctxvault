@@ -38,5 +38,6 @@ class SkillOutput(BaseModel):
     name: str
     description: str
     instructions: str
-    metadata: str | None
+    # frontmatter fields beyond name and description, as the author wrote them
+    metadata: dict | None
     path: Path

@@ -18,8 +18,14 @@ def mock_chroma(monkeypatch):
         "ctxvault.core.embedding.embed_list",
         lambda chunks, model_name=None: [[0.1] * 384] * len(chunks),
     )
+    # no model is loaded in tests: a chunk is 400 words with 100 of overlap
+    monkeypatch.setattr(
+        "ctxvault.core.embedding.token_budget",
+        lambda model_name=None: (lambda text: len(text.split()), 400, 100),
+    )
 
     mock_collection = MagicMock()
+    mock_collection.metadata = {"hnsw:space": "cosine"}
     mock_collection.upsert = MagicMock()
     mock_collection.delete = MagicMock()
     mock_collection.query = MagicMock(
@@ -67,7 +73,8 @@ def mock_chroma(monkeypatch):
     )
 
     mock_client = MagicMock()
-    mock_client.get_or_create_collection = MagicMock(return_value=mock_collection)
+    mock_client.get_collection = MagicMock(return_value=mock_collection)
+    mock_client.create_collection = MagicMock(return_value=mock_collection)
 
     monkeypatch.setattr(
         "ctxvault.storage.chroma_store.PersistentClient",
@@ -80,7 +87,7 @@ def mock_chroma(monkeypatch):
 def mock_global_config(tmp_path, monkeypatch):
     config_dir = tmp_path / ".ctxvault"
     monkeypatch.setattr("ctxvault.utils.config.GLOBAL_DIR", config_dir)
-    monkeypatch.setattr("ctxvault.utils.config._find_local_root", lambda: None)
+    monkeypatch.setattr("ctxvault.utils.config.find_local_root", lambda: None)
     monkeypatch.chdir(tmp_path)
     return config_dir
 

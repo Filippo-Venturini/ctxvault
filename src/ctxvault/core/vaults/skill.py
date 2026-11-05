@@ -1,4 +1,5 @@
 import json
+import warnings
 from pathlib import Path
 from ctxvault.core.exceptions import SkillNotFoundError
 from ctxvault.models.vaults import SkillInput, SkillOutput, VaultOperation
@@ -66,12 +67,17 @@ class SkillVault(BaseVault):
             raise SkillNotFoundError(f"Skill '{skill_name}' not found.")
         
         file_path = self.vault_path / entry["file"]
+        if not file_path.is_file():
+            raise SkillNotFoundError(f"Skill '{skill_name}' is in the index but its file {entry['file']} is gone; run `ctxvault index` to drop it.")
         post = frontmatter.load(file_path)
+        # whatever the author put in the frontmatter beyond the two fields the
+        # library reads: the skill's own metadata, shown as written
+        extra = {k: v for k, v in post.metadata.items() if k not in ("name", "description")}
         return SkillOutput(
             name=entry["name"],
             description=entry["description"],
             instructions=post.content,
-            metadata=None,
+            metadata=extra or None,
             path=file_path
         )
 
@@ -96,6 +102,10 @@ class SkillVault(BaseVault):
         result = []
         for entry in index.values():
             file_path = self.vault_path / entry["file"]
+            if not file_path.is_file():
+                # removed by hand since the last `index`: said, and skipped
+                warnings.warn(f"Skill '{entry['name']}' is in the index but its file {entry['file']} is gone; run `ctxvault index` to drop it.")
+                continue
             stats = file_path.stat()
             result.append(SkillDocumentInfo(
                 source=entry["file"],
@@ -103,6 +113,8 @@ class SkillVault(BaseVault):
                 size_bytes=stats.st_size,
                 skill_name=entry["name"],
                 description=entry["description"],
-                last_modified=datetime.fromtimestamp(stats.st_mtime).isoformat()
+                # aware, in the machine's zone: every other timestamp the
+                # library hands out carries its offset
+                last_modified=datetime.fromtimestamp(stats.st_mtime).astimezone().isoformat()
             ))
         return result

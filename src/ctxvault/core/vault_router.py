@@ -1,12 +1,14 @@
-from ctxvault.core.exceptions import VaultTypeNotValidError
+from pathlib import Path
+
+from ctxvault.core.exceptions import VaultPathMissingError, VaultTypeNotValidError
 from ctxvault.core.vaults.episodic import EpisodicVault
 from ctxvault.core.vaults.semantic import SemanticVault
 from ctxvault.core.vaults.skill import SkillVault
-from ctxvault.models.documents import SemanticDocumentInfo, SkillDocumentInfo, DocumentContent
+from ctxvault.models.documents import SemanticDocumentInfo, SkillDocumentInfo, DocumentContent, VaultStatus
 from ctxvault.models.episodes import Episode, EpisodeHistory, EpisodeQueryResult, VaultEntity
 from ctxvault.models.query_result import QueryResult
 from ctxvault.models.vaults import SkillOutput, SkillInput, VaultOperation, VaultType
-from ctxvault.utils.config import create_vault, get_vault_config, get_vaults
+from ctxvault.utils.config import create_vault, delete_vault, get_vault_config, get_vaults
 
 # Explicit, and deliberately not a default: a vault whose type this version does
 # not know must fail loudly. Falling back to semantic would silently open an
@@ -30,6 +32,15 @@ def open_vault(vault_name: str) -> SemanticVault | SkillVault | EpisodicVault:
         raise VaultTypeNotValidError(
             f"Vault '{vault_name}' has unknown type '{vault_type}'. "
             f"Known types: {', '.join(_VAULT_CLASSES)}."
+        )
+
+    # The stores create what they miss (SQLite its file, Chroma its folder), so
+    # a vault whose folder was deleted, moved or sits on an unmounted disk
+    # would reopen empty. It is checked here, before any store is touched.
+    vault_path = config.get("vault_path")
+    if vault_path and not Path(vault_path).is_dir():
+        raise VaultPathMissingError(
+            f"Vault '{vault_name}' is registered at {vault_path}, but that folder does not exist."
         )
 
     return vault_class(vault_name, config)
@@ -63,7 +74,12 @@ def make_public(vault_name: str) -> None:
     vault.make_public()
 
 def purge_vault(vault_name: str) -> None:
-    vault = open_vault(vault_name=vault_name)
+    try:
+        vault = open_vault(vault_name=vault_name)
+    except VaultPathMissingError:
+        # Nothing left on disk to open; the registration can still be removed.
+        delete_vault(vault_name)
+        return
     vault.purge_vault()
 
 def init_vault(vault_name: str, vault_type: str | VaultType = VaultType.SEMANTIC, restricted: bool = False, path: str | None = None, global_vault: bool = False, embedding_model: str | None = None)-> tuple[str, str]:
@@ -95,6 +111,16 @@ def reindex_files(vault_name: str, path: str | None = None)-> tuple[list[str], l
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.REINDEX)
     return vault.reindex_files(path=path)
+
+def index_status(vault_name: str) -> VaultStatus:
+    vault = open_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.REINDEX)
+    return vault.status()
+
+def sync_index(vault_name: str) -> tuple[list[str], list[str], list[str]]:
+    vault = open_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.REINDEX)
+    return vault.sync_index()
 
 def write_doc(vault_name: str, file_path: str, content: str, overwrite: bool = True, agent_metadata: dict | None = None)-> None:
     vault = open_vault(vault_name=vault_name)
@@ -139,15 +165,21 @@ def get_episode(vault_name: str, episode_id: str)-> Episode:
     vault._require_operation(VaultOperation.READ_EPISODE)
     return vault.get_episode(episode_id=episode_id)
 
+def list_metadata_values(vault_name: str, key: str, **kwargs) -> list[dict]:
+    vault = open_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.QUERY_EPISODES)
+    return vault.list_metadata_values(key, **kwargs)
+
 def query_episodes(vault_name: str, text: str | None = None, **kwargs)-> EpisodeQueryResult:
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.QUERY_EPISODES)
     return vault.query_episodes(text=text, **kwargs)
 
-def invalidate_episode(vault_name: str, episode_id: str, valid_to: str | None = None, reason: str | None = None)-> Episode:
+def invalidate_episode(vault_name: str, episode_id: str, valid_to: str | None = None, reason: str | None = None,
+                       at: str | None = None)-> Episode:
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.INVALIDATE_EPISODE)
-    return vault.invalidate_episode(episode_id=episode_id, valid_to=valid_to, reason=reason)
+    return vault.invalidate_episode(episode_id=episode_id, valid_to=valid_to, reason=reason, at=at)
 
 def supersede_episode(vault_name: str, episode_id: str, content: str, **kwargs)-> Episode:
     vault = open_vault(vault_name=vault_name)

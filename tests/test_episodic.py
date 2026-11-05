@@ -124,7 +124,7 @@ class TestImpossibleWindows:
             )
 
         assert vault_router.get_episode(vault_name=VAULT, episode_id=episode.id).superseded_by is None
-        assert vault_router.episode_stats(vault_name=VAULT) == {"total": 1, "open": 1, "closed": 0}
+        assert vault_router.episode_stats(vault_name=VAULT) == {"total": 1, "open": 1, "closed": 0, "holding": 1, "disputes": 0}
 
 class TestSupersede:
     def test_old_closes_exactly_where_new_opens(self, mock_episodic_vault_config):
@@ -213,6 +213,40 @@ class TestTimeTravel:
 
         assert [e.content for e in past] == ["Anna studies in Bologna"]
         assert [e.content for e in present] == ["Anna studies in Milan"]
+
+    def test_an_end_recorded_later_was_not_yet_known_and_an_end_is_not_a_retraction(self, mock_episodic_vault_config):
+        from ctxvault.core import vault_router as router
+        from ctxvault.storage import sqlite_store
+        episode = write("Giuseppe lives in Mestre", valid_from="2026-01-01T00:00:00+00:00")
+        # recorded in January; the vault learns today that it ended in February
+        conn = sqlite_store.get_connection(router.open_vault(VAULT).config)
+        with conn:
+            conn.execute("UPDATE episodes SET recorded_at = ? WHERE id = ?", ("2026-01-01T00:00:00+00:00", episode.id))
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=episode.id, valid_to="2026-02-01T00:00:00+00:00")
+
+        march = "2026-03-01T00:00:00+00:00"
+        # as the vault stood in March, nothing had ended: the statement was open
+        assert [e.id for e in query(valid_at=march, known_at=march)] == [episode.id]
+        # as the vault stands today, it had ended in February
+        assert query(valid_at=march) == []
+        # and today the vault still holds that it was true in January: ended, not retracted
+        january = "2026-01-15T00:00:00+00:00"
+        assert [e.id for e in query(valid_at=january, known_at=days_from_now(1))] == [episode.id]
+
+    def test_history_can_be_replayed_with_its_own_recording_times(self, mock_episodic_vault_config):
+        from ctxvault.core import vault_router as router
+        march, june, september = "2026-03-01T00:00:00+00:00", "2026-06-01T00:00:00+00:00", "2026-09-01T00:00:00+00:00"
+        plan = write("On the Trial plan", valid_from=march, recorded_at=march)
+        pro = router.supersede_episode(VAULT, plan.id, "On the Pro plan", at=june, valid_from=june)
+        precise = router.revise_episode(VAULT, pro.id, "On the Pro plan, billed yearly", at=september)
+        router.invalidate_episode(VAULT, precise.id, at="2026-10-01T00:00:00+00:00")
+
+        assert plan.recorded_at == march and pro.recorded_at == june and precise.recorded_at == september
+        assert router.get_episode(VAULT, plan.id).invalidated_at == june
+        assert router.get_episode(VAULT, pro.id).invalidated_at == september
+        assert router.get_episode(VAULT, precise.id).invalidated_at == "2026-10-01T00:00:00+00:00"
+        # as the vault stood in July: the Pro plan, as first stated
+        assert [e.id for e in query(valid_at="2026-07-01T00:00:00+00:00", known_at="2026-07-01T00:00:00+00:00")] == [pro.id]
 
     def test_known_at_hides_what_had_not_been_recorded_yet(self, mock_episodic_vault_config):
         write("Giuseppe lives in Mestre", valid_from="2020-01-01T00:00:00+00:00")
@@ -546,7 +580,7 @@ class TestDispute:
         assert disputed.valid_from == mestre.valid_from
         assert disputed.recorded_at == mestre.recorded_at
         assert disputed.metadata == {}
-        assert vault_router.episode_stats(vault_name=VAULT) == {"total": 2, "open": 2, "closed": 0}
+        assert vault_router.episode_stats(vault_name=VAULT) == {"total": 2, "open": 2, "closed": 0, "holding": 2, "disputes": 1}
 
     def test_recording_the_same_pair_twice_is_harmless(self, mock_episodic_vault_config):
         mestre = write("Giuseppe lives in Mestre")
@@ -658,7 +692,47 @@ class TestVaultContract:
         write("Also true")
         vault_router.invalidate_episode(vault_name=VAULT, episode_id=first.id)
 
-        assert vault_router.episode_stats(vault_name=VAULT) == {"total": 2, "open": 1, "closed": 1}
+        assert vault_router.episode_stats(vault_name=VAULT) == {"total": 2, "open": 1, "closed": 1, "holding": 1, "disputes": 0}
+
+    def test_the_distinct_values_of_a_metadata_key_can_be_listed(self, mock_episodic_vault_config):
+        from ctxvault.core import vault_router as router
+        write("Pill at 8", metadata={"card": "health"})
+        closed = write("Lived in Mestre", metadata={"card": "home"})
+        write("Likes coffee", metadata={"card": "habits", "tags": ["a", "b"]})
+        write("Reads", metadata={"card": "habits"})
+        write("No card")
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=closed.id)
+
+        now = router.list_metadata_values(VAULT, "card")
+        everything = router.list_metadata_values(VAULT, "card", include_closed=True)
+
+        assert [(v["value"], v["episode_count"]) for v in now] == [("habits", 2), ("health", 1)]
+        assert [(v["value"], v["episode_count"]) for v in everything] == [("habits", 2), ("health", 1), ("home", 1)]
+        assert router.list_metadata_values(VAULT, "tags") == [{"value": '["a","b"]', "episode_count": 1}]
+        assert router.list_metadata_values(VAULT, "nothing") == []
+
+    def test_stats_tell_open_rows_from_what_holds_now(self, mock_episodic_vault_config):
+        # open is the row's own state; holding is what a default query returns
+        write("Starts next century", valid_from="2099-01-01T00:00:00+00:00")
+        a = write("Pill at 8")
+        b = write("Pill in the evening")
+        vault_router.dispute_episodes(vault_name=VAULT, episode_id=a.id, other_id=b.id)
+
+        stats = vault_router.episode_stats(vault_name=VAULT)
+
+        assert stats["open"] == 3 and stats["holding"] == 2 and stats["disputes"] == 1
+
+    def test_the_whole_vault_can_be_read_without_the_scan_limit(self, mock_episodic_vault_config):
+        from ctxvault.core import vault_router as router
+        from ctxvault.storage import sqlite_store
+        for i in range(3):
+            write(f"fact {i}")
+        vault = router.open_vault(VAULT)
+
+        assert len(sqlite_store.select_episodes(vault.config, include_closed=True, scan_limit=2)) == 2
+        assert len(sqlite_store.select_episodes(vault.config, include_closed=True, scan_limit=None)) == 3
+        assert len(vault.all_episodes()) == 3
+        assert len(vault.changes()) == 3                 # three recordings, nothing else yet
 
 class TestSchemaVersioning:
     def test_version_is_stamped_on_creation(self, mock_episodic_vault_config):
@@ -788,7 +862,7 @@ class TestRevise:
         # Before the revision was recorded, the original was the belief.
         before = query(entities=["Anna"], known_at=first.recorded_at)
         assert [e.id for e in before] == [first.id]
-        assert vault_router.episode_stats(vault_name=VAULT) == {"total": 2, "open": 1, "closed": 1}
+        assert vault_router.episode_stats(vault_name=VAULT) == {"total": 2, "open": 1, "closed": 1, "holding": 1, "disputes": 0}
 
     def test_an_open_dispute_follows_the_revision(self, mock_episodic_vault_config):
         bologna = write("Anna lives in Bologna", entities=["Anna"])

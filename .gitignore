@@ -205,6 +205,13 @@ TODO_CLI.md
 TODO_API.md
 
 chroma/
+# episodic stores built by the examples' app.py
+episodes.db
+episodes.db-wal
+episodes.db-shm
 
 assistant-memory/
 
+
+# mkdocs build output
+site/

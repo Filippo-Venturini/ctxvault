@@ -1,7 +1,5 @@
 from pypdf import PdfReader
 from docx import Document
-import markdown
-from strip_tags import strip_tags
 from pathlib import Path, PurePosixPath
 from ctxvault.core.exceptions import UnsupportedFileTypeError, ExtractionError
 import hashlib
@@ -17,10 +15,13 @@ def _extract_from_txt(path: str)->str:
         raise ExtractionError(f"Failed to extract .txt {path}: {e}")
 
 def _extract_from_md(path: str)->str:
+    # Markdown goes to the chunker as written: the headings are what it
+    # splits on and what it prefixes each section with, and the agent reads
+    # markdown as well as anyone. Rendering it to HTML and stripping the tags
+    # threw the headings away before the chunker ever saw them.
     try:
         with open(file=path, mode='r', encoding='utf-8') as f:
-            md_content = markdown.markdown(f.read())
-        return strip_tags(input=md_content).strip()
+            return f.read()
     except Exception as e:
         raise ExtractionError(f"Failed to extract .md {path}: {e}")
 
@@ -47,7 +48,7 @@ def extract_text(path: str)-> tuple[str, str]:
 
     if suffix not in SUPPORTED_EXT:
         raise UnsupportedFileTypeError(f"Unsupported file type: {suffix}")
-    
+
     if suffix == '.txt':
         return _extract_from_txt(path=path), suffix
     elif suffix == '.md':

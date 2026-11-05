@@ -1,4 +1,5 @@
 from pathlib import Path
+import copy
 import json
 import shutil
 from ctxvault.core.exceptions import VaultAlreadyExistsError, VaultNotFoundError, MissingAgentNameError
@@ -13,17 +14,23 @@ def _config_file(root: Path) -> Path:
 def _vaults_dir(root: Path) -> Path:
     return root / "vaults"
 
-def _find_local_root() -> Path | None:
+def find_local_root() -> Path | None:
     current = Path.cwd()
     while True:
         candidate = current / CTXVAULT_DIR_NAME
-        if (candidate / "config.json").exists():
+        # Walking up from anywhere under the home reaches ~/.ctxvault, which is
+        # the global registry: it must not be read a second time as a project's.
+        if candidate != GLOBAL_DIR and (candidate / "config.json").exists():
             return candidate
         if current.parent == current:
             return None
         current = current.parent
 
 def _resolve_local_paths(local_config: dict, local_root: Path) -> dict:
+    """A copy of the project's registry with its paths made absolute, for
+    readers. The file keeps them relative to the project, so that the project
+    can move: nothing resolved here is ever written back."""
+    local_config = copy.deepcopy(local_config)
     project_root = local_root.parent
     for vault_data in local_config["vaults"].values():
         if not Path(vault_data["vault_path"]).is_absolute():
@@ -39,7 +46,7 @@ def _load_config() -> tuple[dict, dict, Path | None]:
 
     global_config = json.loads(_config_file(GLOBAL_DIR).read_text())
 
-    local_root = _find_local_root()
+    local_root = find_local_root()
 
     if local_root is not None:
         local_config = json.loads(_config_file(local_root).read_text())
@@ -51,6 +58,12 @@ def _load_config() -> tuple[dict, dict, Path | None]:
 
 def _save_config(data: dict, root: Path) -> None:
     _config_file(root).write_text(json.dumps(data))
+
+def _editable_config(scope: str, local_root: Path | None) -> tuple[dict, Path]:
+    """The registry file a change is written to, read as it is on disk: the
+    resolved copy `_load_config` hands to readers must never be saved."""
+    root = local_root if scope == "local" else GLOBAL_DIR
+    return json.loads(_config_file(root).read_text()), root
 
 def _get_vault_scope(vault_name: str, global_config: dict, local_config: dict) -> str | None:
     if vault_name in local_config["vaults"]:
@@ -178,8 +191,7 @@ def attach_agent_to_vault(vault_name: str, agent_name: str) -> None:
     if scope is None:
         raise VaultNotFoundError(f"Vault '{vault_name}' does not exist.")
 
-    config = local_config if scope == "local" else global_config
-    save_root = local_root if scope == "local" else GLOBAL_DIR
+    config, save_root = _editable_config(scope, local_root)
 
     vault_config = config["vaults"][vault_name]
     if agent_name not in vault_config["allowed_agents"]:
@@ -195,8 +207,7 @@ def detach_agent_from_vault(vault_name: str, agent_name: str) -> None:
     if scope is None:
         raise VaultNotFoundError(f"Vault '{vault_name}' does not exist.")
 
-    config = local_config if scope == "local" else global_config
-    save_root = local_root if scope == "local" else GLOBAL_DIR
+    config, save_root = _editable_config(scope, local_root)
 
     vault_config = config["vaults"][vault_name]
     if vault_config.get("restricted") and agent_name in vault_config.get("allowed_agents", []):
@@ -210,8 +221,7 @@ def make_public(vault_name: str) -> None:
     if scope is None:
         raise VaultNotFoundError(f"Vault '{vault_name}' does not exist.")
 
-    config = local_config if scope == "local" else global_config
-    save_root = local_root if scope == "local" else GLOBAL_DIR
+    config, save_root = _editable_config(scope, local_root)
 
     config["vaults"][vault_name]["allowed_agents"] = []
     config["vaults"][vault_name]["restricted"] = False
@@ -225,8 +235,7 @@ def delete_vault(vault_name: str) -> None:
     if scope is None:
         raise VaultNotFoundError(f"Vault '{vault_name}' does not exist.")
 
-    config = local_config if scope == "local" else global_config
-    save_root = local_root if scope == "local" else GLOBAL_DIR
+    config, save_root = _editable_config(scope, local_root)
 
     # An episodic vault holds an open SQLite handle to a file under vault_path;
     # dropping it before the tree goes away keeps a vault recreated at the same
@@ -234,7 +243,8 @@ def delete_vault(vault_name: str) -> None:
     from ctxvault.storage import sqlite_store
     sqlite_store.close_connections()
 
-    vault_path = Path(config["vaults"][vault_name]["vault_path"])
+    # the resolved path: the file's own may be relative to the project
+    vault_path = Path((local_config if scope == "local" else global_config)["vaults"][vault_name]["vault_path"])
     if vault_path.exists():
         shutil.rmtree(vault_path)
 

@@ -46,3 +46,8 @@ class TestToolSchemas:
             parsed = _validate(tool_name, tools[tool_name].inputSchema.get("required", []), {name: '["Giuseppe"]'})
             assert getattr(parsed, name) == '["Giuseppe"]'
 
+
+    def test_every_tool_tells_the_agent_what_it_is_for(self):
+        # An agent picks tools by their description: an empty one is a tool it cannot choose.
+        for tool in _tools():
+            assert (tool.description or "").strip(), f"{tool.name} has no description"

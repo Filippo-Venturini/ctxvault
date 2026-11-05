@@ -230,10 +230,11 @@ def _open_disputes(conn: sqlite3.Connection, episode_id: str,
                    known_at: str | None = None) -> list[str]:
     """The open episodes this one is in dispute with.
 
-    A dispute counts only while its other side is still believed: once that
+    A dispute counts only while its other side is still open: once that
     episode is closed the question is settled and the flag goes with it. With
-    `known_at` both the noticing and the other side's belief window are read
-    as of that instant.
+    `known_at` both the noticing and the other side's state are read as of
+    that instant: recorded, not revised away, and not ended as far as the
+    vault knew by then.
     """
     instant = known_at or now_iso()
     rows = conn.execute(
@@ -244,10 +245,11 @@ def _open_disputes(conn: sqlite3.Connection, episode_id: str,
         WHERE (d.episode_a = ? OR d.episode_b = ?)
           AND d.noticed_at <= ?
           AND e.recorded_at <= ?
-          AND (e.invalidated_at IS NULL OR e.invalidated_at > ?)
+          AND NOT (e.revised_by IS NOT NULL AND e.invalidated_at <= ?)
+          AND (e.valid_to IS NULL OR e.valid_to > ? OR e.invalidated_at > ?)
         ORDER BY d.noticed_at
         """,
-        (episode_id, episode_id, episode_id, episode_id, instant, instant, instant),
+        (episode_id, episode_id, episode_id, episode_id, instant, instant, instant, instant, instant),
     ).fetchall()
     return [r["other"] for r in rows]
 
@@ -334,9 +336,12 @@ def write_episode(
     valid_to: str | None = None,
     metadata: dict | None = None,
     embedding: list[float] | None = None,
+    recorded_at: str | None = None,
 ) -> dict:
+    """`recorded_at` is when the vault learned this, for callers replaying
+    the past (an import, a demo); it defaults to now."""
     conn = get_connection(config)
-    recorded_at = now_iso()
+    recorded_at = recorded_at or now_iso()
     episode_id = new_episode_id()
 
     with _write_lock, conn:
@@ -386,7 +391,11 @@ def invalidate_episode(
     *,
     valid_to: str | None = None,
     reason: str | None = None,
+    at: str | None = None,
 ) -> dict:
+    """`at` is when the closing was recorded, for callers replaying the
+    past; it defaults to now. `valid_to` is when the statement stopped
+    holding in the world and defaults to the same instant."""
     conn = get_connection(config)
 
     with _write_lock, conn:
@@ -398,7 +407,7 @@ def invalidate_episode(
                 f"Episode '{episode_id}' was already closed at {row['invalidated_at']}."
             )
 
-        now = now_iso()
+        now = at or now_iso()
         _check_boundary(row, valid_to or now, "valid_to")
 
         metadata = json.loads(row["metadata"] or "{}")
@@ -425,6 +434,7 @@ def supersede_episode(
     valid_from: str | None = None,
     metadata: dict | None = None,
     embedding: list[float] | None = None,
+    at: str | None = None,
 ) -> dict:
     """Close an episode and open its successor in one transaction.
 
@@ -435,10 +445,13 @@ def supersede_episode(
     leaves them out: a correction is usually about the same thing, and dropping
     the entity links would make the current version unreachable by the lookup
     that found the old one. Pass an explicit empty list to clear them.
+
+    `at` is when the change was recorded, for callers replaying the past; it
+    defaults to now.
     """
     conn = get_connection(config)
     new_id = new_episode_id()
-    recorded_at = now_iso()
+    recorded_at = at or now_iso()
 
     with _write_lock, conn:
         row = conn.execute("SELECT * FROM episodes WHERE id = ?", (episode_id,)).fetchone()
@@ -489,6 +502,7 @@ def revise_episode(
     salience: float | None = None,
     metadata: dict | None = None,
     embedding: list[float] | None = None,
+    at: str | None = None,
 ) -> dict:
     """Restate an episode more precisely, keeping its identity in the world.
 
@@ -503,11 +517,12 @@ def revise_episode(
     the vault states today.
 
     Entities, salience, confidence and metadata carry over unless given;
-    metadata given is merged over the inherited one.
+    metadata given is merged over the inherited one. `at` is when the
+    revision was recorded, for callers replaying the past; it defaults to now.
     """
     conn = get_connection(config)
     new_id = new_episode_id()
-    recorded_at = now_iso()
+    recorded_at = at or now_iso()
 
     with _write_lock, conn:
         row = conn.execute("SELECT * FROM episodes WHERE id = ?", (episode_id,)).fetchone()
@@ -701,7 +716,7 @@ def select_episodes(
     include_closed: bool = False,
     metadata_filters: dict | None = None,
     disputed: bool | None = None,
-    scan_limit: int = 5000,
+    scan_limit: int | None = 5000,
 ) -> list[dict]:
     """Structured retrieval: the primary path into an episodic vault.
 
@@ -710,16 +725,27 @@ def select_episodes(
     belief state of a past moment. With `include_closed` the time filters are
     dropped and the full history comes back. `disputed` keeps only the
     episodes that are (True) or are not (False) in an open dispute.
+    `scan_limit` caps the rows read before ranking; None reads them all, for
+    a caller that wants the whole vault rather than the best of it.
     """
     conn = get_connection(config)
 
     clauses = []
     params: list = []
 
+    # The valid window at an instant. With `known_at`, an end the vault had
+    # not yet recorded by then does not count: in that belief state the
+    # statement was still open.
+    def valid_window(instant: str) -> None:
+        if known_at:
+            clauses.append("valid_from <= ? AND (valid_to IS NULL OR valid_to > ? OR invalidated_at > ?)")
+            params.extend([instant, instant, known_at])
+        else:
+            clauses.append("valid_from <= ? AND (valid_to IS NULL OR valid_to > ?)")
+            params.extend([instant, instant])
+
     if not include_closed:
-        instant = valid_at or now_iso()
-        clauses.append("valid_from <= ? AND (valid_to IS NULL OR valid_to > ?)")
-        params.extend([instant, instant])
+        valid_window(valid_at or now_iso())
         # A revised wording is still valid in the world, it is just no longer
         # how the vault states it: the revision is. Hidden unless the caller
         # asks for the full history or reconstructs a past belief state, when
@@ -727,11 +753,14 @@ def select_episodes(
         if not known_at:
             clauses.append("revised_by IS NULL")
     elif valid_at:
-        clauses.append("valid_from <= ? AND (valid_to IS NULL OR valid_to > ?)")
-        params.extend([valid_at, valid_at])
+        valid_window(valid_at)
 
     if known_at:
-        clauses.append("recorded_at <= ? AND (invalidated_at IS NULL OR invalidated_at > ?)")
+        # Recorded by then, and not retracted by then. Only a revision
+        # retracts: closing a statement (invalidate, supersede) records when
+        # it ended in the world, not that the vault stopped believing it had
+        # held until then.
+        clauses.append("recorded_at <= ? AND NOT (revised_by IS NOT NULL AND invalidated_at <= ?)")
         params.extend([known_at, known_at])
 
     if source:
@@ -752,9 +781,10 @@ def select_episodes(
             params.extend(normalised)
 
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    limit = "" if scan_limit is None else " LIMIT ?"
     rows = conn.execute(
-        f"SELECT * FROM episodes {where} ORDER BY valid_from DESC LIMIT ?",
-        (*params, scan_limit),
+        f"SELECT * FROM episodes {where} ORDER BY valid_from DESC{limit}",
+        (*params, *([] if scan_limit is None else [scan_limit])),
     ).fetchall()
 
     episodes = [_row_to_dict(conn, row, with_embedding=True, known_at=known_at) for row in rows]
@@ -830,10 +860,104 @@ def list_entities(
 
     return [dict(row) for row in rows]
 
-def count_episodes(config: dict) -> dict:
+# What the vault states as true at an instant: the default filter of
+# `select_episodes`, as one SQL condition over the `episodes` table (aliased
+# `e`). Started, not ended, and not restated by a revision.
+_HOLDS_AT = "e.valid_from <= ? AND (e.valid_to IS NULL OR e.valid_to > ?) AND e.revised_by IS NULL"
+
+def list_metadata_values(config: dict, key: str, *, include_closed: bool = False,
+                         valid_at: str | None = None) -> list[dict]:
+    """The distinct values one metadata key takes across the vault, most
+    used first, with how many episodes carry each.
+
+    The metadata counterpart of `list_entities`: whoever needs to enumerate a
+    set the writers encoded as metadata (a category, a card, a channel) asks
+    here instead of paging through a ranked query, or of bending `entities`
+    to hold it. Validity filtering is the same: what holds now by default,
+    `valid_at` moves the instant, `include_closed` counts the whole history.
+    A value that is a list or an object comes back as its JSON text.
+    """
+    if '"' in key:
+        raise ValueError("A metadata key cannot contain a double quote.")
     conn = get_connection(config)
+
+    if not include_closed or valid_at:
+        instant = valid_at or now_iso()
+        where, params = f"WHERE {_HOLDS_AT}", [instant, instant]
+    else:
+        where, params = "", []
+
+    rows = conn.execute(
+        f"""
+        SELECT value, COUNT(*) AS episode_count FROM (
+            SELECT json_extract(e.metadata, ?) AS value FROM episodes e {where}
+        )
+        WHERE value IS NOT NULL
+        GROUP BY value
+        ORDER BY episode_count DESC, value ASC
+        """,
+        (f'$."{key}"', *params),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+def count_episodes(config: dict) -> dict:
+    """How much the vault holds, in the terms the rest of the store uses.
+
+    `open` is the row's own state (no end set, never invalidated) and `closed`
+    its complement. `holding` is what a default query returns now: started,
+    not ended, not revised, so an episode dated in the future or ended ahead
+    of time is open but not yet, or no longer, holding. `disputes` counts the
+    pairs whose two sides both hold now, which is exactly how long a dispute
+    lasts.
+    """
+    conn = get_connection(config)
+    now = now_iso()
     total = conn.execute("SELECT COUNT(*) AS n FROM episodes").fetchone()["n"]
     open_now = conn.execute(
         "SELECT COUNT(*) AS n FROM episodes WHERE valid_to IS NULL AND invalidated_at IS NULL"
     ).fetchone()["n"]
-    return {"total": total, "open": open_now, "closed": total - open_now}
+    holding = conn.execute(
+        f"SELECT COUNT(*) AS n FROM episodes e WHERE {_HOLDS_AT}", (now, now)
+    ).fetchone()["n"]
+    disputes = conn.execute(
+        f"""
+        SELECT COUNT(*) AS n FROM episode_disputes d
+        WHERE EXISTS (SELECT 1 FROM episodes e WHERE e.id = d.episode_a AND {_HOLDS_AT})
+          AND EXISTS (SELECT 1 FROM episodes e WHERE e.id = d.episode_b AND {_HOLDS_AT})
+        """,
+        (now, now, now, now),
+    ).fetchone()["n"]
+    return {"total": total, "open": open_now, "closed": total - open_now, "holding": holding, "disputes": disputes}
+
+def list_attestations(config: dict) -> list[dict]:
+    """Every attestation in the vault, oldest first: which episode, when, by whom.
+
+    The episode row carries only their count and the last one; whoever wants
+    to show each reassertion reads them here.
+    """
+    conn = get_connection(config)
+    rows = conn.execute("SELECT episode_id, at, source FROM episode_attestations ORDER BY at").fetchall()
+    return [dict(row) for row in rows]
+
+def list_disputes(config: dict) -> list[dict]:
+    """Every dispute ever noticed, oldest first, settled or not: the two
+    episodes, when it was noticed and the note. The episode row only carries
+    the ones still open."""
+    conn = get_connection(config)
+    rows = conn.execute(
+        "SELECT episode_a, episode_b, noticed_at, note FROM episode_disputes ORDER BY noticed_at"
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+def change_moments(config: dict) -> list[str]:
+    """Every instant the vault changed, as it recorded them: a statement
+    recorded, one closed (invalidated, superseded or revised), one confirmed,
+    two put in dispute. Unordered; whoever reads it buckets or sorts."""
+    conn = get_connection(config)
+    rows = conn.execute(
+        "SELECT recorded_at AS at FROM episodes UNION ALL "
+        "SELECT invalidated_at FROM episodes WHERE invalidated_at IS NOT NULL UNION ALL "
+        "SELECT at FROM episode_attestations UNION ALL "
+        "SELECT noticed_at FROM episode_disputes"
+    ).fetchall()
+    return [row["at"] for row in rows]
