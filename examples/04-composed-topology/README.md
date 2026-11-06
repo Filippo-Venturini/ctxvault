@@ -1,4 +1,4 @@
-# 04 · Composed Topology
+# 04 · Access Control
 
 Five vaults, three agents, one system. Each agent has a different
 profile of access: private knowledge, shared technical context, and

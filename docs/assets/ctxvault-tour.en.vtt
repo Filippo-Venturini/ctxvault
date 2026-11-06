@@ -1,0 +1,118 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:01.167
+This is CtxVault:
+
+00:00:01.167 --> 00:00:03.020
+local memory for AI agents.
+
+00:00:03.020 --> 00:00:05.765
+Every vault is a folder on your machine,
+
+00:00:05.765 --> 00:00:08.305
+with a type, and a list of the agents
+
+00:00:08.305 --> 00:00:09.540
+that can reach it.
+
+00:00:11.133 --> 00:00:12.999
+Semantic vaults hold documents,
+
+00:00:12.999 --> 00:00:14.203
+searched by meaning.
+
+00:00:16.100 --> 00:00:17.786
+Skill vaults hold procedures:
+
+00:00:17.786 --> 00:00:19.530
+how an agent should do things.
+
+00:00:21.433 --> 00:00:23.374
+Episodic vaults hold episodes:
+
+00:00:23.374 --> 00:00:25.573
+facts, and when each one was true.
+
+00:00:27.467 --> 00:00:29.083
+And every agent reaches only
+
+00:00:29.083 --> 00:00:30.757
+the vaults it has been given.
+
+00:00:32.467 --> 00:00:35.491
+Open a vault, and you see where it lives on disk:
+
+00:00:35.491 --> 00:00:37.219
+a plain folder you can open,
+
+00:00:37.219 --> 00:00:38.268
+edit and back up,
+
+00:00:38.268 --> 00:00:39.997
+and how much space it takes.
+
+00:00:40.600 --> 00:00:42.848
+A semantic vault shows its documents,
+
+00:00:42.848 --> 00:00:45.460
+and the chunks the agent actually receives.
+
+00:00:46.467 --> 00:00:49.139
+And you can search it the way the agent does:
+
+00:00:49.139 --> 00:00:49.792
+by meaning,
+
+00:00:49.792 --> 00:00:52.167
+with a similarity score for every match.
+
+00:00:53.867 --> 00:00:55.711
+A skill vault holds procedures
+
+00:00:55.711 --> 00:00:56.940
+written in markdown.
+
+00:00:56.940 --> 00:00:59.276
+Each one has a name and a description,
+
+00:00:59.276 --> 00:01:01.489
+so the agent can pick the right one,
+
+00:01:01.489 --> 00:01:03.087
+and then follow its steps.
+
+00:01:04.600 --> 00:01:06.056
+An episodic vault shows
+
+00:01:06.056 --> 00:01:07.702
+which episodes hold today:
+
+00:01:07.702 --> 00:01:10.298
+what changed recently, what is coming up,
+
+00:01:10.298 --> 00:01:12.260
+and where two sources disagree.
+
+00:01:12.667 --> 00:01:14.433
+Every episode keeps its history:
+
+00:01:14.433 --> 00:01:16.089
+when it was true in the world,
+
+00:01:16.089 --> 00:01:18.297
+and when the episodic memory learned it.
+
+00:01:21.000 --> 00:01:22.304
+And you can rewind it.
+
+00:01:22.304 --> 00:01:23.726
+Drag back in time to see
+
+00:01:23.726 --> 00:01:26.215
+which episodes were true on any given day,
+
+00:01:26.215 --> 00:01:28.171
+and what the episodic memory knew
+
+00:01:28.171 --> 00:01:29.060
+at that moment.

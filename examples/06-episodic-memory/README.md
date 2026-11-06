@@ -1,4 +1,4 @@
-# 06 · Episodic Memory Agent
+# 06 · Episodic Memory
 
 One agent, one account, six months. Facts are recorded with a validity
 window, corrected when reality changes, and never deleted.

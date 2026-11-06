@@ -1,4 +1,4 @@
-# 01 · Personal Research Assistant
+# 01 · Single-Vault RAG
 
 The simplest CtxVault setup: one vault, one agent, local semantic search
 over a document collection.

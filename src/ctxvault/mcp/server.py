@@ -171,7 +171,7 @@ def list_skills(vault_name: str) -> ListSkillsResponse:
     except UnsupportedVaultOperationError as e:
         raise ValueError(e)
 
-@mcp.tool(description="")
+@mcp.tool(description="Read one skill from a skill vault: its name, description and full instructions. Use this after list_skills, once you know which procedure fits the task, and follow the instructions it returns.")
 def read_skill(vault_name: str, skill_name: str)-> SkillResponse:
     try:
         check_access(vault_name, AGENT_ID)

@@ -118,6 +118,7 @@ class EpisodicVault(BaseVault):
         valid_from: str | None = None,
         valid_to: str | None = None,
         metadata: dict | None = None,
+        recorded_at: str | None = None,
     ) -> Episode:
         if not content.strip():
             raise ValueError("Episode content cannot be empty.")
@@ -134,6 +135,7 @@ class EpisodicVault(BaseVault):
             valid_to=valid_to,
             metadata=metadata,
             embedding=self._embed(content),
+            recorded_at=recorded_at,
         )
         return self._to_episode(data)
 
@@ -146,9 +148,10 @@ class EpisodicVault(BaseVault):
         *,
         valid_to: str | None = None,
         reason: str | None = None,
+        at: str | None = None,
     ) -> Episode:
         data = sqlite_store.invalidate_episode(
-            self.config, episode_id, valid_to=valid_to, reason=reason
+            self.config, episode_id, valid_to=valid_to, reason=reason, at=at
         )
         return self._to_episode(data)
 
@@ -164,6 +167,7 @@ class EpisodicVault(BaseVault):
         occurred_at: str | None = None,
         valid_from: str | None = None,
         metadata: dict | None = None,
+        at: str | None = None,
     ) -> Episode:
         if not content.strip():
             raise ValueError("Episode content cannot be empty.")
@@ -180,6 +184,7 @@ class EpisodicVault(BaseVault):
             valid_from=valid_from,
             metadata=metadata,
             embedding=self._embed(content),
+            at=at,
         )
         return self._to_episode(data)
 
@@ -193,6 +198,7 @@ class EpisodicVault(BaseVault):
         confidence: float | None = None,
         salience: float | None = None,
         metadata: dict | None = None,
+        at: str | None = None,
     ) -> Episode:
         if not content.strip():
             raise ValueError("Episode content cannot be empty.")
@@ -207,6 +213,7 @@ class EpisodicVault(BaseVault):
             salience=salience,
             metadata=metadata,
             embedding=self._embed(content),
+            at=at,
         )
         return self._to_episode(data)
 
@@ -232,6 +239,25 @@ class EpisodicVault(BaseVault):
     def stats(self) -> dict:
         return sqlite_store.count_episodes(self.config)
 
+    def all_episodes(self) -> list[Episode]:
+        """The whole vault, newest first: every episode ever recorded, open or
+        closed, nothing ranked and nothing truncated. For whoever reads the
+        vault whole, the viewer or an export, rather than asking it something."""
+        rows = sqlite_store.select_episodes(self.config, include_closed=True, scan_limit=None)
+        return [self._to_episode(row) for row in rows]
+
+    def attestations(self) -> list[dict]:
+        """Each time a statement was asserted again: episode_id, at, source."""
+        return sqlite_store.list_attestations(self.config)
+
+    def disputes(self) -> list[dict]:
+        """Each dispute noticed, settled or not: episode_a, episode_b, noticed_at, note."""
+        return sqlite_store.list_disputes(self.config)
+
+    def changes(self) -> list[str]:
+        """Every instant the vault changed, as ISO timestamps."""
+        return sqlite_store.change_moments(self.config)
+
     def list_entities(
         self,
         *,
@@ -253,6 +279,20 @@ class EpisodicVault(BaseVault):
             min_episodes=min_episodes,
         )
         return [VaultEntity(**row) for row in rows]
+
+    def list_metadata_values(
+        self,
+        key: str,
+        *,
+        include_closed: bool = False,
+        valid_at: str | None = None,
+    ) -> list[dict]:
+        """The distinct values of one metadata key, with how many episodes
+        carry each: enumeration, like `list_entities`, for what the writers
+        put in metadata."""
+        return sqlite_store.list_metadata_values(
+            self.config, key, include_closed=include_closed, valid_at=valid_at
+        )
 
     def query_episodes(
         self,

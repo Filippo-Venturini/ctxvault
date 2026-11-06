@@ -10,9 +10,12 @@ class Episode(BaseModel):
 
     Valid time (`valid_from` / `valid_to`) is when the statement holds in the
     world. Transaction time (`recorded_at` / `invalidated_at`) is when this
-    vault believed it. The two are independent: learning today that something
-    stopped being true last month closes the valid window in the past while the
-    transaction window closes now.
+    vault recorded it and when it recorded its closing. The two are
+    independent: learning today that something stopped being true last month
+    sets `valid_to` in the past and `invalidated_at` now. A query as of an
+    earlier `known_at` therefore still sees the statement open, as the vault
+    did then. Only a revision retracts: it closes the original in transaction
+    time without touching its valid time.
     """
 
     id: str
@@ -34,7 +37,7 @@ class Episode(BaseModel):
     recorded_at: str
     invalidated_at: str | None = Field(
         default=None,
-        description="When the vault stopped believing this. None means still believed.",
+        description="When the vault recorded that this ended (invalidate, supersede) or stopped stating it (revise). None means neither has happened.",
     )
     superseded_by: str | None = None
     # Set when the statement was restated more precisely: the world did not

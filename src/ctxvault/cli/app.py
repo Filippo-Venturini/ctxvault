@@ -81,7 +81,8 @@ def query(name: str = typer.Argument("my-vault"), text: str = typer.Argument("")
         
         for idx, chunk in enumerate(result.results, 1):
             typer.secho(f"\n[{idx}] ", fg=typer.colors.CYAN, bold=True, nl=False)
-            typer.secho(f"score: {chunk.score:.3f}", fg=typer.colors.MAGENTA)
+            score = f"similarity: {chunk.similarity:.3f}" if chunk.similarity is not None else f"distance: {chunk.score:.3f}"
+            typer.secho(score, fg=typer.colors.MAGENTA)
             typer.secho(f"    ▸ {chunk.source} ", fg=typer.colors.BLUE, nl=False)
             typer.echo(f"(chunk {chunk.chunk_index})")
 
@@ -120,9 +121,41 @@ def delete(name: str = typer.Argument("my-vault"), path: str = typer.Option(None
         typer.secho(f"Error during deleting: {e}", fg=typer.colors.RED, bold=True)
         raise typer.Exit(1)
 
-@app.command()
-def reindex(name: str = typer.Argument("my-vault"), path: str = typer.Option(None, "--path")):
+def _doc_status_command(name: str) -> None:
     try:
+        found = vault_router.index_status(vault_name=name)
+    except Exception as e:
+        typer.secho(f"Error reading the index status: {e}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+
+    colors = {"in_sync": typer.colors.GREEN, "changed": typer.colors.YELLOW, "missing": typer.colors.RED}
+    stale = sum(1 for d in found.documents if d.state != "in_sync")
+    typer.secho(f"\n{len(found.documents)} documents in '{name}', {stale} out of sync, {len(found.unindexed)} files not indexed\n", fg=typer.colors.GREEN, bold=True)
+    for doc in found.documents:
+        typer.secho(f"  {doc.state.replace('_', ' '):9}", fg=colors[doc.state], nl=False)
+        typer.echo(f" {Path(doc.source).name}")
+    for file in found.unindexed:
+        typer.secho("  not indexed", fg=typer.colors.YELLOW, nl=False)
+        typer.echo(f" {Path(file).name}")
+    if stale or found.unindexed:
+        typer.secho(f"\nRun `ctxvault reindex {name} --stale` to bring the index back.", fg=typer.colors.BRIGHT_BLACK)
+    typer.echo("")
+
+@app.command()
+def reindex(name: str = typer.Argument("my-vault"), path: str = typer.Option(None, "--path"),
+            stale: bool = typer.Option(False, "--stale", help="Only what the index got wrong: reindex changed files, index new ones, drop documents whose file is gone.")):
+    try:
+        if stale:
+            reindexed, indexed, dropped = vault_router.sync_index(vault_name=name)
+            for file in reindexed:
+                typer.secho(f"Reindexed: {file}", fg=typer.colors.GREEN)
+            for file in indexed:
+                typer.secho(f"Indexed: {file}", fg=typer.colors.GREEN)
+            for file in dropped:
+                typer.secho(f"Dropped: {file}", fg=typer.colors.YELLOW)
+            typer.secho(f"\nReindexed: {len(reindexed)} · Indexed: {len(indexed)} · Dropped: {len(dropped)}", fg=typer.colors.GREEN, bold=True)
+            return
+
         reindexed_files, skipped_files = vault_router.reindex_files(vault_name=name, path=path)
 
         for file in reindexed_files:
@@ -163,7 +196,11 @@ def docs(
     show: str | None = typer.Option(None, "--show", help="Document id to display reconstructed text for"),
     output: Path | None = typer.Option(None, "--output", "-o", help="Write exported content to this file"),
     json_output: bool = typer.Option(False, "--json", help="Print metadata and content as JSON"),
+    status: bool = typer.Option(False, "--status", help="Whether each document's index still matches its file, and which files were never indexed"),
 ):
+    if status:
+        _doc_status_command(name)
+        return
     if export and show:
         typer.secho("Error: --export and --show are mutually exclusive.", fg=typer.colors.RED, bold=True)
         raise typer.Exit(1)
@@ -396,13 +433,29 @@ def episodes(
     stats: bool = typer.Option(False, "--stats", help="Print counts instead of episodes"),
     entities: bool = typer.Option(False, "--entities", help="List the vault's entities instead of episodes"),
     min_episodes: int = typer.Option(1, "--min-episodes", help="With --entities, hide entities mentioned fewer times"),
+    values: str = typer.Option(None, "--values", help="List the distinct values of this metadata key instead of episodes"),
 ):
     try:
+        if values:
+            found = vault_router.list_metadata_values(vault_name=name, key=values, include_closed=all_episodes, valid_at=valid_at)
+            if not found:
+                typer.secho(f"No episode carries metadata '{values}'.", fg=typer.colors.YELLOW)
+                return
+            typer.secho(f"\n{len(found)} values of '{values}' in '{name}'\n", fg=typer.colors.GREEN, bold=True)
+            width = max(len(str(v["value"])) for v in found)
+            for row in found:
+                typer.echo(f"  {str(row['value']).ljust(width)}  {row['episode_count']}")
+            typer.echo("")
+            return
+
         if stats:
             counts = vault_router.episode_stats(vault_name=name)
             typer.secho(f"\n{counts['total']} episodes in '{name}'", fg=typer.colors.GREEN, bold=True)
-            typer.secho(f"  open:   {counts['open']}", fg=typer.colors.GREEN)
-            typer.secho(f"  closed: {counts['closed']}", fg=typer.colors.YELLOW)
+            typer.secho(f"  open:     {counts['open']}", fg=typer.colors.GREEN)
+            typer.secho(f"  closed:   {counts['closed']}", fg=typer.colors.YELLOW)
+            typer.secho(f"  holding:  {counts['holding']}  (true now, as a query sees it)", fg=typer.colors.GREEN)
+            if counts["disputes"]:
+                typer.secho(f"  disputes: {counts['disputes']}", fg=typer.colors.RED)
             typer.echo("")
             return
 
@@ -562,6 +615,21 @@ def dispute(
     except Exception as e:
         typer.secho(f"Error disputing episodes: {e}", fg=typer.colors.RED, bold=True)
         raise typer.Exit(1)
+
+@app.command()
+def ui(port: int = typer.Option(8765, "--port"), host: str = typer.Option("127.0.0.1", "--host", help="Interface to bind. Anything beyond loopback shows every vault, restricted ones included, to whoever can reach it."),
+       no_browser: bool = typer.Option(False, "--no-browser", help="Serve without opening a browser tab."),
+       export: str = typer.Option(None, "--export", help="Write the page with a snapshot of every vault to this HTML file, and exit."),
+       note: str = typer.Option(None, "--note", help="With --export: a line shown at the top of the snapshot, for whoever opens it without knowing what it is.")):
+    """Look at the memory: every vault, what it holds, and how it changed. Read-only."""
+    from ctxvault.ui import server
+
+    if export:
+        path = server.export(Path(export), note=note)
+        typer.secho(f"Snapshot written to {path}", fg=typer.colors.GREEN, bold=True)
+        return
+    typer.echo(f"ctxvault ui on http://{host}:{port}/ui/  (Ctrl+C to stop)")
+    server.serve(host=host, port=port, open_browser=not no_browser)
 
 def main():
     app()

@@ -1,0 +1,77 @@
+site_name: CtxVault
+site_description: Local memory infrastructure for AI agents. Typed vaults you compose, control and query, entirely local.
+site_url: https://filippo-venturini.github.io/ctxvault/
+repo_url: https://github.com/Filippo-Venturini/ctxvault
+repo_name: Filippo-Venturini/ctxvault
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  custom_dir: overrides
+  logo: assets/logo-ui-dark.svg
+  favicon: assets/favicon.png
+  font:
+    text: Space Grotesk
+    code: JetBrains Mono
+  palette:
+    scheme: slate
+    primary: custom
+    accent: custom
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/demo-tab.js
+  - javascripts/tour.js
+
+nav:
+  - Home: index.md
+  - Get started:
+      - Quick start: get-started/quick-start.md
+  - Connect an agent:
+      - From Python: connect/python.md
+      - Over HTTP: connect/http.md
+      - Through MCP: connect/mcp.md
+  - How it works:
+      - Memory types: how-it-works/memory-types.md
+      - Local and global vaults: how-it-works/local-and-global.md
+      - Access control: how-it-works/access-control.md
+  - Memory viewer: memory-viewer.md
+  - Examples: examples.md
+  - Reference:
+      - CLI: reference/cli.md
+      - HTTP API: reference/http-api.md
+      - MCP tools: reference/mcp.md
+  - Live demo: demo.html
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Filippo-Venturini/ctxvault
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/ctxvault/

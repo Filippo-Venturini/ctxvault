@@ -28,6 +28,15 @@ class VaultNotFoundError(Exception):
     """Raised when trying to operate with a Vault that doesn't exist"""
     pass
 
+class VaultPathMissingError(VaultNotFoundError):
+    """Raised when a vault is registered but its folder is gone.
+
+    A subclass of VaultNotFoundError: for every caller the vault is not there.
+    Opening it must not recreate the folder, or a moved or unmounted vault
+    would come back silently empty and look healthy.
+    """
+    pass
+
 class FileOutsideVaultError(Exception):
     """Raised when try to index a file outside the Context Vault."""
     pass

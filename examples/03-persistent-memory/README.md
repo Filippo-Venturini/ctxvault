@@ -1,4 +1,4 @@
-# 03 · Persistent Memory Agent
+# 03 · Persistent Memory
 
 An agent that accumulates context across sessions and retrieves it
 semantically, days later and with different words.
