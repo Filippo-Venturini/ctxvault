@@ -427,7 +427,8 @@ def export_html(data: dict | None = None, note: str | None = None) -> str:
     assets = json.dumps({"logoDark": _data_uri(STATIC / "logo-dark.svg"), "logoLight": _data_uri(STATIC / "logo-light.svg")})
     bundle = f"<script>window.CTXVAULT_SNAPSHOT = {payload};\nwindow.CTXVAULT_ASSETS = {assets};"
     if note:
-        bundle += f"\nwindow.CTXVAULT_NOTE = {json.dumps(note, ensure_ascii=False).replace('</', '<\\/')};"
+        note_js = json.dumps(note, ensure_ascii=False).replace("</", "<\\/")  # no backslash inside an f-string before 3.12
+        bundle += f"\nwindow.CTXVAULT_NOTE = {note_js};"
     bundle += "</script>\n"
     bundle += "\n".join(f"<script>\n{source}\n</script>" for _, source in scripts)
     first = True
