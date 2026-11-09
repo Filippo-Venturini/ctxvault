@@ -82,12 +82,36 @@ class EpisodicVault(BaseVault):
         VaultOperation.INVALIDATE_EPISODE,
         VaultOperation.SUPERSEDE_EPISODE,
         VaultOperation.REVISE_EPISODE,
+        VaultOperation.REINDEX,
     })
 
     def index_files(self, path: str | None = None) -> tuple[list[str], list[str]]:
         raise UnsupportedVaultOperationError(
             "Episodic vaults store episodes, not files. Use write_episode instead of index."
         )
+
+    def reindex_files(self, path: str | None = None) -> tuple[list[str], list[str]]:
+        """For an episodic vault, reindexing means giving a vector to every
+        episode that has none: a vault that ran without an embedding model
+        and is given one afterwards (`ctxvault reindex <vault>
+        --embedding-model ...`) catches up here, and `text` queries become
+        semantic from then on. Returns the ids embedded and the ids skipped
+        (empty content). Without a model there is nothing to do, and it
+        says so rather than pretending."""
+        if not self.embedding_model:
+            raise UnsupportedVaultOperationError(
+                "This episodic vault has no embedding model: set one with "
+                "`ctxvault reindex <vault> --embedding-model <sentence-transformers model>`."
+            )
+        done: list[str] = []
+        skipped: list[str] = []
+        for row in sqlite_store.episodes_without_embedding(self.config):
+            if not row["content"].strip():
+                skipped.append(row["id"])
+                continue
+            sqlite_store.set_embedding(self.config, row["id"], self._embed(row["content"]))
+            done.append(row["id"])
+        return done, skipped
 
     @property
     def embedding_model(self) -> str | None:
