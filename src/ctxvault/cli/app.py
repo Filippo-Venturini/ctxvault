@@ -635,6 +635,15 @@ def ui(port: int = typer.Option(8765, "--port"), host: str = typer.Option("127.0
     typer.echo(f"ctxvault ui on http://{host}:{port}/ui/  (Ctrl+C to stop)")
     server.serve(host=host, port=port, open_browser=not no_browser)
 
+@app.command()
+def mcp(agent: str = typer.Option(None, "--agent", help="Agent name the server identifies as, for restricted vaults.")):
+    """Start the MCP server on stdio. Same as `ctxvault-mcp`, so `uvx ctxvault mcp` works without installing anything."""
+    # The server module reads --agent from sys.argv when imported, and sys.argv
+    # already holds it here, so importing lazily is enough.
+    from ctxvault.mcp import server
+
+    server.main()
+
 def main():
     app()
 

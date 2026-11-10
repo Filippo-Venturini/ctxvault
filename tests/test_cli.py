@@ -156,3 +156,18 @@ def test_cli_init_embedding_model_rejected_for_skill(mock_global_config):
     )
     assert result.exit_code == 1
     assert "semantic" in result.stdout.lower()
+# ── MCP subcommand ───────────────────────────────────────────────────────────
+
+def test_cli_mcp_starts_server(mocker):
+    from ctxvault.mcp import server
+    run = mocker.patch.object(server, "main")
+    result = runner.invoke(app, ["mcp"])
+    assert result.exit_code == 0
+    run.assert_called_once_with()
+
+def test_cli_mcp_accepts_agent(mocker):
+    from ctxvault.mcp import server
+    run = mocker.patch.object(server, "main")
+    result = runner.invoke(app, ["mcp", "--agent", "counter-agent"])
+    assert result.exit_code == 0
+    run.assert_called_once_with()

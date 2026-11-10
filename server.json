@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Filippo-Venturini/ctxvault",
+  "title": "CtxVault",
+  "description": "Local memory for AI agents: semantic, skill and episodic vaults as plain folders on disk, with per-agent access control and a read-only viewer.",
+  "repository": {
+    "url": "https://github.com/Filippo-Venturini/ctxvault",
+    "source": "github"
+  },
+  "websiteUrl": "https://filippo-venturini.github.io/ctxvault/",
+  "version": "0.9.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "ctxvault",
+      "version": "0.9.1",
+      "runtimeHint": "uvx",
+      "transport": { "type": "stdio" },
+      "packageArguments": [
+        { "type": "positional", "value": "mcp" },
+        {
+          "type": "named",
+          "name": "--agent",
+          "description": "Agent name the server identifies as, for restricted vaults. Public vaults need none.",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

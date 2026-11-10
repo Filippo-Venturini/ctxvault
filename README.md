@@ -17,6 +17,8 @@
 
 </div>
 
+<!-- mcp-name: io.github.Filippo-Venturini/ctxvault -->
+
 ---
 
 ## What is CtxVault?
@@ -154,17 +156,19 @@ Whichever door wrote it, `ctxvault ui` shows it: the viewer reads the same vault
 
 ## CtxVault vs Alternatives
 
-| | CtxVault | ChromaDB + custom | LangChain Memory | Mem0 |
-|--|----------|-------------------|------------------|------|
-| Vault isolation | ✓ | ✗ (you build it) | ✗ | ✗ |
-| Access control | ✓ | ✗ (you build it) | ✗ | ✗ |
-| Typed memory (semantic + procedural + episodic) | ✓ | ✗ | ✗ | ✗ |
-| Bi-temporal memory (supersede, time travel) | ✓ | ✗ (you build it) | ✗ | Partial |
-| Agent-written memory | ✓ | ✗ (you build it) | Partial | Partial |
-| Human CLI observability | ✓ | ✗ | ✗ | ✗ |
-| Local-first | ✓ | ✓ | ✓ | ✓ (self-hosted) |
-| MCP server | ✓ | ✗ (you build it) | ✗ | ✓ (hosted) |
-| Memory viewer (topology, time travel), local | ✓ | ✗ | ✗ | ✓ (hosted dashboard) |
+| | CtxVault | Chroma + your code | LangChain Memory | Mem0 | Graphiti (Zep) |
+|--|----------|--------------------|------------------|------|----------------|
+| Runs without cloud services | ✓ | ✓ | ✓ | self-hosted | self-hosted, plus a graph database |
+| MCP server | ✓ | you build it | ✗ | ✓ | ✓ |
+| Automatic fact extraction from conversations | ✗ (the agent decides what to write) | you build it | ✗ | ✓ | ✓ |
+| Distinct memory types (semantic, procedural, episodic) | ✓ | you build it | ✗ | ✗ | ✗ |
+| Bi-temporal facts (valid time and transaction time) | ✓ | you build it | ✗ | partial | ✓ |
+| Graph-structured memory (entities and relations) | ✗ (planned) | you build it | ✗ | ✓ | ✓ |
+| Per-agent access control | ✓ | you build it | ✗ | ✗ | ✗ |
+| Storage as plain files on disk | ✓ | ✓ | ✗ | ✗ | ✗ (graph database) |
+| Inspection UI | local | ✗ | ✗ | hosted | ✗ |
+
+The ✗ in the CtxVault column are real: there is no graph layer and it does not extract facts for you. The ✓ are what it was built for: memory types, time, access control, and storage you can open as a folder.
 
 ---
 
@@ -228,19 +232,17 @@ ctxvault index notes
 ctxvault query notes "what did we decide about pricing?"
 ```
 
-**4. Give it to your agent.** The quickest way is MCP: add the server to your client's config (Claude Desktop, Cursor, any MCP client) and restart it.
-
-```bash
-uv tool install ctxvault   # puts ctxvault-mcp on your PATH
-```
+**4. Give it to your agent.** The quickest way is MCP: add the server to your client's config (Claude Desktop, Cursor, any MCP client) and restart it. With [uv](https://docs.astral.sh/uv/) installed nothing else is needed:
 
 ```json
 {
   "mcpServers": {
-    "ctxvault": { "command": "ctxvault-mcp" }
+    "ctxvault": { "command": "uvx", "args": ["ctxvault", "mcp"] }
   }
 }
 ```
+
+Or `uv tool install ctxvault` once, and use `{ "command": "ctxvault-mcp" }` instead.
 
 The agent can now list your vaults, query them, and write what it learns back. From your own code instead, use the [Python client](https://filippo-venturini.github.io/ctxvault/connect/python/) in-process or the [HTTP server](https://filippo-venturini.github.io/ctxvault/connect/http/).
 
@@ -337,5 +339,5 @@ Built on [Chroma](https://www.trychroma.com/) for vector storage, [Sentence Tran
 ---
 
 <div align="center">
-<sub>Made by <a href="https://github.com/Filippo-Venturini">Filippo Venturini</a> · <a href="https://github.com/Filippo-Venturini/ctxvault/issues">Report an issue</a> · ⭐ Star if useful</sub>
+<sub>Made by <a href="https://github.com/Filippo-Venturini">Filippo Venturini</a> · <a href="https://github.com/Filippo-Venturini/ctxvault/issues">Report an issue</a> </sub>
 </div>
