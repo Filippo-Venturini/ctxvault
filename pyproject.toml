@@ -29,6 +29,7 @@ keywords = [
     "fastapi",
     "mcp",
     "model-context-protocol",
+    "mcp-server",
     "agent-memory",
     "persistent-memory",
     "claude",
@@ -36,6 +37,7 @@ keywords = [
     "procedural-memory",
     "episodic-memory",
     "bi-temporal",
+    "bitemporal",
     "skills",
     "cognitive-architecture"
 ]
