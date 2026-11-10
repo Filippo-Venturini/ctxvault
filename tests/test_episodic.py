@@ -915,3 +915,29 @@ class TestRevise:
         again = client.post(f"/ctxvault/episodes/{episode.id}/revise",
                             json={"vault_name": VAULT, "content": "twice"})
         assert again.status_code == 409
+
+
+class TestEmbeddingAfterTheFact:
+    def test_a_vault_given_a_model_later_embeds_what_it_already_holds(self, mock_episodic_vault_config):
+        from ctxvault.utils.config import set_embedding_model
+        write("Giuseppe keeps bees on the hill behind the house", entities=["Giuseppe"])
+        write("Giuseppe takes the bus to the market on Thursdays", entities=["Giuseppe"])
+        config = vault_router.open_vault(VAULT).config
+        assert all(sqlite_store.get_episode(config, e["id"], with_embedding=True)["embedding"] is None
+                   for e in sqlite_store.episodes_without_embedding(config))
+        with pytest.raises(UnsupportedVaultOperationError):
+            vault_router.reindex_files(vault_name=VAULT)
+
+        set_embedding_model(VAULT, "sentence-transformers/all-MiniLM-L6-v2")
+        done, skipped = vault_router.reindex_files(vault_name=VAULT)
+        assert len(done) == 2 and skipped == []
+        assert sqlite_store.episodes_without_embedding(vault_router.open_vault(VAULT).config) == []
+
+        # vectors from now on (the test environment stubs the model, so the
+        # ordering is not asserted here; only that similarity is computed)
+        results = query(text="honey and hives", entities=["Giuseppe"], order_by="relevance")
+        assert len(results) == 2 and all(r.similarity is not None for r in results)
+        # and a new episode is written with its vector at once
+        new = write("Giuseppe sells honey at the market", entities=["Giuseppe"])
+        assert sqlite_store.get_episode(vault_router.open_vault(VAULT).config, new.id, with_embedding=True)["embedding"]
+

@@ -468,6 +468,20 @@ ctxvault reindex my-vault --path docs/
 
 ---
 
+## `mcp`
+Start the MCP server on stdio, for an MCP client to launch. It is the same server as the `ctxvault-mcp` executable; the subcommand exists so that a client can run it with `uvx ctxvault mcp` and nothing installed.
+
+```bash
+ctxvault mcp [--agent <name>]
+```
+
+**Arguments:**
+- `--agent <name>` - The agent name the server identifies as, for restricted vaults (optional). Without it the server reaches public vaults only
+
+See [Through MCP](../connect/mcp.md) for the client configuration and the [MCP tools reference](mcp.md) for what the agent can do.
+
+---
+
 ## `ui`
 Open the memory viewer in the browser: every registered vault, its contents, and for episodic vaults the time cursor and the history of each statement. Read-only. With `--export`, write the page and a snapshot of every vault to one self-contained HTML file instead of serving it.
 

@@ -961,3 +961,18 @@ def change_moments(config: dict) -> list[str]:
         "SELECT noticed_at FROM episode_disputes"
     ).fetchall()
     return [row["at"] for row in rows]
+
+
+def episodes_without_embedding(config: dict) -> list[dict]:
+    """The id and content of every episode that has no vector yet: what a
+    vault given an embedding model after the fact has to catch up on."""
+    conn = get_connection(config)
+    rows = conn.execute("SELECT id, content FROM episodes WHERE embedding IS NULL ORDER BY recorded_at").fetchall()
+    return [{"id": row["id"], "content": row["content"]} for row in rows]
+
+
+def set_embedding(config: dict, episode_id: str, embedding: list[float] | None) -> None:
+    conn = get_connection(config)
+    with _write_lock, conn:
+        conn.execute("UPDATE episodes SET embedding = ? WHERE id = ?", (encode_embedding(embedding), episode_id))
+

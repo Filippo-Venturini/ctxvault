@@ -2,17 +2,28 @@
 
 For agents that run inside an MCP client, such as Claude Desktop, Claude Code or Cursor: the client starts `ctxvault-mcp` and the agent uses the vaults on its own, with no integration code.
 
-## Install
+## Configure the client
+
+Two ways. With [uv](https://docs.astral.sh/uv/) installed, nothing else is needed: the client runs the package straight from PyPI.
+
+**Add to your `mcp.json`** (Claude Desktop: `%APPDATA%\Claude\claude_desktop_config.json`; macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "ctxvault": {
+      "command": "uvx",
+      "args": ["ctxvault", "mcp"]
+    }
+  }
+}
+```
+
+Or install it once, which puts `ctxvault-mcp` on your PATH:
 
 ```bash
 uv tool install ctxvault        # or: pipx install ctxvault
 ```
 
-This puts `ctxvault-mcp` on your PATH, where the client can start it.
-
-## Configure the client
-
-**Add to your `mcp.json`** (Claude Desktop: `%APPDATA%\Claude\claude_desktop_config.json`; macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
@@ -36,6 +47,8 @@ Restart your client. The agent can now query your existing vaults, write new con
   }
 }
 ```
+
+With `uvx`, the same flag goes at the end: `"args": ["ctxvault", "mcp", "--agent", "my-agent"]`.
 
 The `--agent` argument is optional and only required for restricted vaults.
 

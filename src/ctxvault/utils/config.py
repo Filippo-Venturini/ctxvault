@@ -200,6 +200,21 @@ def attach_agent_to_vault(vault_name: str, agent_name: str) -> None:
 
     _save_config(data=config, root=save_root)
 
+def set_embedding_model(vault_name: str, model_name: str) -> None:
+    """Pins a sentence-transformers model to an existing vault. For an
+    episodic vault this is how one that ran without vectors gets them:
+    set the model, then reindex to embed what is already there."""
+    global_config, local_config, local_root = _load_config()
+
+    scope = _get_vault_scope(vault_name, global_config, local_config)
+    if scope is None:
+        raise VaultNotFoundError(f"Vault '{vault_name}' does not exist.")
+
+    config, save_root = _editable_config(scope, local_root)
+    config["vaults"][vault_name]["embedding_model"] = model_name
+    _save_config(data=config, root=save_root)
+
+
 def detach_agent_from_vault(vault_name: str, agent_name: str) -> None:
     global_config, local_config, local_root = _load_config()
 

@@ -143,8 +143,12 @@ def _doc_status_command(name: str) -> None:
 
 @app.command()
 def reindex(name: str = typer.Argument("my-vault"), path: str = typer.Option(None, "--path"),
-            stale: bool = typer.Option(False, "--stale", help="Only what the index got wrong: reindex changed files, index new ones, drop documents whose file is gone.")):
+            stale: bool = typer.Option(False, "--stale", help="Only what the index got wrong: reindex changed files, index new ones, drop documents whose file is gone."),
+            embedding_model: str = typer.Option(None, "--embedding-model", help="Pin this sentence-transformers model to the vault first. On an episodic vault that had none, every episode then gets its vector.")):
     try:
+        if embedding_model:
+            vault_router.set_embedding_model(vault_name=name, model_name=embedding_model)
+            typer.secho(f"Embedding model: {embedding_model}", fg=typer.colors.BRIGHT_BLACK)
         if stale:
             reindexed, indexed, dropped = vault_router.sync_index(vault_name=name)
             for file in reindexed:
@@ -630,6 +634,15 @@ def ui(port: int = typer.Option(8765, "--port"), host: str = typer.Option("127.0
         return
     typer.echo(f"ctxvault ui on http://{host}:{port}/ui/  (Ctrl+C to stop)")
     server.serve(host=host, port=port, open_browser=not no_browser)
+
+@app.command()
+def mcp(agent: str = typer.Option(None, "--agent", help="Agent name the server identifies as, for restricted vaults.")):
+    """Start the MCP server on stdio. Same as `ctxvault-mcp`, so `uvx ctxvault mcp` works without installing anything."""
+    # The server module reads --agent from sys.argv when imported, and sys.argv
+    # already holds it here, so importing lazily is enough.
+    from ctxvault.mcp import server
+
+    server.main()
 
 def main():
     app()

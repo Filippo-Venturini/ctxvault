@@ -8,7 +8,7 @@ from ctxvault.models.documents import SemanticDocumentInfo, SkillDocumentInfo, D
 from ctxvault.models.episodes import Episode, EpisodeHistory, EpisodeQueryResult, VaultEntity
 from ctxvault.models.query_result import QueryResult
 from ctxvault.models.vaults import SkillOutput, SkillInput, VaultOperation, VaultType
-from ctxvault.utils.config import create_vault, delete_vault, get_vault_config, get_vaults
+from ctxvault.utils.config import create_vault, delete_vault, get_vault_config, get_vaults, set_embedding_model as _set_embedding_model
 
 # Explicit, and deliberately not a default: a vault whose type this version does
 # not know must fail loudly. Falling back to semantic would silently open an
@@ -106,6 +106,9 @@ def delete_files(vault_name: str, path: str | None = None)-> tuple[list[str], li
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.DELETE)
     return vault.delete_files(path=path)
+
+def set_embedding_model(vault_name: str, model_name: str) -> None:
+    _set_embedding_model(vault_name=vault_name, model_name=model_name)
 
 def reindex_files(vault_name: str, path: str | None = None)-> tuple[list[str], list[str]]:
     vault = open_vault(vault_name=vault_name)
