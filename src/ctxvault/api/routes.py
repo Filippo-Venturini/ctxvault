@@ -437,6 +437,38 @@ async def invalidate_episode(episode_id: str, invalidate_request: InvalidateEpis
         raise HTTPException(status_code=400, detail=str(e))
 
 @ctxvault_router.post(
+    "/episodes/{episode_id}/reopen",
+    summary="Reopen a closed episode",
+    description="Make a closed episode current again without erasing the close. An as-of query between the close and the reopen still sees it as closed. If it was superseded or revised, the successor must already be closed."
+)
+async def reopen_episode(episode_id: str, reopen_request: ReopenEpisodeRequest, request: Request)-> EpisodeResponse:
+    try:
+        check_vault_access(vault_name=reopen_request.vault_name, request=request)
+
+        episode = vault_router.reopen_episode(
+            vault_name=reopen_request.vault_name,
+            episode_id=episode_id,
+            at=reopen_request.at,
+            reason=reopen_request.reason,
+        )
+
+        return EpisodeResponse(vault_name=reopen_request.vault_name, episode=episode)
+    except EpisodeNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except (EpisodeAlreadyOpenError, EpisodeSuccessorStillOpenError) as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except VaultNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except UnsupportedVaultOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except MissingAgentNameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except VaultAccessDeniedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@ctxvault_router.post(
     "/episodes/{episode_id}/revise",
     summary="Restate an episode more precisely",
     description="The world did not change, the wording did: the revision opens where the original did, inherits its attestations and open disputes, and the original is closed in transaction time only."

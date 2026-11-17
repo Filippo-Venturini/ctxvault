@@ -156,6 +156,17 @@ Mark an episode as no longer true, without deleting it. Use this when something 
 | `valid_to` | `str | None` | `None` |
 | `reason` | `str` | `''` |
 
+### `reopen_episode`
+
+Make a closed episode current again, without erasing the close. Use this to undo an invalidate, or to bring back a superseded or revised statement after its successor has itself been closed. An as-of query between the close and the reopen still sees the episode as closed. If a successor is still current, close it first; this tool will not close it for you.
+
+| Parameter | Type | Default |
+|-----------|------|---------|
+| `vault_name` | `str` | required |
+| `episode_id` | `str` | required |
+| `at` | `str | None` | `None` |
+| `reason` | `str` | `''` |
+
 ### `dispute_episodes`
 
 Record that two open statements cannot both hold, when you cannot tell which one is wrong. Neither is closed: both keep coming back from queries, each flagged with the other in disputed_with, so you can ask instead of assert. The dispute ends by itself when one side is invalidated or superseded. If you do know which one is wrong, use supersede_episode or invalidate_episode instead.

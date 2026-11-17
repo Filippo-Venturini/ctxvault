@@ -81,6 +81,20 @@ class EpisodeAlreadyClosedError(Exception):
     """Raised when trying to invalidate or supersede an episode that is already closed."""
     pass
 
+class EpisodeAlreadyOpenError(Exception):
+    """Raised when trying to reopen an episode that is already current."""
+    pass
+
+class EpisodeSuccessorStillOpenError(Exception):
+    """Raised when reopening a replaced episode whose successor is still current."""
+    def __init__(self, episode_id: str, successor_id: str):
+        self.episode_id = episode_id
+        self.successor_id = successor_id
+        super().__init__(
+            f"Episode '{episode_id}' was replaced by '{successor_id}', which is still current; "
+            "invalidate or supersede the successor first."
+        )
+
 class SchemaVersionError(Exception):
     """Raised when an episodic store was written by a newer version of ctxvault."""
     pass

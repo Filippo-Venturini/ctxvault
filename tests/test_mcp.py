@@ -4,7 +4,7 @@ from ctxvault.mcp.server import mcp
 
 # Free-text arguments stay plain `str` with a "" default: with `str | None` the SDK
 # JSON-decodes them, so JSON-looking text would be rejected.
-FREE_TEXT_PARAMS = {("query_episodes", "query"), ("invalidate_episode", "reason")}
+FREE_TEXT_PARAMS = {("query_episodes", "query"), ("invalidate_episode", "reason"), ("reopen_episode", "reason")}
 
 
 def _tools():

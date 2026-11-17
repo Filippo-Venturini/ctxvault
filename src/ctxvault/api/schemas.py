@@ -146,6 +146,11 @@ class InvalidateEpisodeRequest(BaseModel):
     valid_to: str | None = None
     reason: str | None = None
 
+class ReopenEpisodeRequest(BaseModel):
+    vault_name: str
+    at: str | None = None
+    reason: str | None = None
+
 class SupersedeEpisodeRequest(BaseModel):
     vault_name: str
     content: str
