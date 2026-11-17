@@ -1,7 +1,13 @@
+import hashlib
+import subprocess
+import sys
+
 import pytest
 from pydantic import ValidationError
 
 from ctxvault.consolidation import ChunkProvenance, Claim, ExternalProvenance, parse_claims
+
+HASH = hashlib.sha256(b"Mestre, since March.").hexdigest()
 
 def claim(**overrides):
     data = {
@@ -13,15 +19,26 @@ def claim(**overrides):
     data.update(overrides)
     return data
 
+def chunk(**overrides):
+    data = {
+        "type": "chunk",
+        "vault": "transcripts",
+        "doc_id": "abc",
+        "chunk_index": 3,
+        "chunk_hash": HASH,
+    }
+    data.update(overrides)
+    return data
+
 class TestClaimSchema:
     def test_defaults(self):
         parsed = Claim.model_validate(claim())
 
         assert parsed.durability == "durable"
-        assert parsed.confidence == 1.0
+        assert parsed.confidence is None
         assert parsed.valid_from is None
-        assert parsed.valid_from_precision == "day"
-        assert parsed.provenance is None
+        assert parsed.valid_from_precision is None
+        assert parsed.provenance == []
 
     def test_speaker_is_distinct_from_subject(self):
         parsed = Claim.model_validate(claim(
@@ -50,59 +67,80 @@ class TestClaimSchema:
         with pytest.raises(ValidationError):
             Claim.model_validate(claim(confidence=confidence))
 
+    def test_missing_confidence_is_not_read_as_certain(self):
+        assert Claim.model_validate(claim()).confidence is None
+        assert Claim.model_validate(claim(confidence=0.7)).confidence == 0.7
+
+class TestValidFrom:
     @pytest.mark.parametrize("value", ["2026-03-01", "2026-03-01T10:00:00+00:00", "2026-03-01T10:00:00Z"])
-    def test_valid_from_accepts_iso(self, value):
-        assert Claim.model_validate(claim(valid_from=value)).valid_from == value
+    def test_accepts_iso(self, value):
+        assert Claim.model_validate(claim(valid_from=value, valid_from_precision="day")).valid_from == value
+
+    def test_naive_time_is_read_as_utc(self):
+        parsed = Claim.model_validate(claim(valid_from="2026-03-01T10:00:00", valid_from_precision="day"))
+
+        assert parsed.valid_from == "2026-03-01T10:00:00+00:00"
 
     @pytest.mark.parametrize("value", ["March 2026", "last year", "2026-13-01"])
-    def test_valid_from_rejects_free_text(self, value):
+    def test_rejects_free_text(self, value):
         with pytest.raises(ValidationError):
-            Claim.model_validate(claim(valid_from=value))
+            Claim.model_validate(claim(valid_from=value, valid_from_precision="day"))
 
     def test_imprecise_date_keeps_its_precision(self):
         parsed = Claim.model_validate(claim(valid_from="2026-03-01", valid_from_precision="month"))
 
         assert parsed.valid_from_precision == "month"
 
+    def test_precision_is_required_with_a_date(self):
+        with pytest.raises(ValidationError):
+            Claim.model_validate(claim(valid_from="2026-03-01"))
+
+    def test_precision_without_a_date_is_rejected(self):
+        with pytest.raises(ValidationError):
+            Claim.model_validate(claim(valid_from_precision="month"))
+
     def test_unknown_precision_is_rejected(self):
         with pytest.raises(ValidationError):
-            Claim.model_validate(claim(valid_from_precision="week"))
+            Claim.model_validate(claim(valid_from="2026-03-01", valid_from_precision="week"))
 
 class TestProvenance:
     def test_chunk_reference(self):
-        parsed = Claim.model_validate(claim(provenance={
-            "type": "chunk",
-            "vault": "transcripts",
-            "doc_id": "abc",
-            "chunk_index": 3,
-            "chunk_hash": "f00d",
-        }))
+        parsed = Claim.model_validate(claim(provenance=[chunk(path="sessions/2026-03-01.md")]))
 
-        assert isinstance(parsed.provenance, ChunkProvenance)
-        assert parsed.provenance.chunk_index == 3
+        [reference] = parsed.provenance
+        assert isinstance(reference, ChunkProvenance)
+        assert reference.chunk_index == 3
+        assert reference.path == "sessions/2026-03-01.md"
 
-    def test_external_source(self):
-        parsed = Claim.model_validate(claim(provenance={
-            "type": "external",
-            "source": "telegram",
-            "locator": "msg-42",
-        }))
+    def test_question_and_answer_in_two_chunks(self):
+        parsed = Claim.model_validate(claim(provenance=[chunk(chunk_index=3), chunk(chunk_index=4)]))
 
-        assert isinstance(parsed.provenance, ExternalProvenance)
-        assert parsed.provenance.locator == "msg-42"
+        assert [p.chunk_index for p in parsed.provenance] == [3, 4]
+
+    def test_mixed_sources(self):
+        parsed = Claim.model_validate(claim(provenance=[
+            chunk(),
+            {"type": "external", "source": "telegram", "locator": "msg-42"},
+        ]))
+
+        assert isinstance(parsed.provenance[1], ExternalProvenance)
+        assert parsed.provenance[1].locator == "msg-42"
 
     def test_chunk_reference_needs_its_hash(self):
+        data = chunk()
+        del data["chunk_hash"]
+
         with pytest.raises(ValidationError):
-            Claim.model_validate(claim(provenance={
-                "type": "chunk",
-                "vault": "transcripts",
-                "doc_id": "abc",
-                "chunk_index": 3,
-            }))
+            Claim.model_validate(claim(provenance=[data]))
+
+    @pytest.mark.parametrize("value", ["f00d", HASH.upper(), HASH[:-1] + "g"])
+    def test_chunk_hash_must_be_a_sha256_hex_digest(self, value):
+        with pytest.raises(ValidationError):
+            Claim.model_validate(claim(provenance=[chunk(chunk_hash=value)]))
 
     def test_unknown_provenance_type_is_rejected(self):
         with pytest.raises(ValidationError):
-            Claim.model_validate(claim(provenance={"type": "rumour", "source": "x"}))
+            Claim.model_validate(claim(provenance=[{"type": "rumour", "source": "x"}]))
 
 class TestParseClaims:
     def test_malformed_items_are_dropped(self):
@@ -134,7 +172,9 @@ class TestParseClaims:
 
         assert len(parsed) == 1
 
-    def test_core_does_not_import_the_layer(self):
-        import ctxvault
+def test_core_does_not_import_the_layer():
+    # In a fresh interpreter: this test module has already imported the layer.
+    probe = "import sys, ctxvault; print('ctxvault.consolidation' in sys.modules)"
+    result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
 
-        assert "consolidation" not in ctxvault.__all__
+    assert result.stdout.strip() == "False"
