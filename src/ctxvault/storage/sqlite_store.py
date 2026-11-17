@@ -146,7 +146,21 @@ _MIGRATIONS: dict[int, list[str]] = {
     2: [     # v3: a statement can be revised, not only superseded
         "ALTER TABLE episodes ADD COLUMN revised_by TEXT REFERENCES episodes(id)",
     ],
-    3: [],   # v4: episode_closures, created by _SCHEMA, backfilled in _apply_schema
+    3: [   # v4: episode_closures is created by _SCHEMA; backfill one row per already-closed episode
+        """
+        INSERT INTO episode_closures (
+            episode_id, closed_at, valid_to, prior_valid_to,
+            superseded_by, revised_by, reason, reopened_at, reopen_reason
+        )
+        SELECT
+            id, invalidated_at, valid_to, NULL,
+            superseded_by, revised_by,
+            json_extract(metadata, '$.invalidation_reason'),
+            NULL, NULL
+        FROM episodes
+        WHERE invalidated_at IS NOT NULL
+        """,
+    ]
 }
 
 def now_iso() -> str:
@@ -204,82 +218,7 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
 
     for statement in _LATE_INDEXES:
         conn.execute(statement)
-    _migrate_reopenings_if_present(conn)
-    _backfill_closures(conn)
     conn.commit()
-
-def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
-    return conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-        (name,),
-    ).fetchone() is not None
-
-def _migrate_reopenings_if_present(conn: sqlite3.Connection) -> None:
-    """Convert an unreleased v4 file that stored reopens as events."""
-    if not _table_exists(conn, "episode_reopenings"):
-        return
-    for event in conn.execute("SELECT * FROM episode_reopenings").fetchall():
-        closed_meta = json.loads(event["closed_metadata"] or "{}")
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO episode_closures (
-                episode_id, closed_at, valid_to, prior_valid_to,
-                superseded_by, revised_by, reason, reopened_at, reopen_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            ,
-            (
-                event["episode_id"],
-                event["closed_invalidated_at"],
-                event["closed_valid_to"],
-                event["open_valid_to"],
-                event["closed_superseded_by"],
-                event["closed_revised_by"],
-                closed_meta.get("invalidation_reason"),
-                event["at"],
-                event["reason"],
-            ),
-        )
-    conn.execute("DROP TABLE episode_reopenings")
-
-def _backfill_closures(conn: sqlite3.Connection) -> None:
-    """One closure per currently closed row that has none.
-
-    `prior_valid_to` is unknown for these legacy rows and is stored as
-    NULL: the close already overwrote `valid_to` on the episode, and
-    that earlier end cannot be recovered. Reopening one cannot restore
-    a written-in valid_to.
-    """
-    rows = conn.execute(
-        """
-        SELECT e.id, e.invalidated_at, e.valid_to, e.superseded_by,
-               e.revised_by, e.metadata
-        FROM episodes e
-        WHERE e.invalidated_at IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM episode_closures c WHERE c.episode_id = e.id
-          )
-        """
-    ).fetchall()
-    for row in rows:
-        metadata = json.loads(row["metadata"] or "{}")
-        conn.execute(
-            """
-            INSERT INTO episode_closures (
-                episode_id, closed_at, valid_to, prior_valid_to,
-                superseded_by, revised_by, reason, reopened_at, reopen_reason
-            ) VALUES (?, ?, ?, NULL, ?, ?, ?, NULL, NULL)
-            """
-            ,
-            (
-                row["id"],
-                row["invalidated_at"],
-                row["valid_to"],
-                row["superseded_by"],
-                row["revised_by"],
-                metadata.get("invalidation_reason"),
-            ),
-        )
 
 def get_connection(config: dict) -> sqlite3.Connection:
     db_path = config.get("db_path")
@@ -643,8 +582,6 @@ def _row_to_dict(
         data["embedding"] = decode_embedding(row["embedding"])
     return data
 
-
-
 def _get_entities(conn: sqlite3.Connection, episode_id: str) -> list[str]:
     rows = conn.execute(
         "SELECT entity FROM episode_entities WHERE episode_id = ? ORDER BY entity",
@@ -749,6 +686,23 @@ def _check_boundary(row: sqlite3.Row, boundary: str, field: str) -> None:
             "an episode cannot stop holding before it starts."
         )
 
+def _check_close_after_reopen(conn: sqlite3.Connection, episode_id: str, closed_at: str) -> None:
+    """A close recorded before the latest reopen would overlap intervals."""
+    latest = conn.execute(
+        """
+        SELECT reopened_at FROM episode_closures
+        WHERE episode_id = ? AND reopened_at IS NOT NULL
+        ORDER BY reopened_at DESC
+        LIMIT 1
+        """,
+        (episode_id,),
+    ).fetchone()
+    if latest is not None and closed_at < latest["reopened_at"]:
+        raise ValueError(
+            f"at {closed_at!r} is before the episode's latest reopen at {latest['reopened_at']!r}: "
+            "an episode cannot be closed before it was reopened."
+        )
+
 def invalidate_episode(
     config: dict,
     episode_id: str,
@@ -772,6 +726,7 @@ def invalidate_episode(
             )
 
         now = at or now_iso()
+        _check_close_after_reopen(conn, episode_id, now)
         _check_boundary(row, valid_to or now, "valid_to")
 
         metadata = json.loads(row["metadata"] or "{}")
@@ -925,6 +880,7 @@ def supersede_episode(
                 "supersede its successor instead."
             )
 
+        _check_close_after_reopen(conn, episode_id, recorded_at)
         boundary = valid_from or occurred_at or recorded_at
         _check_boundary(row, boundary, "valid_from")
 
@@ -998,6 +954,7 @@ def revise_episode(
                 f"Episode '{episode_id}' was already closed at {row['invalidated_at']}; "
                 "revise its successor instead."
             )
+        _check_close_after_reopen(conn, episode_id, recorded_at)
 
         inherited = json.loads(row["metadata"] or "{}")
         inherited.update(metadata or {})
@@ -1220,7 +1177,9 @@ def select_episodes(
         clauses.append(f"NOT ({retracted})")
         params.extend(retracted_params)
         if not include_closed or valid_at:
-            instant = valid_at or known_at
+            # known_at alone is "recorded by then, that holds now";
+            # pass valid_at to move the valid instant.
+            instant = valid_at or now_iso()
             as_of_to, as_of_params = _as_of_valid_to_sql("episodes", known_at)
             clauses.append(
                 f"valid_from <= ? AND ({as_of_to} IS NULL OR {as_of_to} > ?)"

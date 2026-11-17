@@ -1381,3 +1381,75 @@ class TestReviewRegressions:
         assert response.status_code == 409
         assert revision.id in response.json()["detail"]
 
+    def test_known_at_alone_filters_validity_at_now(self, mock_episodic_vault_config):
+        # On dev, known_at alone means "recorded by then, that holds now".
+        # valid_at is what moves the valid instant; known_at must not.
+        from ctxvault.core import vault_router as router
+
+        vault = router.open_vault(VAULT)
+        ended = sqlite_store.write_episode(
+            vault.config,
+            content="held only in March",
+            valid_from="2026-03-01T00:00:00+00:00",
+            valid_to="2026-03-20T00:00:00+00:00",
+            recorded_at="2026-03-01T00:00:00+00:00",
+        )
+        upcoming = sqlite_store.write_episode(
+            vault.config,
+            content="starts in April",
+            valid_from="2026-04-01T00:00:00+00:00",
+            recorded_at="2026-03-01T00:00:00+00:00",
+        )
+
+        found = sqlite_store.select_episodes(
+            vault.config, known_at="2026-03-10T00:00:00+00:00",
+        )
+        assert {e["id"] for e in found} == {upcoming["id"]}
+
+        then = sqlite_store.select_episodes(
+            vault.config,
+            known_at="2026-03-10T00:00:00+00:00",
+            valid_at="2026-03-10T00:00:00+00:00",
+        )
+        assert {e["id"] for e in then} == {ended["id"]}
+
+    def test_a_close_before_the_latest_reopen_is_refused(self, mock_episodic_vault_config):
+        episode = write(
+            "Giuseppe likes coffee",
+            recorded_at="2026-01-01T00:00:00+00:00",
+            valid_from="2026-01-01T00:00:00+00:00",
+        )
+        vault_router.invalidate_episode(
+            vault_name=VAULT, episode_id=episode.id, at="2026-03-01T00:00:00+00:00",
+        )
+        reopen(episode.id, at="2026-06-01T00:00:00+00:00")
+
+        with pytest.raises(ValueError, match="reopened"):
+            vault_router.invalidate_episode(
+                vault_name=VAULT, episode_id=episode.id, at="2026-04-01T00:00:00+00:00",
+            )
+        assert vault_router.get_episode(vault_name=VAULT, episode_id=episode.id).is_open
+
+        other = write(
+            "Sarah is the contact",
+            recorded_at="2026-01-01T00:00:00+00:00",
+            valid_from="2026-01-01T00:00:00+00:00",
+        )
+        vault_router.invalidate_episode(
+            vault_name=VAULT, episode_id=other.id, at="2026-03-01T00:00:00+00:00",
+        )
+        reopen(other.id, at="2026-06-01T00:00:00+00:00")
+        with pytest.raises(ValueError, match="reopened"):
+            vault_router.supersede_episode(
+                vault_name=VAULT, episode_id=other.id,
+                content="Marco is the contact",
+                at="2026-04-01T00:00:00+00:00",
+            )
+        with pytest.raises(ValueError, match="reopened"):
+            vault_router.revise_episode(
+                vault_name=VAULT, episode_id=other.id,
+                content="Sarah Klein is the contact",
+                at="2026-04-01T00:00:00+00:00",
+            )
+        assert vault_router.get_episode(vault_name=VAULT, episode_id=other.id).is_open
+
