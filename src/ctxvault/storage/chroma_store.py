@@ -82,3 +82,20 @@ def get_document_records(doc_id: str, config: dict) -> dict:
         where={"doc_id": doc_id},
         include=["documents", "metadatas"],
     )
+
+def get_all_records(config: dict, include: list[str]) -> dict:
+    """Every chunk in the vault, with what `include` asks for."""
+    collection = get_collection(config=config)
+    return collection.get(include=include)
+
+def nearest_other_chunks(embeddings: list[list[float]], exclude_doc_id: str, config: dict, n_results: int = 3) -> dict:
+    """For each embedding, the closest chunks of every document but one, with
+    their own embeddings so the caller can measure similarity itself: the
+    distances of an older (l2) collection are not cosine."""
+    collection = get_collection(config=config)
+    return collection.query(
+        query_embeddings=embeddings,
+        n_results=n_results,
+        where={"doc_id": {"$ne": exclude_doc_id}},
+        include=["metadatas", "embeddings", "documents"],
+    )

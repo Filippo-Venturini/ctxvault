@@ -1,12 +1,21 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import ClassVar
+from ctxvault.models.pruning import PrunePolicy, PruneReport, ReasonSpec
 from ctxvault.models.vaults import VaultOperation
 from ctxvault.utils.config import attach_agent_to_vault, delete_vault, detach_agent_from_vault, is_authorized, make_public as _make_public
 from ctxvault.core.exceptions import FileAlreadyExistError, FileOutsideVaultError, FileTypeNotPresentError, PathOutsideVaultError, UnsupportedFileTypeError, UnsupportedVaultOperationError
 from ctxvault.utils.text_extraction import SUPPORTED_EXT
 
+# Where pruned files wait to be restored or purged, inside the vault and
+# outside everything that walks it.
+ARCHIVE_DIR = ".archive"
+
 class BaseVault(ABC):
     supported_operations: frozenset[VaultOperation] = frozenset()
+    # The reasons this vault type can prune for. A type that declares none
+    # also leaves PRUNE out of supported_operations.
+    prune_reasons: ClassVar[dict[str, ReasonSpec]] = {}
 
     def __init__(self, vault_name: str, config: dict):
         self.vault_name = vault_name
@@ -32,6 +41,16 @@ class BaseVault(ABC):
         
         return base_path
     
+    @property
+    def archive_path(self) -> Path:
+        return (self.vault_path / ARCHIVE_DIR).resolve()
+
+    def _excluded_dirs(self) -> list[Path]:
+        """What a walk of the vault's files never enters: the index database
+        and the prune archive."""
+        excluded = [self.db_path] if self.db_path is not None else []
+        return excluded + [self.archive_path]
+
     def iter_files(self, path: Path, exclude_dirs: list[Path] | None = None):
         if exclude_dirs is None:
             exclude_dirs = []
@@ -78,7 +97,7 @@ class BaseVault(ABC):
         if not file_path.resolve().is_relative_to(self.vault_path):
             raise FileOutsideVaultError("The file to delete is already outside the Context Vault.")
         
-        if file_path.exists:
+        if file_path.exists():
             file_path.unlink()
     
     def delete_files(self, path: str | None = None)-> tuple[list[str], list[str]]:
@@ -87,9 +106,7 @@ class BaseVault(ABC):
         deleted_files = []
         skipped_files = []
 
-        exclude_dirs = [self.db_path] if self.db_path is not None else []
-
-        for file in self.iter_files(path=base_path, exclude_dirs=exclude_dirs):
+        for file in self.iter_files(path=base_path, exclude_dirs=self._excluded_dirs()):
             try:
                 self.delete_file(file_path=file)
                 deleted_files.append(str(file))
@@ -117,6 +134,38 @@ class BaseVault(ABC):
         
         abs_path.parent.mkdir(parents=True, exist_ok=True)
         abs_path.write_text(content, encoding="utf-8")
+
+    def prune_policy(self) -> PrunePolicy:
+        return PrunePolicy.for_vault(self.config, self.prune_reasons)
+
+    def prune(self, *, reasons: set[str] | None = None, targets: list[str] | None = None,
+              policy: PrunePolicy | None = None) -> PruneReport:
+        """What this vault would prune, and why. Changes nothing.
+
+        `reasons` limits the report to some of the type's reasons, `targets`
+        to some documents (paths inside the vault) or episodes. `policy`
+        replaces the stored one for this call, e.g. with a one-off threshold.
+        """
+        self._require_operation(VaultOperation.PRUNE)
+        policy = policy or self.prune_policy()
+        unknown = set(reasons or ()) - set(self.prune_reasons)
+        if unknown:
+            raise ValueError(f"Unknown prune reason(s): {', '.join(sorted(unknown))}. "
+                             f"Known: {', '.join(self.prune_reasons)}.")
+        report = self._find_candidates(policy=policy, reasons=reasons or set(self.prune_reasons))
+        if targets:
+            wanted = {self._prune_target(t) for t in targets}
+            report.candidates = [c for c in report.candidates if c.target in wanted]
+            report.held = [c for c in report.held if c.target in wanted]
+        return report
+
+    def _prune_target(self, target: str) -> str:
+        """A target as the vault's candidates name it."""
+        return target
+
+    def _find_candidates(self, policy: PrunePolicy, reasons: set[str]) -> PruneReport:
+        """The report for these reasons. Never has side effects."""
+        raise NotImplementedError
 
     @abstractmethod
     def index_files(self, path: str | None = None) -> tuple[list[str], list[str]]:
