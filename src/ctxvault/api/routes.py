@@ -439,7 +439,7 @@ async def invalidate_episode(episode_id: str, invalidate_request: InvalidateEpis
 @ctxvault_router.post(
     "/episodes/{episode_id}/reopen",
     summary="Reopen a closed episode",
-    description="Make a closed episode current again without erasing the close. An as-of query between the close and the reopen still sees it as closed. If it was superseded or revised, the successor must already be closed."
+    description="Make a closed episode current again without erasing the close. An as-of query between the close and the reopen still sees it as closed. A revised original cannot be reopened: use the revision. If it was superseded, the successor must already be closed."
 )
 async def reopen_episode(episode_id: str, reopen_request: ReopenEpisodeRequest, request: Request)-> EpisodeResponse:
     try:
@@ -455,7 +455,7 @@ async def reopen_episode(episode_id: str, reopen_request: ReopenEpisodeRequest, 
         return EpisodeResponse(vault_name=reopen_request.vault_name, episode=episode)
     except EpisodeNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except (EpisodeAlreadyOpenError, EpisodeSuccessorStillOpenError) as e:
+    except (EpisodeAlreadyOpenError, EpisodeSuccessorStillOpenError, EpisodeWasRevisedError) as e:
         raise HTTPException(status_code=409, detail=str(e))
     except VaultNotFoundError as e:
         raise HTTPException(status_code=400, detail=str(e))

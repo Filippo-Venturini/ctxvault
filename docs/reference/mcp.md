@@ -158,7 +158,7 @@ Mark an episode as no longer true, without deleting it. Use this when something 
 
 ### `reopen_episode`
 
-Make a closed episode current again, without erasing the close. Use this to undo an invalidate, or to bring back a superseded or revised statement after its successor has itself been closed. An as-of query between the close and the reopen still sees the episode as closed. If a successor is still current, close it first; this tool will not close it for you.
+Make a closed episode current again, without erasing the close. Use this to undo an invalidate, or to bring back a superseded statement after its successor has itself been closed. A revised original cannot be reopened: attestations and disputes already moved to the revision, so reopen or close that instead. An as-of query between the close and the reopen still sees the episode as closed. If a successor is still current, close it first; this tool will not close it for you. `episode` history surfaces the reopen reason and `reopened_at`.
 
 | Parameter | Type | Default |
 |-----------|------|---------|

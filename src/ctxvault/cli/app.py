@@ -387,7 +387,9 @@ def _print_episode(e, index: int | None = None, show_score: bool = False):
     if e.revised_by:
         typer.secho(f"     revised by: {e.revised_by}", fg=typer.colors.YELLOW)
     if getattr(e, "reopened_at", None):
-        typer.secho(f"     reopened at: {e.reopened_at}", fg=typer.colors.GREEN)
+        reason = getattr(e, "reopen_reason", None)
+        suffix = f" ({reason})" if reason else ""
+        typer.secho(f"     reopened at: {e.reopened_at}{suffix}", fg=typer.colors.GREEN)
     if e.disputed_with:
         typer.secho(f"     disputed with: {', '.join(e.disputed_with)}", fg=typer.colors.YELLOW)
 

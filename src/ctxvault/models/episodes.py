@@ -44,9 +44,12 @@ class Episode(BaseModel):
     # change, the wording did. The revision opens where this one did and
     # carries its attestations.
     revised_by: str | None = None
-    # Derived from episode_reopenings: when this statement last became
+    # Derived from episode_closures: when this statement last became
     # current again, as of `known_at` when a query asks for a past instant.
     reopened_at: str | None = None
+    # Why it was last reopened, as of the same instant. None if it has
+    # not been reopened, or if that reopen carried no reason.
+    reopen_reason: str | None = None
 
     recall_count: int = 0
     last_recalled_at: str | None = None

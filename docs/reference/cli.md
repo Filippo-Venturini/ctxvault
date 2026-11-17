@@ -325,11 +325,13 @@ ctxvault invalidate memories 6f1c... --valid-to 2026-07-12T00:00:00+00:00 --reas
 
 ## `reopen`
 Make a closed episode current again, without erasing the close. The close is
-recorded as an event, so a query with `--known-at` between the close and the
+recorded as an interval, so a query with `--known-at` between the close and the
 reopen still sees the episode as closed, and `episode --history` shows the
-reopen on the statement. If the episode was superseded or revised, the
-successor (or a later still-current one in the same chain) must already be
-closed; `reopen` will not close it for you.
+reopen time and reason on the statement. A revised original cannot be
+reopened: attestations and disputes already moved to the revision, so
+reopen or close that instead. If the episode was superseded, the successor
+(or a later still-current one in the same chain) must already be closed;
+`reopen` will not close it for you.
 
 A dispute that ended because this side was closed becomes open again if the
 other side is still current.

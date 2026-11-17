@@ -12,6 +12,16 @@ successor, so what the vault believed, and when, stays reconstructable.
 Structured filtering lives here; ranking (similarity, recency, salience) lives
 in the vault layer, which is the only place that knows about embeddings.
 
+Closes are stored as intervals in `episode_closures`, and the `episodes` row
+is a cache of the current state. A query as of a past `known_at` filters on
+those intervals in SQL so a `scan_limit` cannot drop rows that only fail a
+later Python check. Metadata is always read from the row, never reconstructed.
+
+A vault migrated from schema v3 gets one closure per already-closed row.
+The valid window that was on the row before that close was overwritten and
+is not recoverable, so `prior_valid_to` is stored as NULL. Reopening such
+a legacy close therefore cannot restore a written-in `valid_to`.
+
 Timestamps are stored and compared as ISO-8601 strings, which only orders
 correctly when they share an offset: everything written by this module is UTC,
 and callers passing their own timestamps should be too.
@@ -25,7 +35,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ctxvault.core.exceptions import EpisodeAlreadyClosedError, EpisodeAlreadyOpenError, EpisodeNotFoundError, EpisodeSuccessorStillOpenError, SchemaVersionError
+from ctxvault.core.exceptions import EpisodeAlreadyClosedError, EpisodeAlreadyOpenError, EpisodeNotFoundError, EpisodeSuccessorStillOpenError, EpisodeWasRevisedError, SchemaVersionError
 
 SCHEMA_VERSION = 4
 
@@ -99,24 +109,30 @@ CREATE TABLE IF NOT EXISTS episode_disputes (
 
 CREATE INDEX IF NOT EXISTS idx_disputes_b ON episode_disputes(episode_b);
 
--- A reopen is an event, not an in-place clear of invalidated_at: the close
--- stays reconstructable, so a query as of an instant between the close and
--- the reopen still sees the episode as closed.
-CREATE TABLE IF NOT EXISTS episode_reopenings (
-    episode_id            TEXT NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
-    at                    TEXT NOT NULL,
-    reason                TEXT,
-    closed_invalidated_at TEXT NOT NULL,
-    closed_valid_to       TEXT,
-    closed_superseded_by  TEXT,
-    closed_revised_by     TEXT,
-    closed_metadata       TEXT NOT NULL DEFAULT '{}',
-    open_valid_to         TEXT,
-    open_metadata         TEXT NOT NULL DEFAULT '{}',
-    PRIMARY KEY (episode_id, at)
+-- One row per close. The episodes table is a cache of the current state;
+-- a query as of a past instant uses these intervals to see whether the
+-- statement was closed then. Reopening sets reopened_at on the latest
+-- closure and restores prior_valid_to on the row, so the close stays
+-- reconstructable. reason is why it was closed; reopen_reason is why
+-- it was later reopened, when it was.
+--
+-- Vaults migrated from v3 backfill one closure per already-closed row
+-- with prior_valid_to NULL: that earlier end was overwritten on the
+-- row and is not recoverable.
+CREATE TABLE IF NOT EXISTS episode_closures (
+    episode_id     TEXT NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+    closed_at      TEXT NOT NULL,
+    valid_to       TEXT,
+    prior_valid_to TEXT,
+    superseded_by  TEXT REFERENCES episodes(id),
+    revised_by     TEXT REFERENCES episodes(id),
+    reason         TEXT,
+    reopened_at    TEXT,
+    reopen_reason  TEXT,
+    PRIMARY KEY (episode_id, closed_at)
 );
 
-CREATE INDEX IF NOT EXISTS idx_reopenings_episode ON episode_reopenings(episode_id, at);
+CREATE INDEX IF NOT EXISTS idx_closures_episode ON episode_closures(episode_id, closed_at);
 """
 
 # from_version -> list of statements taking the file to from_version + 1.
@@ -130,7 +146,7 @@ _MIGRATIONS: dict[int, list[str]] = {
     2: [     # v3: a statement can be revised, not only superseded
         "ALTER TABLE episodes ADD COLUMN revised_by TEXT REFERENCES episodes(id)",
     ],
-    3: [],   # v4: episode_reopenings, created by _SCHEMA
+    3: [],   # v4: episode_closures, created by _SCHEMA, backfilled in _apply_schema
 }
 
 def now_iso() -> str:
@@ -188,7 +204,82 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
 
     for statement in _LATE_INDEXES:
         conn.execute(statement)
+    _migrate_reopenings_if_present(conn)
+    _backfill_closures(conn)
     conn.commit()
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (name,),
+    ).fetchone() is not None
+
+def _migrate_reopenings_if_present(conn: sqlite3.Connection) -> None:
+    """Convert an unreleased v4 file that stored reopens as events."""
+    if not _table_exists(conn, "episode_reopenings"):
+        return
+    for event in conn.execute("SELECT * FROM episode_reopenings").fetchall():
+        closed_meta = json.loads(event["closed_metadata"] or "{}")
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO episode_closures (
+                episode_id, closed_at, valid_to, prior_valid_to,
+                superseded_by, revised_by, reason, reopened_at, reopen_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            ,
+            (
+                event["episode_id"],
+                event["closed_invalidated_at"],
+                event["closed_valid_to"],
+                event["open_valid_to"],
+                event["closed_superseded_by"],
+                event["closed_revised_by"],
+                closed_meta.get("invalidation_reason"),
+                event["at"],
+                event["reason"],
+            ),
+        )
+    conn.execute("DROP TABLE episode_reopenings")
+
+def _backfill_closures(conn: sqlite3.Connection) -> None:
+    """One closure per currently closed row that has none.
+
+    `prior_valid_to` is unknown for these legacy rows and is stored as
+    NULL: the close already overwrote `valid_to` on the episode, and
+    that earlier end cannot be recovered. Reopening one cannot restore
+    a written-in valid_to.
+    """
+    rows = conn.execute(
+        """
+        SELECT e.id, e.invalidated_at, e.valid_to, e.superseded_by,
+               e.revised_by, e.metadata
+        FROM episodes e
+        WHERE e.invalidated_at IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM episode_closures c WHERE c.episode_id = e.id
+          )
+        """
+    ).fetchall()
+    for row in rows:
+        metadata = json.loads(row["metadata"] or "{}")
+        conn.execute(
+            """
+            INSERT INTO episode_closures (
+                episode_id, closed_at, valid_to, prior_valid_to,
+                superseded_by, revised_by, reason, reopened_at, reopen_reason
+            ) VALUES (?, ?, ?, NULL, ?, ?, ?, NULL, NULL)
+            """
+            ,
+            (
+                row["id"],
+                row["invalidated_at"],
+                row["valid_to"],
+                row["superseded_by"],
+                row["revised_by"],
+                metadata.get("invalidation_reason"),
+            ),
+        )
 
 def get_connection(config: dict) -> sqlite3.Connection:
     db_path = config.get("db_path")
@@ -246,107 +337,182 @@ def _attestation_summary(conn: sqlite3.Connection, episode_id: str,
     ).fetchone()
     return row["n"], row["last"]
 
-def _reopenings(conn: sqlite3.Connection, episode_id: str) -> list[sqlite3.Row]:
+def _covering_closure(
+    conn: sqlite3.Connection, episode_id: str, known_at: str
+) -> sqlite3.Row | None:
     return conn.execute(
         """
-        SELECT at, reason, closed_invalidated_at, closed_valid_to,
-               closed_superseded_by, closed_revised_by, closed_metadata,
-               open_valid_to, open_metadata
-        FROM episode_reopenings
+        SELECT * FROM episode_closures
         WHERE episode_id = ?
-        ORDER BY at
+          AND closed_at <= ?
+          AND (reopened_at IS NULL OR reopened_at > ?)
+        ORDER BY closed_at DESC
+        LIMIT 1
+        """,
+        (episode_id, known_at, known_at),
+    ).fetchone()
+
+def _next_closure(
+    conn: sqlite3.Connection, episode_id: str, known_at: str
+) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT * FROM episode_closures
+        WHERE episode_id = ? AND closed_at > ?
+        ORDER BY closed_at ASC
+        LIMIT 1
+        """,
+        (episode_id, known_at),
+    ).fetchone()
+
+def _last_reopen(
+    conn: sqlite3.Connection, episode_id: str, known_at: str | None = None
+) -> sqlite3.Row | None:
+    if known_at:
+        return conn.execute(
+            """
+            SELECT reopened_at, reopen_reason FROM episode_closures
+            WHERE episode_id = ?
+              AND reopened_at IS NOT NULL
+              AND reopened_at <= ?
+            ORDER BY reopened_at DESC
+            LIMIT 1
+            """,
+            (episode_id, known_at),
+        ).fetchone()
+    return conn.execute(
+        """
+        SELECT reopened_at, reopen_reason FROM episode_closures
+        WHERE episode_id = ? AND reopened_at IS NOT NULL
+        ORDER BY reopened_at DESC
+        LIMIT 1
         """,
         (episode_id,),
-    ).fetchall()
+    ).fetchone()
 
+def _insert_closure(
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    *,
+    closed_at: str,
+    valid_to: str | None,
+    superseded_by: str | None = None,
+    revised_by: str | None = None,
+    reason: str | None = None,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO episode_closures (
+            episode_id, closed_at, valid_to, prior_valid_to,
+            superseded_by, revised_by, reason, reopened_at, reopen_reason
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+        """,
+        (
+            row["id"],
+            closed_at,
+            valid_to,
+            row["valid_to"],
+            superseded_by,
+            revised_by,
+            reason,
+        ),
+    )
+
+def _covering_clause(alias: str, known_at: str) -> tuple[str, list]:
+    sql = (
+        f"EXISTS (SELECT 1 FROM episode_closures c "
+        f"WHERE c.episode_id = {alias}.id AND c.closed_at <= ? "
+        f"AND (c.reopened_at IS NULL OR c.reopened_at > ?))"
+    )
+    return sql, [known_at, known_at]
+
+def _retracted_clause(alias: str, known_at: str) -> tuple[str, list]:
+    sql = (
+        f"EXISTS (SELECT 1 FROM episode_closures c "
+        f"WHERE c.episode_id = {alias}.id AND c.revised_by IS NOT NULL "
+        f"AND c.closed_at <= ? AND (c.reopened_at IS NULL OR c.reopened_at > ?))"
+    )
+    return sql, [known_at, known_at]
+
+def _as_of_valid_to_sql(alias: str, known_at: str) -> tuple[str, list]:
+    """Valid_to as of known_at: the covering close's end, else the
+    prior_valid_to of the next later close, else the current row."""
+    sql = f"""(
+      CASE
+        WHEN EXISTS (
+          SELECT 1 FROM episode_closures c
+          WHERE c.episode_id = {alias}.id
+            AND c.closed_at <= ?
+            AND (c.reopened_at IS NULL OR c.reopened_at > ?)
+        ) THEN (
+          SELECT c.valid_to FROM episode_closures c
+          WHERE c.episode_id = {alias}.id
+            AND c.closed_at <= ?
+            AND (c.reopened_at IS NULL OR c.reopened_at > ?)
+          ORDER BY c.closed_at DESC LIMIT 1
+        )
+        WHEN EXISTS (
+          SELECT 1 FROM episode_closures c
+          WHERE c.episode_id = {alias}.id AND c.closed_at > ?
+        ) THEN (
+          SELECT c.prior_valid_to FROM episode_closures c
+          WHERE c.episode_id = {alias}.id AND c.closed_at > ?
+          ORDER BY c.closed_at ASC LIMIT 1
+        )
+        ELSE {alias}.valid_to
+      END
+    )"""
+    return sql, [known_at] * 6
 
 def _lifecycle_as_of(
     conn: sqlite3.Connection, row: sqlite3.Row, known_at: str | None = None
 ) -> dict:
     """Transaction-time fields as they stood at `known_at`, or now.
 
-    Reopening clears the close on the current row and records it as an event,
-    so a past instant between the close and the reopen has to reconstruct the
-    closed state from that event rather than from the row.
+    Metadata always comes from the current row: it is not reconstructed
+    from a past close. When `known_at` is covered by a closure, the
+    close's valid_to and successor links are the ones that held then;
+    otherwise the statement was open and valid_to is the prior end
+    (or the row, if no later close is on file).
     """
-    valid_to = row["valid_to"]
-    invalidated_at = row["invalidated_at"]
-    superseded_by = row["superseded_by"]
-    revised_by = row["revised_by"]
     metadata = json.loads(row["metadata"] or "{}")
-    events = _reopenings(conn, row["id"])
+    last = _last_reopen(conn, row["id"], known_at)
+    reopened_at = last["reopened_at"] if last else None
+    reopen_reason = last["reopen_reason"] if last else None
 
-    if known_at:
-        for event in reversed(events):
-            if event["at"] > known_at:
-                invalidated_at = event["closed_invalidated_at"]
-                valid_to = event["closed_valid_to"]
-                superseded_by = event["closed_superseded_by"]
-                revised_by = event["closed_revised_by"]
-                metadata = json.loads(event["closed_metadata"] or "{}")
-        if invalidated_at is not None and invalidated_at > known_at:
-            prior = [event for event in events if event["at"] <= known_at]
-            if prior:
-                last = prior[-1]
-                valid_to = last["open_valid_to"]
-                metadata = json.loads(last["open_metadata"] or "{}")
-                superseded_by = last["closed_superseded_by"]
-                revised_by = last["closed_revised_by"]
-            else:
-                upcoming = [event for event in events if event["at"] > known_at]
-                first = upcoming[0] if upcoming else None
-                valid_to = first["open_valid_to"] if first else None
-                metadata = json.loads(first["open_metadata"] or "{}") if first else {}
-                superseded_by = None
-                revised_by = None
-            invalidated_at = None
+    if known_at is None:
+        return {
+            "valid_to": row["valid_to"],
+            "invalidated_at": row["invalidated_at"],
+            "superseded_by": row["superseded_by"],
+            "revised_by": row["revised_by"],
+            "metadata": metadata,
+            "reopened_at": reopened_at,
+            "reopen_reason": reopen_reason,
+        }
 
-    reopened_at = None
-    for event in events:
-        if known_at is None or event["at"] <= known_at:
-            reopened_at = event["at"]
+    covering = _covering_closure(conn, row["id"], known_at)
+    if covering is not None:
+        return {
+            "valid_to": covering["valid_to"],
+            "invalidated_at": covering["closed_at"],
+            "superseded_by": covering["superseded_by"],
+            "revised_by": covering["revised_by"],
+            "metadata": metadata,
+            "reopened_at": reopened_at,
+            "reopen_reason": reopen_reason,
+        }
+
+    nxt = _next_closure(conn, row["id"], known_at)
     return {
-        "valid_to": valid_to,
-        "invalidated_at": invalidated_at,
-        "superseded_by": superseded_by,
-        "revised_by": revised_by,
+        "valid_to": nxt["prior_valid_to"] if nxt is not None else row["valid_to"],
+        "invalidated_at": None,
+        "superseded_by": None,
+        "revised_by": None,
         "metadata": metadata,
         "reopened_at": reopened_at,
+        "reopen_reason": reopen_reason,
     }
-
-
-def _holds_at(
-    episode: dict, *, valid_at: str | None, known_at: str | None, include_closed: bool
-) -> bool:
-    """The same time filters `select_episodes` used to apply in SQL."""
-    if known_at and episode["recorded_at"] > known_at:
-        return False
-    if known_at:
-        revised = episode["revised_by"] is not None
-        closed_by_then = (
-            episode["invalidated_at"] is not None and episode["invalidated_at"] <= known_at
-        )
-        if revised and closed_by_then:
-            return False
-    elif episode["revised_by"] is not None:
-        return False
-
-    if include_closed and not valid_at:
-        return True
-
-    instant = valid_at or known_at or now_iso()
-    if episode["valid_from"] > instant:
-        return False
-    ended = episode["valid_to"] is not None and episode["valid_to"] <= instant
-    if ended:
-        if (
-            known_at
-            and episode["invalidated_at"] is not None
-            and episode["invalidated_at"] > known_at
-        ):
-            return True
-        return False
-    return True
 
 
 def _successor_id(conn: sqlite3.Connection, row: sqlite3.Row) -> str | None:
@@ -354,14 +520,17 @@ def _successor_id(conn: sqlite3.Connection, row: sqlite3.Row) -> str | None:
         return row["superseded_by"] or row["revised_by"]
     event = conn.execute(
         """
-        SELECT closed_superseded_by, closed_revised_by FROM episode_reopenings
-        WHERE episode_id = ? ORDER BY at DESC LIMIT 1
+        SELECT superseded_by, revised_by FROM episode_closures
+        WHERE episode_id = ?
+          AND (superseded_by IS NOT NULL OR revised_by IS NOT NULL)
+        ORDER BY closed_at DESC
+        LIMIT 1
         """,
         (row["id"],),
     ).fetchone()
     if event is None:
         return None
-    return event["closed_superseded_by"] or event["closed_revised_by"]
+    return event["superseded_by"] or event["revised_by"]
 
 
 def _predecessor_id(conn: sqlite3.Connection, episode_id: str) -> str | None:
@@ -373,9 +542,10 @@ def _predecessor_id(conn: sqlite3.Connection, episode_id: str) -> str | None:
         return row["id"]
     event = conn.execute(
         """
-        SELECT episode_id FROM episode_reopenings
-        WHERE closed_superseded_by = ? OR closed_revised_by = ?
-        ORDER BY at DESC LIMIT 1
+        SELECT episode_id FROM episode_closures
+        WHERE superseded_by = ? OR revised_by = ?
+        ORDER BY closed_at DESC
+        LIMIT 1
         """,
         (episode_id, episode_id),
     ).fetchone()
@@ -410,35 +580,32 @@ def _open_disputes(
     reading an instant before it happened.
     """
     instant = known_at or now_iso()
+    retracted, retracted_params = _retracted_clause("o", instant)
+    covering, covering_params = _covering_clause("o", instant)
+    as_of_to, as_of_params = _as_of_valid_to_sql("o", instant)
     rows = conn.execute(
-        """
+        f"""
         SELECT CASE WHEN d.episode_a = ? THEN d.episode_b ELSE d.episode_a END AS other
         FROM episode_disputes d
+        JOIN episodes o
+          ON o.id = CASE WHEN d.episode_a = ? THEN d.episode_b ELSE d.episode_a END
         WHERE (d.episode_a = ? OR d.episode_b = ?)
           AND d.noticed_at <= ?
+          AND o.recorded_at <= ?
+          AND NOT ({retracted})
+          AND NOT ({covering})
+          AND ({as_of_to} IS NULL OR {as_of_to} > ?)
         ORDER BY d.noticed_at
         """,
-        (episode_id, episode_id, episode_id, instant),
+        (
+            episode_id, episode_id, episode_id, episode_id, instant, instant,
+            *retracted_params,
+            *covering_params,
+            *as_of_params, *as_of_params,
+            instant,
+        ),
     ).fetchall()
-
-    open_with: list[str] = []
-    for item in rows:
-        other = conn.execute("SELECT * FROM episodes WHERE id = ?", (item["other"],)).fetchone()
-        if other is None or other["recorded_at"] > instant:
-            continue
-        state = _lifecycle_as_of(conn, other, known_at=instant)
-        revised = state["revised_by"] is not None
-        closed_by_then = state["invalidated_at"] is not None and state["invalidated_at"] <= instant
-        if revised and closed_by_then:
-            continue
-        ended = state["valid_to"] is not None and state["valid_to"] <= instant
-        end_not_yet_known = (
-            state["invalidated_at"] is not None and state["invalidated_at"] > instant
-        )
-        if ended and not end_not_yet_known:
-            continue
-        open_with.append(item["other"])
-    return open_with
+    return [item["other"] for item in rows]
 
 
 def _row_to_dict(
@@ -463,6 +630,7 @@ def _row_to_dict(
         "superseded_by": state["superseded_by"],
         "revised_by": state["revised_by"],
         "reopened_at": state["reopened_at"],
+        "reopen_reason": state["reopen_reason"],
         "recall_count": row["recall_count"],
         "last_recalled_at": row["last_recalled_at"],
         "confirmed_count": confirmed_count,
@@ -610,9 +778,13 @@ def invalidate_episode(
         if reason:
             metadata["invalidation_reason"] = reason
 
+        end = valid_to or now
+        # The closure is the source of truth for this close; invalidation_reason
+        # stays on the row so older readers still see it.
+        _insert_closure(conn, row, closed_at=now, valid_to=end, reason=reason)
         conn.execute(
             "UPDATE episodes SET valid_to = ?, invalidated_at = ?, metadata = ? WHERE id = ?",
-            (valid_to or now, now, json.dumps(metadata), episode_id),
+            (end, now, json.dumps(metadata), episode_id),
         )
 
     return get_episode(config, episode_id)
@@ -626,15 +798,19 @@ def reopen_episode(
 ) -> dict:
     """Make a closed episode current again, without erasing the close.
 
-    The close stays in `episode_reopenings`, so a query as of an instant
-    between the close and the reopen still sees the episode as closed.
-    `at` is when the reopen was recorded, for callers replaying the past;
-    it defaults to now and cannot precede the close.
+    The close stays in `episode_closures`: reopening sets `reopened_at` on
+    the latest closure and restores `prior_valid_to` on the current row, so
+    a query as of an instant between the close and the reopen still sees
+    the episode as closed. `at` is when the reopen was recorded, for
+    callers replaying the past; it defaults to now and cannot precede the
+    close.
 
-    If the episode was superseded or revised, the successor (or a later
-    still-current one in the same chain) must already be closed. The reopen
-    does not close a successor by itself: two current statements in one
-    chain would leave a query at "now" seeing both.
+    A revised original cannot be reopened: attestations and disputes
+    already moved to the revision, and that is the statement to reopen
+    (or close) instead. If the episode was superseded, the successor (or a
+    later still-current one in the same chain) must already be closed.
+    The reopen does not close a successor by itself: two current
+    statements in one chain would leave a query at "now" seeing both.
     """
     conn = get_connection(config)
 
@@ -647,10 +823,24 @@ def reopen_episode(
                 f"Episode '{episode_id}' is already current; there is nothing to reopen."
             )
 
+        latest = conn.execute(
+            """
+            SELECT * FROM episode_closures
+            WHERE episode_id = ?
+            ORDER BY closed_at DESC
+            LIMIT 1
+            """,
+            (episode_id,),
+        ).fetchone()
+        revision_id = (latest["revised_by"] if latest is not None else None) or row["revised_by"]
+        if revision_id:
+            raise EpisodeWasRevisedError(episode_id, revision_id)
+
         moment = at or now_iso()
-        if moment < row["invalidated_at"]:
+        closed_at = latest["closed_at"] if latest is not None else row["invalidated_at"]
+        if moment < closed_at:
             raise ValueError(
-                f"at {moment!r} is before the episode's close at {row['invalidated_at']!r}: "
+                f"at {moment!r} is before the episode's close at {closed_at!r}: "
                 "an episode cannot be reopened before it was closed."
             )
 
@@ -662,38 +852,24 @@ def reopen_episode(
         open_metadata = {
             key: value for key, value in closed_metadata.items() if key != "invalidation_reason"
         }
-        # The pre-close valid window is not stored on the row (invalidate and
-        # supersede overwrite valid_to). A written-in valid_to is unusual for
-        # a later close; reopening makes the statement current, so the open
-        # end is cleared.
-        open_valid_to = None
+        # Restore the valid window that was on the row before this close.
+        # A legacy backfilled closure has prior_valid_to NULL because that
+        # earlier end was not kept.
+        prior_valid_to = latest["prior_valid_to"] if latest is not None else None
 
-        conn.execute(
-            """
-            INSERT INTO episode_reopenings (
-                episode_id, at, reason,
-                closed_invalidated_at, closed_valid_to,
-                closed_superseded_by, closed_revised_by, closed_metadata,
-                open_valid_to, open_metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                episode_id,
-                moment,
-                reason,
-                row["invalidated_at"],
-                row["valid_to"],
-                row["superseded_by"],
-                row["revised_by"],
-                json.dumps(closed_metadata),
-                open_valid_to,
-                json.dumps(open_metadata),
-            ),
-        )
-        # Clear the close on the current row so default queries see it as
-        # open. The successor links go with it: history() follows them
-        # through episode_reopenings instead, and current queries must not
-        # hide a reopened original behind revised_by.
+        if latest is not None:
+            conn.execute(
+                """
+                UPDATE episode_closures
+                SET reopened_at = ?, reopen_reason = ?
+                WHERE episode_id = ? AND closed_at = ?
+                """,
+                (moment, reason, episode_id, latest["closed_at"]),
+            )
+        # Clear the close on the current cache so default queries see it as
+        # open. Successor links go with it: history() follows them through
+        # episode_closures instead, and current queries must not hide a
+        # reopened original behind a cleared revised_by.
         conn.execute(
             """
             UPDATE episodes
@@ -701,7 +877,7 @@ def reopen_episode(
                 revised_by = NULL, metadata = ?
             WHERE id = ?
             """,
-            (open_valid_to, json.dumps(open_metadata), episode_id),
+            (prior_valid_to, json.dumps(open_metadata), episode_id),
         )
 
     return get_episode(config, episode_id)
@@ -770,6 +946,9 @@ def supersede_episode(
             embedding=embedding,
         )
 
+        _insert_closure(
+            conn, row, closed_at=recorded_at, valid_to=boundary, superseded_by=new_id,
+        )
         conn.execute(
             "UPDATE episodes SET valid_to = ?, invalidated_at = ?, superseded_by = ? WHERE id = ?",
             (boundary, recorded_at, new_id, episode_id),
@@ -849,6 +1028,12 @@ def revise_episode(
 
         closed_meta = json.loads(row["metadata"] or "{}")
         closed_meta["invalidation_reason"] = "revised"
+        # A revision does not change valid time; the closure records the
+        # same valid_to the row already had (often None).
+        _insert_closure(
+            conn, row, closed_at=recorded_at, valid_to=row["valid_to"],
+            revised_by=new_id, reason="revised",
+        )
         conn.execute(
             "UPDATE episodes SET invalidated_at = ?, revised_by = ?, metadata = ? WHERE id = ?",
             (recorded_at, new_id, json.dumps(closed_meta), episode_id),
@@ -964,10 +1149,10 @@ def history(config: dict, episode_id: str) -> list[dict]:
     if conn.execute("SELECT 1 FROM episodes WHERE id = ?", (episode_id,)).fetchone() is None:
         raise EpisodeNotFoundError(f"Episode '{episode_id}' not found.")
 
-# Walk back to the head of the chain, then forward from it. The `seen` set
+    # Walk back to the head of the chain, then forward from it. The `seen` set
     # is belt and braces: the writers never build a cycle, but a hand-edited
     # database should not hang the process. A reopen clears successor links
-    # on the current row, so the walk also follows episode_reopenings.
+    # on the current row, so the walk also follows episode_closures.
     head = episode_id
     seen = {head}
     while True:
@@ -988,7 +1173,6 @@ def history(config: dict, episode_id: str) -> list[dict]:
         chain.append(_row_to_dict(conn, row))
         current = _successor_id(conn, row)
 
-    
     return chain
 
 def select_episodes(
@@ -1019,24 +1203,32 @@ def select_episodes(
     clauses = []
     params: list = []
 
-    # The valid window at an instant. With `known_at`, an end the vault had
-    # not yet recorded by then does not count: in that belief state the
-    # statement was still open.
+    # The valid window at an instant, against the current row. As-of
+    # queries use closure intervals instead, so a later close cannot hide
+    # a row the vault still believed at known_at.
     def valid_window(instant: str) -> None:
-        if known_at:
-            clauses.append("valid_from <= ? AND (valid_to IS NULL OR valid_to > ? OR invalidated_at > ?)")
-            params.extend([instant, instant, known_at])
-        else:
-            clauses.append("valid_from <= ? AND (valid_to IS NULL OR valid_to > ?)")
-            params.extend([instant, instant])
+        clauses.append("valid_from <= ? AND (valid_to IS NULL OR valid_to > ?)")
+        params.extend([instant, instant])
 
     if known_at:
-        # recorded_at is immutable, so this cut is safe in SQL. The rest of
-        # the time filters run in Python after `_row_to_dict` has applied any
-        # reopen events: a currently-open row may have been closed at
-        # `known_at`, and a currently-closed one may have been open.
+        # recorded_at is immutable. Closed-or-open at this instant, and the
+        # valid window as it stood then, are expressed as interval
+        # predicates so scan_limit applies after the time filters.
         clauses.append("recorded_at <= ?")
         params.append(known_at)
+        retracted, retracted_params = _retracted_clause("episodes", known_at)
+        clauses.append(f"NOT ({retracted})")
+        params.extend(retracted_params)
+        if not include_closed or valid_at:
+            instant = valid_at or known_at
+            as_of_to, as_of_params = _as_of_valid_to_sql("episodes", known_at)
+            clauses.append(
+                f"valid_from <= ? AND ({as_of_to} IS NULL OR {as_of_to} > ?)"
+            )
+            params.append(instant)
+            params.extend(as_of_params)
+            params.extend(as_of_params)
+            params.append(instant)
     elif not include_closed:
         valid_window(valid_at or now_iso())
         # A revised wording is still valid in the world, it is just no longer
@@ -1045,7 +1237,6 @@ def select_episodes(
         clauses.append("revised_by IS NULL")
     elif valid_at:
         valid_window(valid_at)
-
 
     if source:
         clauses.append("source = ?")
@@ -1072,14 +1263,6 @@ def select_episodes(
     ).fetchall()
 
     episodes = [_row_to_dict(conn, row, with_embedding=True, known_at=known_at) for row in rows]
-    if known_at:
-        episodes = [
-            episode
-            for episode in episodes
-            if _holds_at(
-                episode, valid_at=valid_at, known_at=known_at, include_closed=include_closed
-            )
-        ]
 
     # Metadata lives in a JSON blob rather than columns, so it is filtered here
     # instead of in SQL: the structured clauses above have already cut the set
@@ -1248,9 +1431,8 @@ def change_moments(config: dict) -> list[str]:
     conn = get_connection(config)
     rows = conn.execute(
         "SELECT recorded_at AS at FROM episodes UNION ALL "
-        "SELECT invalidated_at FROM episodes WHERE invalidated_at IS NOT NULL UNION ALL "
-        "SELECT closed_invalidated_at FROM episode_reopenings UNION ALL "
-        "SELECT at FROM episode_reopenings UNION ALL "
+        "SELECT closed_at FROM episode_closures UNION ALL "
+        "SELECT reopened_at FROM episode_closures WHERE reopened_at IS NOT NULL UNION ALL "
         "SELECT at FROM episode_attestations UNION ALL "
         "SELECT noticed_at FROM episode_disputes"
     ).fetchall()

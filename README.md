@@ -148,7 +148,7 @@ CtxVault exposes the same vault layer through four interfaces. Use whichever fit
 
 **[HTTP API](https://filippo-venturini.github.io/ctxvault/connect/http/)**: Programmatic integration. Connect LangChain, LangGraph, or any custom pipeline to vaults via REST. Full CRUD, semantic search, and agent write support.
 
-**[MCP server](https://filippo-venturini.github.io/ctxvault/connect/mcp/)**: For autonomous agents. Give any MCP-compatible client direct vault access with no integration code required. The agent handles `list_vaults`, `query`, `write_doc`, and `list_docs` on its own, and on an episodic vault it records and corrects facts with `write_episode`, `query_episodes`, `supersede_episode` and `invalidate_episode`, counts repetitions with `confirm_episode`, holds contradictions open with `dispute_episodes`, and discovers what the vault is about with `list_entities`.
+**[MCP server](https://filippo-venturini.github.io/ctxvault/connect/mcp/)**: For autonomous agents. Give any MCP-compatible client direct vault access with no integration code required. The agent handles `list_vaults`, `query`, `write_doc`, and `list_docs` on its own, and on an episodic vault it records and corrects facts with `write_episode`, `query_episodes`, `supersede_episode` and `invalidate_episode`, brings a close back with `reopen_episode`, counts repetitions with `confirm_episode`, holds contradictions open with `dispute_episodes`, and discovers what the vault is about with `list_entities`.
 
 Whichever door wrote it, `ctxvault ui` shows it: the viewer reads the same vaults, so what an agent recorded over MCP is on the page next to what you indexed from the CLI.
 
