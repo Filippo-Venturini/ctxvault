@@ -6,7 +6,10 @@ import pytest
 from ctxvault.core import vault_router
 from ctxvault.core.exceptions import (
     EpisodeAlreadyClosedError,
+    EpisodeAlreadyOpenError,
     EpisodeNotFoundError,
+    EpisodeSuccessorStillOpenError,
+    EpisodeWasRevisedError,
     SchemaVersionError,
     UnsupportedVaultOperationError,
     VaultTypeNotValidError,
@@ -459,6 +462,9 @@ def confirm(episode_id, **kwargs):
 def dispute(episode_id, other_id, **kwargs):
     return vault_router.dispute_episodes(vault_name=VAULT, episode_id=episode_id, other_id=other_id, **kwargs)
 
+def reopen(episode_id, **kwargs):
+    return vault_router.reopen_episode(vault_name=VAULT, episode_id=episode_id, **kwargs)
+
 class TestConfirmation:
     def test_a_new_episode_is_unconfirmed(self, mock_episodic_vault_config):
         episode = write("Giuseppe likes coffee")
@@ -789,11 +795,23 @@ class TestSchemaVersioning:
                                               content="Written under schema v1, said better")
         assert revised.confirmed_count == 1
         assert vault_router.get_episode(vault_name=VAULT, episode_id="old1").revised_by == revised.id
+        # v4: a revised original cannot be reopened; a merely closed
+        # migrated row can, and the store now has episode_closures.
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=revised.id)
+        with pytest.raises(EpisodeWasRevisedError) as raised:
+            reopen("old1")
+        assert revised.id in str(raised.value)
+        temporary = write("a close to undo")
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=temporary.id)
+        restored = reopen(temporary.id)
+        assert restored.is_open and restored.reopened_at is not None
 
         conn = sqlite3.connect(db_path)
         stored = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0]
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         conn.close()
         assert int(stored) == sqlite_store.SCHEMA_VERSION
+        assert "episode_closures" in tables
 
     def test_a_newer_file_is_refused_instead_of_misread(self, mock_episodic_vault_config):
         write("anything")
@@ -940,4 +958,498 @@ class TestEmbeddingAfterTheFact:
         # and a new episode is written with its vector at once
         new = write("Giuseppe sells honey at the market", entities=["Giuseppe"])
         assert sqlite_store.get_episode(vault_router.open_vault(VAULT).config, new.id, with_embedding=True)["embedding"]
+class TestReopen:
+    """A close can be undone without erasing it."""
+
+    def test_an_invalidated_episode_becomes_current_again(self, mock_episodic_vault_config):
+        episode = write("Giuseppe likes coffee", entities=["Giuseppe"])
+        vault_router.invalidate_episode(
+            vault_name=VAULT, episode_id=episode.id, reason="the shop closed"
+        )
+        assert query() == []
+
+        restored = reopen(episode.id, reason="it reopened")
+
+        assert restored.is_open
+        assert restored.valid_to is None
+        assert restored.invalidated_at is None
+        assert restored.reopened_at is not None
+        assert restored.reopen_reason == "it reopened"
+        assert "invalidation_reason" not in restored.metadata
+        assert {e.id for e in query()} == {episode.id}
+
+    def test_as_of_between_the_close_and_the_reopen_still_sees_it_closed(
+        self, mock_episodic_vault_config
+    ):
+        written, closed, reopened = (
+            days_from_now(-30),
+            days_from_now(-20),
+            days_from_now(-10),
+        )
+        episode = write("Giuseppe likes coffee", recorded_at=written, valid_from=written)
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=episode.id, at=closed)
+        reopen(episode.id, at=reopened)
+
+        before = query(known_at=days_from_now(-25), valid_at=days_from_now(-25))
+        during = query(known_at=days_from_now(-15), valid_at=days_from_now(-15))
+        after = query(known_at=days_from_now(-5), valid_at=days_from_now(-5))
+
+        assert [e.id for e in before] == [episode.id]
+        assert before[0].invalidated_at is None and before[0].reopened_at is None
+        assert during == []
+        closed_as_of = query(known_at=days_from_now(-15), include_closed=True)
+        assert [e.id for e in closed_as_of] == [episode.id]
+        assert closed_as_of[0].invalidated_at == closed
+        assert [e.id for e in after] == [episode.id]
+        assert after[0].is_open and after[0].reopened_at == reopened
+
+    def test_history_shows_the_reopen_and_keeps_the_successor(self, mock_episodic_vault_config):
+        first = write("Sarah Klein is the main contact", entities=["Sarah"])
+        second = vault_router.supersede_episode(
+            vault_name=VAULT, episode_id=first.id, content="Marco Rossi is the main contact"
+        )
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=second.id)
+        restored = reopen(first.id)
+
+        chain = vault_router.episode_history(vault_name=VAULT, episode_id=first.id).chain
+        assert [e.id for e in chain] == [first.id, second.id]
+        assert chain[0].is_open and chain[0].reopened_at is not None
+        assert not chain[1].is_open
+        assert {e.id for e in query()} == {first.id}
+        # The successor link is preserved for the history even though the
+        # current row was cleared so default queries can see the original.
+        assert restored.reopened_at is not None
+
+    def test_reopening_fails_while_the_successor_is_current(self, mock_episodic_vault_config):
+        first = write("Sarah Klein is the main contact")
+        second = vault_router.supersede_episode(
+            vault_name=VAULT, episode_id=first.id, content="Marco Rossi is the main contact"
+        )
+
+        with pytest.raises(EpisodeSuccessorStillOpenError) as raised:
+            reopen(first.id)
+        assert second.id in str(raised.value)
+        assert not vault_router.get_episode(vault_name=VAULT, episode_id=first.id).is_open
+        assert vault_router.get_episode(vault_name=VAULT, episode_id=second.id).is_open
+
+    def test_a_revised_original_cannot_be_reopened(
+        self, mock_episodic_vault_config
+    ):
+        first = write("Anna lives in Padova")
+        revision = vault_router.revise_episode(
+            vault_name=VAULT, episode_id=first.id, content="Anna lives in Padova, in the Arcella"
+        )
+
+        with pytest.raises(EpisodeWasRevisedError) as raised:
+            reopen(first.id)
+        assert revision.id in str(raised.value)
+
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=revision.id)
+        with pytest.raises(EpisodeWasRevisedError) as raised:
+            reopen(first.id)
+        assert revision.id in str(raised.value)
+        assert not vault_router.get_episode(vault_name=VAULT, episode_id=first.id).is_open
+        chain = vault_router.episode_history(vault_name=VAULT, episode_id=first.id).chain
+        assert [e.id for e in chain] == [first.id, revision.id]
+
+    def test_reopening_an_open_episode_is_refused(self, mock_episodic_vault_config):
+        episode = write("Giuseppe likes coffee")
+        with pytest.raises(EpisodeAlreadyOpenError):
+            reopen(episode.id)
+
+    def test_a_missing_episode_cannot_be_reopened(self, mock_episodic_vault_config):
+        with pytest.raises(EpisodeNotFoundError):
+            reopen("does-not-exist")
+
+    def test_reopening_before_the_close_is_refused(self, mock_episodic_vault_config):
+        episode = write(
+            "Giuseppe likes coffee", recorded_at=days_from_now(-10), valid_from=days_from_now(-10)
+        )
+        vault_router.invalidate_episode(
+            vault_name=VAULT, episode_id=episode.id, at=days_from_now(-2)
+        )
+        with pytest.raises(ValueError, match="before the episode's close"):
+            reopen(episode.id, at=days_from_now(-5))
+
+    def test_a_settled_dispute_returns_once_the_closed_side_is_reopened(
+        self, mock_episodic_vault_config
+    ):
+        mestre = write("Giuseppe lives in Mestre")
+        padova = write("Giuseppe lives in Padova")
+        dispute(mestre.id, padova.id)
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=padova.id)
+        assert not vault_router.get_episode(vault_name=VAULT, episode_id=mestre.id).disputed
+
+        restored = reopen(padova.id)
+
+        assert restored.disputed_with == [mestre.id]
+        assert vault_router.get_episode(vault_name=VAULT, episode_id=mestre.id).disputed_with == [
+            padova.id
+        ]
+        assert {e.id for e in query(disputed=True)} == {mestre.id, padova.id}
+
+    def test_as_of_during_the_settled_window_hides_the_dispute(self, mock_episodic_vault_config):
+        written, closed, reopened = (
+            days_from_now(-30),
+            days_from_now(-20),
+            days_from_now(-10),
+        )
+        mestre = write("Giuseppe lives in Mestre", recorded_at=written, valid_from=written)
+        padova = write("Giuseppe lives in Padova", recorded_at=written, valid_from=written)
+        dispute(mestre.id, padova.id, at=written)
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=padova.id, at=closed)
+        reopen(padova.id, at=reopened)
+
+        during = query(known_at=days_from_now(-15), valid_at=days_from_now(-15))
+        after = query(known_at=days_from_now(-5), valid_at=days_from_now(-5))
+
+        assert {e.id for e in during} == {mestre.id}
+        assert not during[0].disputed
+        assert {e.id for e in after} == {mestre.id, padova.id}
+        assert all(e.disputed for e in after)
+
+    def test_it_can_be_closed_again_and_the_open_window_stays_reconstructable(
+        self, mock_episodic_vault_config
+    ):
+        written, closed, reopened, closed_again = (
+            days_from_now(-40),
+            days_from_now(-30),
+            days_from_now(-20),
+            days_from_now(-10),
+        )
+        episode = write("Giuseppe likes coffee", recorded_at=written, valid_from=written)
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=episode.id, at=closed)
+        reopen(episode.id, at=reopened)
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=episode.id, at=closed_again)
+
+        mid = query(known_at=days_from_now(-15), valid_at=days_from_now(-15))
+        late = query(known_at=days_from_now(-5), valid_at=days_from_now(-5))
+
+        assert [e.id for e in mid] == [episode.id] and mid[0].is_open
+        assert late == []
+        assert not vault_router.get_episode(vault_name=VAULT, episode_id=episode.id).is_open
+
+    def test_the_http_endpoint_reopens_an_episode(self, mock_episodic_vault_config):
+        from fastapi.testclient import TestClient
+
+        from ctxvault.api.app import app, ctxvault_router
+
+        app.include_router(ctxvault_router)
+        client = TestClient(app)
+        episode = write("Giuseppe likes coffee")
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=episode.id)
+
+        response = client.post(
+            f"/ctxvault/episodes/{episode.id}/reopen",
+            json={"vault_name": VAULT, "reason": "false alarm"},
+        )
+
+        assert response.status_code == 200
+        body = response.json()["episode"]
+        assert body["invalidated_at"] is None
+        assert body["reopened_at"] is not None
+
+
+class TestReviewRegressions:
+    """Bugs the maintainer reported on PR #48's reconstruction approach.
+
+    These fail on the first reopen implementation and pass once known_at
+    uses closure intervals and metadata comes from the row itself.
+    """
+
+    def test_known_at_before_a_never_reopened_close_keeps_row_metadata(
+        self, mock_episodic_vault_config,
+    ):
+        from ctxvault.core import vault_router as router
+
+        vault = router.open_vault(VAULT)
+        written = sqlite_store.write_episode(
+            vault.config,
+            content="Likes coffee",
+            metadata={"generated_by": "agent-x"},
+            recorded_at="2026-01-01T00:00:00+00:00",
+            valid_from="2026-01-01T00:00:00+00:00",
+        )
+        sqlite_store.invalidate_episode(
+            vault.config,
+            written["id"],
+            valid_to="2026-06-01T00:00:00+00:00",
+            at="2026-06-01T00:00:00+00:00",
+        )
+
+        as_of = sqlite_store.select_episodes(
+            vault.config, known_at="2026-03-01T00:00:00+00:00",
+        )
+
+        assert len(as_of) == 1
+        assert as_of[0]["metadata"]["generated_by"] == "agent-x"
+        assert as_of[0]["invalidated_at"] is None
+        assert as_of[0]["valid_to"] is None
+
+    def test_scan_limit_is_applied_after_the_known_at_filter(
+        self, mock_episodic_vault_config,
+    ):
+        # Five older episodes still open at T, then five newer ones closed
+        # before T. ORDER BY valid_from DESC plus a SQL LIMIT of 5 before
+        # the Python known_at filter returns nothing; the filter must
+        # happen in SQL so the five older rows are kept.
+        from ctxvault.core import vault_router as router
+
+        vault = router.open_vault(VAULT)
+        older = [
+            sqlite_store.write_episode(
+                vault.config,
+                content=f"old {i}",
+                valid_from=f"2026-01-0{i + 1}T00:00:00+00:00",
+                recorded_at="2026-01-01T00:00:00+00:00",
+            )
+            for i in range(5)
+        ]
+        newer = [
+            sqlite_store.write_episode(
+                vault.config,
+                content=f"new {i}",
+                valid_from=f"2026-06-0{i + 1}T00:00:00+00:00",
+                recorded_at="2026-01-01T00:00:00+00:00",
+            )
+            for i in range(5)
+        ]
+        for episode in newer:
+            sqlite_store.invalidate_episode(
+                vault.config, episode["id"], at="2026-06-15T00:00:00+00:00",
+            )
+
+        found = sqlite_store.select_episodes(
+            vault.config,
+            known_at="2026-07-01T00:00:00+00:00",
+            scan_limit=5,
+        )
+
+        assert {e["id"] for e in found} == {e["id"] for e in older}
+        assert all(e["invalidated_at"] is None for e in found)
+
+    def test_a_written_in_valid_to_is_restored_on_reopen(
+        self, mock_episodic_vault_config,
+    ):
+        episode = write(
+            "The lease ends in December",
+            recorded_at="2026-01-01T00:00:00+00:00",
+            valid_from="2026-01-01T00:00:00+00:00",
+            valid_to="2026-12-31T00:00:00+00:00",
+        )
+        vault_router.invalidate_episode(
+            vault_name=VAULT,
+            episode_id=episode.id,
+            at="2026-06-01T00:00:00+00:00",
+        )
+        restored = reopen(episode.id)
+
+        assert restored.valid_to == "2026-12-31T00:00:00+00:00"
+        assert [e.id for e in query()] == [episode.id]
+
+    def test_history_exposes_the_reopen_reason(self, mock_episodic_vault_config):
+        first = write("Sarah Klein is the main contact")
+        second = vault_router.supersede_episode(
+            vault_name=VAULT, episode_id=first.id, content="Marco Rossi is the main contact"
+        )
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=second.id)
+        reopen(first.id, reason="the report was a false alarm")
+
+        chain = vault_router.episode_history(vault_name=VAULT, episode_id=first.id).chain
+        assert chain[0].reopen_reason == "the report was a false alarm"
+        assert chain[0].reopened_at is not None
+
+    def test_multiple_close_reopen_cycles_keep_each_interval(
+        self, mock_episodic_vault_config
+    ):
+        written, closed, reopened, closed_again, reopened_again = (
+            days_from_now(-50),
+            days_from_now(-40),
+            days_from_now(-30),
+            days_from_now(-20),
+            days_from_now(-10),
+        )
+        episode = write(
+            "The lease ends in December",
+            recorded_at=written,
+            valid_from=written,
+            valid_to="2026-12-31T00:00:00+00:00",
+        )
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=episode.id, at=closed)
+        reopen(episode.id, at=reopened, reason="first undo")
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=episode.id, at=closed_again)
+        restored = reopen(episode.id, at=reopened_again, reason="second undo")
+
+        assert restored.valid_to == "2026-12-31T00:00:00+00:00"
+        assert restored.reopen_reason == "second undo"
+        during_first_close = query(known_at=days_from_now(-35), include_closed=True)
+        assert during_first_close[0].invalidated_at == closed
+        mid_open = query(known_at=days_from_now(-25), valid_at=days_from_now(-25))
+        assert [e.id for e in mid_open] == [episode.id] and mid_open[0].is_open is False
+        assert mid_open[0].valid_to == "2026-12-31T00:00:00+00:00"
+        assert mid_open[0].reopen_reason == "first undo"
+        during_second = query(known_at=days_from_now(-15), valid_at=days_from_now(-15))
+        assert during_second == []
+        after = query(known_at=days_from_now(-5), valid_at=days_from_now(-5))
+        assert [e.id for e in after] == [episode.id]
+        assert after[0].reopened_at == reopened_again
+        assert after[0].reopen_reason == "second undo"
+
+    def test_a_v3_closed_row_is_backfilled_with_a_null_prior_valid_to(
+        self, mock_episodic_vault_config, tmp_path,
+    ):
+        """Closed rows from before closures existed get a closure whose
+        prior_valid_to is NULL, because that earlier end was overwritten."""
+        db_path = tmp_path / "legacy.db"
+        conn = sqlite3.connect(db_path)
+        conn.executescript("""
+            CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO meta (key, value) VALUES ('schema_version', '3');
+            CREATE TABLE episodes (
+                id TEXT PRIMARY KEY, content TEXT NOT NULL, source TEXT,
+                confidence REAL NOT NULL DEFAULT 1.0, salience REAL NOT NULL DEFAULT 0.5,
+                occurred_at TEXT, valid_from TEXT NOT NULL, valid_to TEXT,
+                recorded_at TEXT NOT NULL, invalidated_at TEXT,
+                superseded_by TEXT REFERENCES episodes(id),
+                revised_by TEXT REFERENCES episodes(id),
+                recall_count INTEGER NOT NULL DEFAULT 0, last_recalled_at TEXT,
+                metadata TEXT NOT NULL DEFAULT '{}', embedding BLOB
+            );
+            CREATE TABLE episode_entities (
+                episode_id TEXT NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+                entity TEXT NOT NULL, entity_norm TEXT NOT NULL,
+                PRIMARY KEY (episode_id, entity_norm)
+            );
+            INSERT INTO episodes (
+                id, content, valid_from, valid_to, recorded_at, invalidated_at, metadata
+            ) VALUES (
+                'old-closed',
+                'Was already closed under v3',
+                '2026-01-01T00:00:00+00:00',
+                '2026-06-01T00:00:00+00:00',
+                '2026-01-01T00:00:00+00:00',
+                '2026-06-01T00:00:00+00:00',
+                '{"generated_by": "agent-x", "invalidation_reason": "ended"}'
+            );
+        """)
+        conn.commit()
+        conn.close()
+
+        config = {"db_path": str(db_path)}
+        sqlite_store.close_connections()
+        # Opening migrates v3 -> v4 and backfills the closure.
+        as_of = sqlite_store.select_episodes(config, known_at="2026-03-01T00:00:00+00:00")
+        assert len(as_of) == 1
+        assert as_of[0]["metadata"]["generated_by"] == "agent-x"
+        assert as_of[0]["invalidated_at"] is None
+
+        conn = sqlite3.connect(db_path)
+        closure = conn.execute(
+            "SELECT prior_valid_to, valid_to, reason FROM episode_closures WHERE episode_id = 'old-closed'"
+        ).fetchone()
+        version = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0]
+        conn.close()
+        sqlite_store.close_connections()
+
+        assert closure[0] is None  # prior_valid_to unknown for a legacy close
+        assert closure[1] == "2026-06-01T00:00:00+00:00"
+        assert closure[2] == "ended"
+        assert int(version) == sqlite_store.SCHEMA_VERSION
+
+        restored = sqlite_store.reopen_episode(config, "old-closed")
+        # The written-in end cannot be restored: it was never kept.
+        assert restored["valid_to"] is None
+        assert restored["invalidated_at"] is None
+
+    def test_http_refuses_to_reopen_a_revised_original(self, mock_episodic_vault_config):
+        from fastapi.testclient import TestClient
+
+        from ctxvault.api.app import app, ctxvault_router
+
+        app.include_router(ctxvault_router)
+        client = TestClient(app)
+        first = write("Anna lives in Padova")
+        revision = vault_router.revise_episode(
+            vault_name=VAULT, episode_id=first.id, content="Anna lives in Padova, in the Arcella"
+        )
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=revision.id)
+
+        response = client.post(
+            f"/ctxvault/episodes/{first.id}/reopen",
+            json={"vault_name": VAULT},
+        )
+        assert response.status_code == 409
+        assert revision.id in response.json()["detail"]
+
+    def test_known_at_alone_filters_validity_at_now(self, mock_episodic_vault_config):
+        # On dev, known_at alone means "recorded by then, that holds now".
+        # valid_at is what moves the valid instant; known_at must not.
+        from ctxvault.core import vault_router as router
+
+        vault = router.open_vault(VAULT)
+        ended = sqlite_store.write_episode(
+            vault.config,
+            content="held only in March",
+            valid_from="2026-03-01T00:00:00+00:00",
+            valid_to="2026-03-20T00:00:00+00:00",
+            recorded_at="2026-03-01T00:00:00+00:00",
+        )
+        upcoming = sqlite_store.write_episode(
+            vault.config,
+            content="starts in April",
+            valid_from="2026-04-01T00:00:00+00:00",
+            recorded_at="2026-03-01T00:00:00+00:00",
+        )
+
+        found = sqlite_store.select_episodes(
+            vault.config, known_at="2026-03-10T00:00:00+00:00",
+        )
+        assert {e["id"] for e in found} == {upcoming["id"]}
+
+        then = sqlite_store.select_episodes(
+            vault.config,
+            known_at="2026-03-10T00:00:00+00:00",
+            valid_at="2026-03-10T00:00:00+00:00",
+        )
+        assert {e["id"] for e in then} == {ended["id"]}
+
+    def test_a_close_before_the_latest_reopen_is_refused(self, mock_episodic_vault_config):
+        episode = write(
+            "Giuseppe likes coffee",
+            recorded_at="2026-01-01T00:00:00+00:00",
+            valid_from="2026-01-01T00:00:00+00:00",
+        )
+        vault_router.invalidate_episode(
+            vault_name=VAULT, episode_id=episode.id, at="2026-03-01T00:00:00+00:00",
+        )
+        reopen(episode.id, at="2026-06-01T00:00:00+00:00")
+
+        with pytest.raises(ValueError, match="reopened"):
+            vault_router.invalidate_episode(
+                vault_name=VAULT, episode_id=episode.id, at="2026-04-01T00:00:00+00:00",
+            )
+        assert vault_router.get_episode(vault_name=VAULT, episode_id=episode.id).is_open
+
+        other = write(
+            "Sarah is the contact",
+            recorded_at="2026-01-01T00:00:00+00:00",
+            valid_from="2026-01-01T00:00:00+00:00",
+        )
+        vault_router.invalidate_episode(
+            vault_name=VAULT, episode_id=other.id, at="2026-03-01T00:00:00+00:00",
+        )
+        reopen(other.id, at="2026-06-01T00:00:00+00:00")
+        with pytest.raises(ValueError, match="reopened"):
+            vault_router.supersede_episode(
+                vault_name=VAULT, episode_id=other.id,
+                content="Marco is the contact",
+                at="2026-04-01T00:00:00+00:00",
+            )
+        with pytest.raises(ValueError, match="reopened"):
+            vault_router.revise_episode(
+                vault_name=VAULT, episode_id=other.id,
+                content="Sarah Klein is the contact",
+                at="2026-04-01T00:00:00+00:00",
+            )
+        assert vault_router.get_episode(vault_name=VAULT, episode_id=other.id).is_open
 

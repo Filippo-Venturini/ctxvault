@@ -194,6 +194,12 @@ def revise_episode(vault_name: str, episode_id: str, content: str, **kwargs)-> E
     vault._require_operation(VaultOperation.REVISE_EPISODE)
     return vault.revise_episode(episode_id=episode_id, content=content, **kwargs)
 
+def reopen_episode(vault_name: str, episode_id: str, at: str | None = None,
+                   reason: str | None = None)-> Episode:
+    vault = open_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.REOPEN_EPISODE)
+    return vault.reopen_episode(episode_id=episode_id, at=at, reason=reason)
+
 def episode_history(vault_name: str, episode_id: str)-> EpisodeHistory:
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.READ_EPISODE)

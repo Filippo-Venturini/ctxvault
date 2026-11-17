@@ -28,6 +28,7 @@ class VaultOperation(str, Enum):
     INVALIDATE_EPISODE = "invalidate_episode"
     SUPERSEDE_EPISODE = "supersede_episode"
     REVISE_EPISODE = "revise_episode"
+    REOPEN_EPISODE = "reopen_episode"
 
 class SkillInput(BaseModel):
     name: str

@@ -323,6 +323,36 @@ ctxvault invalidate memories 6f1c... --valid-to 2026-07-12T00:00:00+00:00 --reas
 
 ---
 
+## `reopen`
+Make a closed episode current again, without erasing the close. The close is
+recorded as an interval, so a query with `--known-at` between the close and the
+reopen still sees the episode as closed, and `episode --history` shows the
+reopen time and reason on the statement. A revised original cannot be
+reopened: attestations and disputes already moved to the revision, so
+reopen or close that instead. If the episode was superseded, the successor
+(or a later still-current one in the same chain) must already be closed;
+`reopen` will not close it for you.
+
+A dispute that ended because this side was closed becomes open again if the
+other side is still current.
+
+```bash
+ctxvault reopen <vault> <episode_id> [--at <iso>] [--reason <text>]
+```
+
+**Arguments:**
+- `<vault>` - Vault name (required)
+- `<episode_id>` - Episode id (required); must already be closed
+- `--at <iso>` - When the reopen was recorded (optional, default: now); cannot precede the close
+- `--reason <text>` - Why it was reopened (optional)
+
+**Example:**
+```bash
+ctxvault reopen memories 6f1c... --reason "the report was a false alarm"
+```
+
+---
+
 ## `supersede`
 Replace an episode with a corrected version. The old statement closes exactly
 where the new one opens, in one transaction, and the two stay linked.
@@ -545,7 +575,11 @@ Found 3 vaults (1 local, 2 global)
 | `episodes`      | ✗              | ✗           | ✓              |
 | `episode`       | ✗              | ✗           | ✓              |
 | `invalidate`    | ✗              | ✗           | ✓              |
+| `reopen`        | ✗              | ✗           | ✓              |
 | `supersede`     | ✗              | ✗           | ✓              |
+| `revise`        | ✗              | ✗           | ✓              |
+| `confirm`       | ✗              | ✗           | ✓              |
+| `dispute`       | ✗              | ✗           | ✓              |
 | `reindex`       | ✓              | ✗           | ✗              |
 | `delete`        | ✓              | ✗           | ✗              |
 | `vaults`        | ✓              | ✓           | ✓              |

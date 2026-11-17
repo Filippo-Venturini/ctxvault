@@ -244,6 +244,19 @@ def invalidate_episode(vault_name: str, episode_id: str, valid_to: str | None = 
     except UnsupportedVaultOperationError as e:
         raise ValueError(e)
 
+@mcp.tool(description="Make a closed episode current again, without erasing the close. Use this to undo an invalidate, or to bring back a superseded statement after its successor has itself been closed. A revised original cannot be reopened: attestations and disputes already moved to the revision, so reopen or close that instead. An as-of query between the close and the reopen still sees the episode as closed. If a successor is still current, close it first; this tool will not close it for you.")
+def reopen_episode(vault_name: str, episode_id: str, at: str | None = None, reason: str = "") -> EpisodeResponse:
+    try:
+        check_access(vault_name, AGENT_ID)
+        episode = vault_router.reopen_episode(vault_name=vault_name, episode_id=episode_id, at=at, reason=reason or None)
+        return EpisodeResponse(vault_name=vault_name, episode=episode)
+    except VaultNotFoundError:
+        raise ValueError(f"Vault '{vault_name}' does not exist.")
+    except (EpisodeNotFoundError, EpisodeAlreadyOpenError, EpisodeSuccessorStillOpenError, EpisodeWasRevisedError, ValueError) as e:
+        raise ValueError(e)
+    except UnsupportedVaultOperationError as e:
+        raise ValueError(e)
+
 @mcp.tool(description="Replace an episode with a corrected or updated version. The old statement is closed exactly where the new one begins and the two are linked, so the history of what changed stays readable. Entities and salience carry over from the old episode unless you pass new ones. Use this whenever new information contradicts something already recorded.")
 def supersede_episode(vault_name: str, episode_id: str, content: str, entities: list[str] = [], source: str | None = None, salience: float | None = None) -> EpisodeResponse:
     try:

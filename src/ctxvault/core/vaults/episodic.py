@@ -82,6 +82,7 @@ class EpisodicVault(BaseVault):
         VaultOperation.INVALIDATE_EPISODE,
         VaultOperation.SUPERSEDE_EPISODE,
         VaultOperation.REVISE_EPISODE,
+        VaultOperation.REOPEN_EPISODE,
         VaultOperation.REINDEX,
     })
 
@@ -239,6 +240,11 @@ class EpisodicVault(BaseVault):
             embedding=self._embed(content),
             at=at,
         )
+        return self._to_episode(data)
+
+    def reopen_episode(self, episode_id: str, *, at: str | None = None,
+                       reason: str | None = None) -> Episode:
+        data = sqlite_store.reopen_episode(self.config, episode_id, at=at, reason=reason)
         return self._to_episode(data)
 
     def confirm_episode(self, episode_id: str, *, at: str | None = None,

@@ -17,6 +17,7 @@ memory = Client(agent="briefing-bot")
 facts = memory.episodic("account-memory")
 contact = facts.write_episode("Sarah Klein is the main contact", entities=["Sarah Klein"], salience=0.9)
 facts.supersede_episode(contact.id, "Marco Rossi is the main contact", entities=["Marco Rossi"])
+facts.reopen_episode(contact.id)                                  # after the successor is itself closed
 facts.query_episodes(entities=["Marco Rossi"]).results        # what holds now
 facts.query_episodes(valid_at="2026-04-10T00:00:00+00:00")    # what held then
 facts.history(contact.id).chain                               # how the belief changed
