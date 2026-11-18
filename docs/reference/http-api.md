@@ -32,7 +32,7 @@ Start the server with `uvicorn ctxvault.api.app:app`, then call it from any lang
 | `/episodes` | GET | Episode counts for a vault |
 | `/episodes/entities` | GET | List the entities a vault knows, with their episode counts |
 | `/episodes/{episode_id}` | GET | Read a single episode |
-| `/episodes/{episode_id}/history` | GET | Read the supersession chain, with confirmations, disputes and closes |
+| `/episodes/{episode_id}/history` | GET | Read the supersession chain, with confirmations, disputes and closes (event metadata included; inherited attestations listed once) |
 | `/episodes/{episode_id}/invalidate` | POST | Close an episode |
 | `/episodes/{episode_id}/reopen` | POST | Reopen a closed episode without erasing the close |
 | `/episodes/{episode_id}/supersede` | POST | Replace an episode with a corrected one |

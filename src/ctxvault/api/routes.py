@@ -459,6 +459,7 @@ async def reopen_episode(episode_id: str, reopen_request: ReopenEpisodeRequest, 
             episode_id=episode_id,
             at=reopen_request.at,
             reason=reopen_request.reason,
+            metadata=reopen_request.metadata or None,
         )
 
         return EpisodeResponse(vault_name=reopen_request.vault_name, episode=episode)
@@ -495,6 +496,7 @@ async def revise_episode(episode_id: str, revise_request: ReviseEpisodeRequest, 
             confidence=revise_request.confidence,
             salience=revise_request.salience,
             metadata=revise_request.metadata,
+            event_metadata=revise_request.event_metadata or None,
         )
 
         return EpisodeResponse(vault_name=revise_request.vault_name, episode=episode)
@@ -531,6 +533,7 @@ async def supersede_episode(episode_id: str, supersede_request: SupersedeEpisode
             occurred_at=supersede_request.occurred_at,
             valid_from=supersede_request.valid_from,
             metadata=supersede_request.metadata,
+            event_metadata=supersede_request.event_metadata or None,
         )
 
         return EpisodeResponse(vault_name=supersede_request.vault_name, episode=episode)

@@ -1477,6 +1477,7 @@ class TestEventMetadata:
             "at": attestations[0]["at"],
             "source": "conversation",
             "metadata": run,
+            "inherited": False,
         }]
         assert disputes[0]["metadata"] == run
         assert {disputes[0]["episode_a"], disputes[0]["episode_b"]} == {coffee.id, tea.id}
@@ -1576,9 +1577,11 @@ class TestEventMetadata:
             "at": "2026-01-02T00:00:00+00:00",
             "source": "carer",
             "metadata": {},
+            "inherited": False,
         }]
         assert disputes[0]["metadata"] == {} and disputes[0]["note"] == "legacy"
         assert closures[0]["metadata"] == {} and closures[0]["reason"] == "ended"
+        assert closures[0]["reopen_metadata"] == {}
         sqlite_store.close_connections()
 
     def test_episodes_can_be_queried_by_event_metadata(self, mock_episodic_vault_config):
@@ -1606,6 +1609,7 @@ class TestEventMetadata:
         ]
         assert copied[0]["metadata"] == {"run_id": "run-1"}
         assert copied[0]["source"] == "conversation"
+        assert copied[0]["inherited"] is True
 
     def test_omitted_event_metadata_is_an_empty_object(self, mock_episodic_vault_config):
         episode = write("Giuseppe likes coffee")
@@ -1653,3 +1657,286 @@ class TestEventMetadata:
         )
         assert found.status_code == 200
         assert [row["id"] for row in found.json()["results"]] == [episode.id]
+
+
+class TestEventAttribution:
+    """Follow-up to event metadata: reopen, supersede/revise closes, history, as-of."""
+
+    def test_reopen_stores_metadata_on_the_closure(self, mock_episodic_vault_config):
+        episode = write("Giuseppe likes coffee")
+        vault_router.invalidate_episode(
+            vault_name=VAULT, episode_id=episode.id, reason="ended",
+            metadata={"run_id": "close-1"},
+        )
+        reopen(episode.id, reason="false alarm", metadata={"run_id": "reopen-1"})
+
+        closure = vault_router.episode_history(vault_name=VAULT, episode_id=episode.id).closures[0]
+        assert closure["metadata"] == {"run_id": "close-1"}
+        assert closure["reopen_metadata"] == {"run_id": "reopen-1"}
+        assert closure["reopen_reason"] == "false alarm"
+        # Reopen metadata stays on the event; it is not mixed into the episode or the close.
+        assert "run_id" not in vault_router.get_episode(vault_name=VAULT, episode_id=episode.id).metadata
+
+        found = query(event_metadata_filters={"run_id": "reopen-1"}, include_closed=True)
+        assert [e.id for e in found] == [episode.id]
+        assert query(event_metadata_filters={"run_id": "close-1"}, include_closed=True)[0].id == episode.id
+
+    def test_supersede_and_revise_closes_carry_event_metadata(self, mock_episodic_vault_config):
+        first = write("Giuseppe lives in Padova", metadata={"card": "home"})
+        revised = vault_router.revise_episode(
+            vault_name=VAULT, episode_id=first.id,
+            content="Giuseppe lives in Padova, in the Arcella",
+            event_metadata={"run_id": "revise-1"},
+        )
+        successor = vault_router.supersede_episode(
+            vault_name=VAULT, episode_id=revised.id,
+            content="Giuseppe lives in Mestre",
+            event_metadata={"run_id": "supersede-1"},
+        )
+
+        history = vault_router.episode_history(vault_name=VAULT, episode_id=first.id)
+        revise_close = next(row for row in history.closures if row["revised_by"] == revised.id)
+        supersede_close = next(row for row in history.closures if row["superseded_by"] == successor.id)
+        assert revise_close["metadata"] == {"run_id": "revise-1"}
+        assert supersede_close["metadata"] == {"run_id": "supersede-1"}
+        # Statement metadata stays on the new episode; the close has its own.
+        assert successor.metadata == {}
+        assert revised.metadata.get("card") == "home"
+        assert "run_id" not in revised.metadata
+        assert "run_id" not in vault_router.get_episode(vault_name=VAULT, episode_id=first.id).metadata
+
+        assert [e.id for e in query(event_metadata_filters={"run_id": "revise-1"}, include_closed=True)] == [first.id]
+        assert [e.id for e in query(event_metadata_filters={"run_id": "supersede-1"}, include_closed=True)] == [revised.id]
+
+    def test_history_lists_each_attestation_once_after_a_revise(self, mock_episodic_vault_config):
+        episode = write("Giuseppe lives in Padova")
+        confirm(episode.id, source="conversation", metadata={"run_id": "run-1"})
+        revised = vault_router.revise_episode(
+            vault_name=VAULT, episode_id=episode.id,
+            content="Giuseppe lives in Padova, in the Arcella",
+        )
+
+        history = vault_router.episode_history(vault_name=VAULT, episode_id=revised.id)
+        assert len(history.attestations) == 1
+        assert history.attestations[0]["episode_id"] == episode.id
+        assert history.attestations[0]["metadata"] == {"run_id": "run-1"}
+        assert history.attestations[0]["inherited"] is False
+
+        # The copy stays in the store, so a query can still find the revision.
+        copied = [
+            row for row in vault_router.open_vault(VAULT).attestations()
+            if row["episode_id"] == revised.id
+        ]
+        assert copied[0]["inherited"] is True
+        found = query(event_metadata_filters={"run_id": "run-1"}, include_closed=True)
+        assert {e.id for e in found} == {episode.id, revised.id}
+
+    def test_as_of_queries_ignore_events_recorded_after_known_at(self, mock_episodic_vault_config):
+        early = "2026-01-01T00:00:00+00:00"
+        mid = "2026-02-01T00:00:00+00:00"
+        late = "2026-03-01T00:00:00+00:00"
+        later = "2026-04-01T00:00:00+00:00"
+
+        confirmed = write("Giuseppe likes coffee", recorded_at=early, valid_from=early)
+        confirm(confirmed.id, at=late, metadata={"run_id": "confirm-late"})
+
+        closed = write("Giuseppe likes tea", recorded_at=early, valid_from=early)
+        vault_router.invalidate_episode(
+            vault_name=VAULT, episode_id=closed.id, at=late, metadata={"run_id": "close-late"}
+        )
+
+        reopened = write("Giuseppe lives in Padova", recorded_at=early, valid_from=early)
+        vault_router.invalidate_episode(
+            vault_name=VAULT, episode_id=reopened.id, at=mid, metadata={"run_id": "close-mid"}
+        )
+        reopen(reopened.id, at=late, metadata={"run_id": "reopen-late"})
+
+        # A later-recorded event does not match an earlier as-of query.
+        assert query(event_metadata_filters={"run_id": "confirm-late"}, known_at=mid, include_closed=True) == []
+        assert query(event_metadata_filters={"run_id": "close-late"}, known_at=mid, include_closed=True) == []
+        assert query(event_metadata_filters={"run_id": "reopen-late"}, known_at=mid, include_closed=True) == []
+        # The close that had already happened by mid still matches.
+        assert [e.id for e in query(event_metadata_filters={"run_id": "close-mid"}, known_at=mid, include_closed=True)] == [reopened.id]
+
+        assert [e.id for e in query(event_metadata_filters={"run_id": "confirm-late"}, known_at=later, include_closed=True)] == [confirmed.id]
+        assert [e.id for e in query(event_metadata_filters={"run_id": "close-late"}, known_at=later, include_closed=True)] == [closed.id]
+        assert [e.id for e in query(event_metadata_filters={"run_id": "reopen-late"}, known_at=later, include_closed=True)] == [reopened.id]
+
+    def test_non_object_event_metadata_is_refused_on_reopen_and_closes(self, mock_episodic_vault_config):
+        episode = write("Giuseppe likes coffee")
+        vault_router.invalidate_episode(vault_name=VAULT, episode_id=episode.id)
+        with pytest.raises(ValueError, match="JSON object"):
+            reopen(episode.id, metadata=["run-1"])
+
+        open_one = write("Giuseppe lives in Padova")
+        with pytest.raises(ValueError, match="JSON object"):
+            vault_router.revise_episode(
+                vault_name=VAULT, episode_id=open_one.id,
+                content="Giuseppe lives in Padova, in the Arcella",
+                event_metadata=["run-1"],
+            )
+        with pytest.raises(ValueError, match="JSON object"):
+            vault_router.supersede_episode(
+                vault_name=VAULT, episode_id=open_one.id,
+                content="Giuseppe lives in Mestre",
+                event_metadata=["run-1"],
+            )
+
+    def test_a_v5_vault_file_migrates(self, tmp_path):
+        sqlite_store.close_connections()
+        db = tmp_path / "episodes.db"
+        config = {"db_path": str(db)}
+        conn = sqlite3.connect(db)
+        conn.executescript(
+            """
+            CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO meta (key, value) VALUES ('schema_version', '5');
+            CREATE TABLE episodes (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                source TEXT,
+                confidence REAL NOT NULL DEFAULT 1.0,
+                salience REAL NOT NULL DEFAULT 0.5,
+                occurred_at TEXT,
+                valid_from TEXT NOT NULL,
+                valid_to TEXT,
+                recorded_at TEXT NOT NULL,
+                invalidated_at TEXT,
+                superseded_by TEXT,
+                revised_by TEXT,
+                recall_count INTEGER NOT NULL DEFAULT 0,
+                last_recalled_at TEXT,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                embedding BLOB
+            );
+            CREATE TABLE episode_entities (
+                episode_id TEXT NOT NULL,
+                entity TEXT NOT NULL,
+                entity_norm TEXT NOT NULL,
+                PRIMARY KEY (episode_id, entity_norm)
+            );
+            CREATE TABLE episode_attestations (
+                episode_id TEXT NOT NULL,
+                at TEXT NOT NULL,
+                source TEXT,
+                metadata TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE TABLE episode_disputes (
+                episode_a TEXT NOT NULL,
+                episode_b TEXT NOT NULL,
+                noticed_at TEXT NOT NULL,
+                note TEXT,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                PRIMARY KEY (episode_a, episode_b)
+            );
+            CREATE TABLE episode_closures (
+                episode_id TEXT NOT NULL,
+                closed_at TEXT NOT NULL,
+                valid_to TEXT,
+                prior_valid_to TEXT,
+                superseded_by TEXT,
+                revised_by TEXT,
+                reason TEXT,
+                reopened_at TEXT,
+                reopen_reason TEXT,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                PRIMARY KEY (episode_id, closed_at)
+            );
+            INSERT INTO episodes (id, content, valid_from, recorded_at, invalidated_at, metadata)
+            VALUES (
+                'e1', 'old fact', '2026-01-01T00:00:00+00:00',
+                '2026-01-01T00:00:00+00:00', '2026-01-04T00:00:00+00:00', '{}'
+            );
+            INSERT INTO episode_attestations (episode_id, at, source, metadata)
+            VALUES ('e1', '2026-01-02T00:00:00+00:00', 'carer', '{"run_id": "old"}');
+            INSERT INTO episode_closures (
+                episode_id, closed_at, valid_to, prior_valid_to,
+                superseded_by, revised_by, reason, reopened_at, reopen_reason, metadata
+            )
+            VALUES (
+                'e1', '2026-01-04T00:00:00+00:00', NULL, NULL,
+                NULL, NULL, 'ended', NULL, NULL, '{"run_id": "close-old"}'
+            );
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        sqlite_store.get_connection(config)
+        version = sqlite_store.get_connection(config).execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()[0]
+        attestations = sqlite_store.list_attestations(config)
+        closures = sqlite_store.list_closures(config)
+
+        assert int(version) == sqlite_store.SCHEMA_VERSION
+        assert attestations == [{
+            "episode_id": "e1",
+            "at": "2026-01-02T00:00:00+00:00",
+            "source": "carer",
+            "metadata": {"run_id": "old"},
+            "inherited": False,
+        }]
+        assert closures[0]["metadata"] == {"run_id": "close-old"}
+        assert closures[0]["reopen_metadata"] == {}
+        sqlite_store.close_connections()
+
+    def test_endpoint_stores_reopen_and_close_event_metadata(self, mock_episodic_vault_config):
+        from fastapi.testclient import TestClient
+        from ctxvault.api.app import app, ctxvault_router
+
+        app.include_router(ctxvault_router)
+        client = TestClient(app)
+        episode = write("Giuseppe likes coffee")
+
+        closed = client.post(
+            f"/ctxvault/episodes/{episode.id}/supersede",
+            json={
+                "vault_name": VAULT,
+                "content": "Giuseppe likes tea",
+                "event_metadata": {"run_id": "supersede-9"},
+            },
+        )
+        assert closed.status_code == 200
+        successor_id = closed.json()["episode"]["id"]
+
+        history = client.get(
+            f"/ctxvault/episodes/{episode.id}/history",
+            params={"vault_name": VAULT},
+        )
+        assert history.status_code == 200
+        body = history.json()
+        close = next(row for row in body["closures"] if row["superseded_by"] == successor_id)
+        assert close["metadata"] == {"run_id": "supersede-9"}
+
+        found = client.post(
+            "/ctxvault/episodes/query",
+            json={
+                "vault_name": VAULT,
+                "include_closed": True,
+                "event_metadata_filters": {"run_id": "supersede-9"},
+            },
+        )
+        assert found.status_code == 200
+        assert [row["id"] for row in found.json()["results"]] == [episode.id]
+
+        # Close the successor so the original can be reopened.
+        client.post(
+            f"/ctxvault/episodes/{successor_id}/invalidate",
+            json={"vault_name": VAULT, "reason": "settled"},
+        )
+        reopened = client.post(
+            f"/ctxvault/episodes/{episode.id}/reopen",
+            json={"vault_name": VAULT, "metadata": {"run_id": "reopen-9"}},
+        )
+        assert reopened.status_code == 200
+        history = client.get(
+            f"/ctxvault/episodes/{episode.id}/history",
+            params={"vault_name": VAULT},
+        )
+        reopen_row = next(
+            row for row in history.json()["closures"] if row["superseded_by"] == successor_id
+        )
+        assert reopen_row["reopen_metadata"] == {"run_id": "reopen-9"}
+        assert reopen_row["metadata"] == {"run_id": "supersede-9"}
+

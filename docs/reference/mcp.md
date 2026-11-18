@@ -109,6 +109,8 @@ Retrieve episodes from an episodic vault. By default only statements that still 
 | `limit` | `int` | `10` |
 | `event_metadata_filters` | `dict | None` | `None` |
 
+`event_metadata_filters` keeps episodes that have a confirm, dispute, close or reopen whose metadata contains every given key/value (AND, on the same event). A confirmation copied onto a revision still matches, so the current wording is returned too. With `known_at`, only events recorded at or before that instant match.
+
 ### `confirm_episode`
 
 Record that a statement already in the vault was asserted again. Use this when you hear something the vault already holds, instead of writing it a second time: the episode stays as it is and gains one attestation, so a fact heard once can be told from one heard many times.
@@ -133,6 +135,7 @@ Replace an episode with a corrected or updated version. The old statement is clo
 | `entities` | `list[str]` | `[]` |
 | `source` | `str | None` | `None` |
 | `salience` | `float | None` | `None` |
+| `event_metadata` | `dict | None` | `None` |
 
 ### `revise_episode`
 
@@ -146,6 +149,7 @@ Restate an episode more precisely, when the world did not change but you can now
 | `entities` | `list[str]` | `[]` |
 | `source` | `str | None` | `None` |
 | `salience` | `float | None` | `None` |
+| `event_metadata` | `dict | None` | `None` |
 
 ### `invalidate_episode`
 
@@ -169,6 +173,7 @@ Make a closed episode current again, without erasing the close. Use this to undo
 | `episode_id` | `str` | required |
 | `at` | `str | None` | `None` |
 | `reason` | `str` | `''` |
+| `metadata` | `dict | None` | `None` |
 
 ### `dispute_episodes`
 
@@ -184,7 +189,7 @@ Record that two open statements cannot both hold, when you cannot tell which one
 
 ### `episode_history`
 
-Show every version of a statement, oldest first, plus the confirmations, disputes and closes on that chain, each with any metadata stored on the event. Use this to explain why the vault believes something, or to see what an episode used to say before it was corrected.
+Show every version of a statement, oldest first, plus the confirmations, disputes and closes on that chain, each with any metadata stored on the event. A confirmation copied onto a revision is listed once, on the episode that first recorded it. Use this to explain why the vault believes something, or to see what an episode used to say before it was corrected.
 
 | Parameter | Type | Default |
 |-----------|------|---------|
