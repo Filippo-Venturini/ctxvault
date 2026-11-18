@@ -84,3 +84,34 @@ model = OpenAICompatibleModel("qwen2.5:7b", prompts=Prompts.from_dir("my-prompts
 ```
 
 A directory holds `extract.md`, `relate.md` and `VERSION`. English ships today.
+
+## Transcripts and chunk references
+
+A claim can point back at the words it came from. Write the conversation itself into a semantic vault, then attach a reference to the chunk each claim rests on. Both functions are in the core, so they work without the layer.
+
+```python
+from ctxvault import Client
+from ctxvault.core.transcripts import Turn, write_session
+from ctxvault.core.references import chunk_reference, resolve_chunk
+
+transcripts = Client().semantic("transcripts")
+written = write_session(transcripts, "sessions/42.txt", turns, session_id="42",
+                        agent_metadata={"generated_by": "harness"})
+ref = chunk_reference("transcripts", written.doc_id, written.turn_chunks[3])   # the chunk turn 3 starts in
+resolve_chunk(ref, agent="briefing-bot").state   # "holds"
+```
+
+**`write_session`** writes one `.txt` document with one line per turn, `2026-03-01 09:05  user: text`, the time in UTC (an undated turn has no time in front). Every chunk keeps the times of the turns it holds, even when it starts mid-session. The session's dates come from its dated turns, never from the file: `session_started` and `session_ended` (ISO), `session_started_ts` and `session_ended_ts` (epoch seconds, for `$lt` / `$gt` filters), and `session_dated`. A session with no dated turn is undated. Writing the same path again replaces the session under the same `doc_id`. It returns `turn_chunks`: for each turn, the chunk it starts in.
+
+**`resolve_chunk`** checks a reference against the vault as it is now, and gives exactly one answer:
+
+| state | when |
+|---|---|
+| `holds` | the chunk is there, with the same text. `text` is returned |
+| `changed` | the document is there, but the chunk's text differs or the chunk is past its end. No text |
+| `moved` | the `doc_id` is gone, but the reference's `path` in this vault has the same chunk: a vault moved to another folder. `text` and the new `doc_id` are returned |
+| `missing` | the document is neither under its `doc_id` nor at its `path` |
+| `unreachable` | the vault is not registered here, is not a semantic vault, or could not be read |
+| `refused` | the agent may not read the vault, or `path` is not a plain relative path inside it |
+
+`unreachable` and `refused` are never `missing`: they mean the source could not be checked, not that it is gone. Access is checked before anything is read, so a refused caller learns nothing about the document.

@@ -13,6 +13,7 @@ All notable changes to CtxVault are documented here. The format follows
 - **Event metadata on reopens, and on the closes produced by `supersede` and `revise`** (#57), so the events of one consolidation run can be queried together; `history()` lists each attestation once after a `revise`, the copies the revision made marked `inherited`, while `event_metadata_filters` still matches them (#57).
 - **Consolidation layer**, an opt-in `ctxvault.consolidation` module not imported by the core: the claim schema (#49), the extraction pipeline `consolidate(vault, turns, model, ...)` (#59), and `OpenAICompatibleModel` for any chat-completions endpoint with the shipped prompts (#61). The client talks to loopback endpoints only unless `allow_remote=True`, since the text of the conversations is sent to it.
 - **`.html`, `.htm` and `.csv` documents in semantic vaults**, alongside `.txt`, `.md`, `.pdf` and `.docx` (#62). HTML is read with the standard library, dropping scripts, styles and markup; each CSV data row is indexed as one line with header names beside values. No new required dependency.
+- **Transcripts and chunk references** in the core (#45). `write_session(vault, path, turns)` writes a conversation to a semantic vault as one line per turn, dated from its turns and never from the file, with session dates as filterable metadata, and returns the chunk each turn starts in. `chunk_reference(...)` names a chunk with the hash of its text, and `resolve_chunk(reference, agent=...)` answers exactly one of `holds`, `changed`, `moved`, `missing`, `unreachable` or `refused`; `changed` never carries text.
 - **Memory viewer:** an episode's closes and reopens are listed in order, a reopen appears as its own kind on the changes timeline, and event metadata is a collapsed row that expands to the values (#58).
 
 ### Changed
@@ -24,6 +25,7 @@ All notable changes to CtxVault are documented here. The format follows
 
 ### Fixed
 
+- Rewriting a document so that it has fewer chunks, through `write_doc` or by editing the file and running `index`, no longer leaves the old document's trailing chunks in the index (#45).
 - HTML exports inline `.woff2` fonts as `font/woff2` even when the system MIME table has no entry, so an export keeps its typography (#64).
 
 ## [0.9.1] - 2026-11-10
