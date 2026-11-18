@@ -19,6 +19,8 @@ from ctxvault.consolidation.claims import (
     ValidFromPrecision,
     parse_claims,
 )
+from ctxvault.consolidation.model import ConsolidationModel, Relation, RelationDecision, Turn
+from ctxvault.consolidation.pipeline import ConsolidationResult, Operation, consolidate
 
 __all__ = [
     "Claim",
@@ -29,4 +31,11 @@ __all__ = [
     "ChunkProvenance",
     "ExternalProvenance",
     "parse_claims",
+    "Turn",
+    "Relation",
+    "RelationDecision",
+    "ConsolidationModel",
+    "Operation",
+    "ConsolidationResult",
+    "consolidate",
 ]
