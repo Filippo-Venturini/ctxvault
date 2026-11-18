@@ -37,7 +37,11 @@ async def query(query_request: QueryRequest, request: Request)-> QueryResponse:
     try:
         check_vault_access(vault_name=query_request.vault_name, request=request)
 
-        result = vault_router.query(vault_name=query_request.vault_name, text=query_request.query, filters=query_request.filters, n_results=query_request.n_results)
+        kwargs = {"vault_name": query_request.vault_name, "text": query_request.query,
+                  "filters": query_request.filters, "n_results": query_request.n_results}
+        if query_request.hybrid is not None:
+            kwargs["hybrid"] = query_request.hybrid
+        result = vault_router.query(**kwargs)
 
         if not result.results:
             raise HTTPException(status_code=404, detail="No results found.")

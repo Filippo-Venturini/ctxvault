@@ -81,9 +81,10 @@ def index(name: str = typer.Argument("my-vault"), path: str = typer.Option(None,
         raise typer.Exit(1)
     
 @app.command()
-def query(name: str = typer.Argument("my-vault"), text: str = typer.Argument(""), limit: int = typer.Option(5, "--limit", "-n", help="Number of chunks to return")):
+def query(name: str = typer.Argument("my-vault"), text: str = typer.Argument(""), limit: int = typer.Option(5, "--limit", "-n", help="Number of chunks to return"),
+          hybrid: bool = typer.Option(False, "--hybrid", help="Rank by the keyword index as well as the vectors")):
     try:
-        result = vault_router.query(text=text, vault_name=name, n_results=limit)
+        result = vault_router.query(text=text, vault_name=name, n_results=limit, hybrid=hybrid)
         if not result.results:
             typer.secho("No results found.", fg=typer.colors.YELLOW)
             return
@@ -94,6 +95,8 @@ def query(name: str = typer.Argument("my-vault"), text: str = typer.Argument("")
         for idx, chunk in enumerate(result.results, 1):
             typer.secho(f"\n[{idx}] ", fg=typer.colors.CYAN, bold=True, nl=False)
             score = f"similarity: {chunk.similarity:.3f}" if chunk.similarity is not None else f"distance: {chunk.score:.3f}"
+            if chunk.rank_score is not None:
+                score = f"fusion: {chunk.rank_score:.4f} ({score})"
             typer.secho(score, fg=typer.colors.MAGENTA)
             typer.secho(f"    ▸ {chunk.source} ", fg=typer.colors.BLUE, nl=False)
             typer.echo(f"(chunk {chunk.chunk_index})")
