@@ -5,14 +5,13 @@ from the index alone comes back on the next reindex of its file. Chunk-level
 findings are evidence for a decision about a document.
 """
 
-import hashlib
 import math
-import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from ctxvault.core.embedding import DEFAULT_EMBEDDING_MODEL
+from ctxvault.core.identifiers import get_text_hash
 from ctxvault.models.pruning import Candidate, PruneAction, PruneMode, PrunePolicy, PruneReport, ReasonSpec
 from ctxvault.storage import chroma_store
 from ctxvault.utils.metadata_builder import BUILT_IN_METADATA_KEYS
@@ -48,11 +47,21 @@ class _Doc:
     source: str
     metadata: dict
     modified: datetime | None
+    text_hash: str | None = None   # as indexed; None on chunks indexed before it was stored
+    indexed_at: datetime | None = None
     chunks: list[tuple[int, str, list[float] | None]] = field(default_factory=list)
 
     @property
     def exists(self) -> bool:
         return self.modified is not None
+
+    def current_hash(self) -> str:
+        """The stored hash while the file is as it was indexed, else the file's own.
+        No slack here: a file modified at the moment it was indexed is read
+        again, which costs time and is never wrong."""
+        if self.text_hash and self.indexed_at and self.modified and self.modified < self.indexed_at:
+            return self.text_hash
+        return text_hash(self.source)
 
 def _instant(value) -> datetime | None:
     if not isinstance(value, str) or not value:
@@ -95,16 +104,13 @@ def agent_written(doc: _Doc) -> bool:
     return doc.modified <= written_at + _SLACK
 
 def text_hash(path: str) -> str:
-    """The document's extracted text, normalised (Unicode NFC, whitespace
-    collapsed), hashed. Equal hashes are the same document whatever the
-    vault's model or chunking."""
+    """The file's text hashed as the indexer hashes it (`get_text_hash`)."""
     text, _ = extract_text(path)
-    normalised = " ".join(unicodedata.normalize("NFC", text).split())
-    return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
+    return get_text_hash(text)
 
-def _load_documents(config: dict, with_embeddings: bool) -> list[_Doc]:
+def _load_documents(config: dict, with_embeddings: bool, where: dict | None = None) -> list[_Doc]:
     include = ["metadatas", "documents"] + (["embeddings"] if with_embeddings else [])
-    records = chroma_store.get_all_records(config=config, include=include)
+    records = chroma_store.get_all_records(config=config, include=include, where=where)
     metadatas = records.get("metadatas")
     texts = records.get("documents")
     embeddings = records.get("embeddings") if with_embeddings else None
@@ -122,7 +128,8 @@ def _load_documents(config: dict, with_embeddings: bool) -> list[_Doc]:
             path = Path(source)
             modified = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc) if path.is_file() else None
             doc = _Doc(doc_id=metadata["doc_id"], source=source, modified=modified,
-                       metadata={k: v for k, v in metadata.items() if k not in BUILT_IN_METADATA_KEYS})
+                       metadata={k: v for k, v in metadata.items() if k not in BUILT_IN_METADATA_KEYS},
+                       text_hash=metadata.get("text_hash"), indexed_at=_instant(metadata.get("indexed_at")))
             docs[doc.doc_id] = doc
         doc.chunks.append((int(metadata.get("chunk_index", 0)), text or "", _vector(embedding)))
 
@@ -139,10 +146,18 @@ class _Builder:
         self.policy = policy
         self.report = report
 
-    def add(self, doc: _Doc, reason: str, action: PruneAction, signals: dict, group: str | None = None) -> None:
+    def add(self, doc: _Doc, reason: str, action: PruneAction, signals: dict, group: str | None = None,
+            digest: str | None = None) -> None:
         spec = SEMANTIC_REASONS[reason]
         by_agent = agent_written(doc)
         signals = dict(signals)
+        if action != PruneAction.NONE:
+            # what applying checks again first: the file must still be what was found
+            try:
+                signals["text_hash"] = digest or doc.current_hash()
+            except Exception:
+                action = PruneAction.NONE
+                signals["unreadable"] = True
         if doc.modified is not None:
             signals["modified"] = doc.modified.date().isoformat()
         signals["agent_written"] = by_agent
@@ -163,7 +178,7 @@ def _identical(docs: list[_Doc], build: _Builder) -> set[frozenset[str]]:
     unreadable = 0
     for doc in docs:
         try:
-            by_hash.setdefault(text_hash(doc.source), []).append(doc)
+            by_hash.setdefault(doc.current_hash(), []).append(doc)
         except Exception:
             unreadable += 1
     if unreadable:
@@ -177,8 +192,12 @@ def _identical(docs: list[_Doc], build: _Builder) -> set[frozenset[str]]:
         group_id = f"identical:{digest[:12]}"
         for doc in sorted(group, key=lambda d: d.source):
             kept = doc is keep
-            build.add(doc, DUPLICATE, PruneAction.NONE if kept else PruneAction.ARCHIVE,
-                      {"match": "identical document", "chunks": len(doc.chunks), "keep": kept}, group=group_id)
+            signals = {"match": "identical document", "chunks": len(doc.chunks), "keep": kept}
+            if not kept:
+                # applying archives this copy only while the kept one still holds the text
+                signals["kept"] = keep.source
+            build.add(doc, DUPLICATE, PruneAction.NONE if kept else PruneAction.ARCHIVE, signals,
+                      group=group_id, digest=digest)
         ids = [d.doc_id for d in group]
         pairs.update(frozenset((a, b)) for a in ids for b in ids if a != b)
     return pairs
@@ -243,11 +262,15 @@ def _stale(docs: list[_Doc], older_than_days: int, build: _Builder, now: datetim
             })
 
 def find_semantic_candidates(vault_name: str, config: dict, policy: PrunePolicy, reasons: set[str],
-                             now: datetime | None = None) -> PruneReport:
+                             now: datetime | None = None, same_text_as: str | None = None) -> PruneReport:
+    """`same_text_as`, a text hash, narrows the report to the documents with
+    that text: what a single write can have duplicated, found with one
+    filtered read instead of a scan of the vault."""
     now = now or datetime.now(timezone.utc)
     model = config.get("embedding_model") or DEFAULT_EMBEDDING_MODEL
     wants_partial = DUPLICATE_PARTIAL in reasons and policy.mode(DUPLICATE_PARTIAL) != PruneMode.OFF
-    all_docs = _load_documents(config=config, with_embeddings=wants_partial)
+    where = {"text_hash": same_text_as} if same_text_as else None
+    all_docs = _load_documents(config=config, with_embeddings=wants_partial, where=where)
     docs = [doc for doc in all_docs if doc.exists]
 
     report = PruneReport(vault_name=vault_name, policy_enabled=policy.enabled,

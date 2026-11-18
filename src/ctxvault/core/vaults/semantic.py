@@ -1,12 +1,15 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from ctxvault.core import indexer
-from ctxvault.core.pruning import SEMANTIC_REASONS, find_semantic_candidates
-from ctxvault.core.vaults.base import BaseVault
-from ctxvault.models.pruning import PrunePolicy, PruneReport
+import os
+import warnings
+from ctxvault.core import prune_log as log
+from ctxvault.core.pruning import DUPLICATE, SEMANTIC_REASONS, find_semantic_candidates, text_hash
+from ctxvault.core.vaults.base import ARCHIVE_DIR, BaseVault
+from ctxvault.models.pruning import Candidate, PruneLogEntry, PruneMode, PrunePolicy, PruneReport, PruneTrigger
 from ctxvault.models.documents import DocumentStatus, SemanticDocumentInfo, DocumentContent, VaultStatus
 from ctxvault.models.query_result import ChunkMatch, QueryResult
-from ctxvault.core.exceptions import EmptyQueryError, FileOutsideVaultError, UnsupportedFileTypeError
+from ctxvault.core.exceptions import EmptyQueryError, FileAlreadyExistError, FileOutsideVaultError, UnsupportedFileTypeError
 from ctxvault.models.vaults import VaultOperation
 from ctxvault.storage import chroma_store
 from ctxvault.utils.metadata_builder import BUILT_IN_METADATA_KEYS
@@ -43,6 +46,9 @@ class SemanticVault(BaseVault):
         if not file_path.resolve().is_relative_to(self.vault_path):
             raise FileOutsideVaultError("The file to index is outside the Context Vault.")
 
+        if file_path.resolve().is_relative_to(self.archive_path):
+            raise FileOutsideVaultError(f"The file is inside {ARCHIVE_DIR}/: archived files are not indexed.")
+
         indexer.index_file(file_path=str(file_path), config=self.config, agent_metadata=agent_metadata,
                            new_write=new_write)
 
@@ -59,6 +65,7 @@ class SemanticVault(BaseVault):
             except Exception as e:
                 skipped_files.append(f"{str(file)} ({e})")
 
+        self._evaluate_quietly("index")
         return indexed_files, skipped_files
     
     def reindex_files(self, path: str | None = None)-> tuple[list[str], list[str]]:
@@ -145,6 +152,7 @@ class SemanticVault(BaseVault):
         for file in status.unindexed:
             self.index_file(file_path=Path(file))
             indexed.append(file)
+        self._evaluate_quietly("sync")
         return reindexed, indexed, dropped
 
     def _find_candidates(self, policy: PrunePolicy, reasons: set[str]) -> PruneReport:
@@ -153,6 +161,129 @@ class SemanticVault(BaseVault):
     def _prune_target(self, target: str) -> str:
         path = Path(target)
         return str(path if path.is_absolute() else (self.vault_path / path).resolve())
+
+    def _log_target(self, target: str) -> str:
+        """The path relative to the vault, with "/": how the log names a document on every platform."""
+        path = Path(self._prune_target(target)).resolve()
+        try:
+            return path.relative_to(self.vault_path.resolve()).as_posix()
+        except ValueError:
+            raise FileOutsideVaultError(f"{target} is not inside the vault.") from None
+
+    def _display(self, target: str) -> str:
+        try:
+            return self._log_target(target)
+        except FileOutsideVaultError:
+            return target
+
+    # ── pruning: archive, restore, purge ─────────────────────────────────────
+
+    def _why_not_apply(self, candidate: Candidate) -> str | None:
+        """Approved bytes are proposed bytes: a file is archived only while it
+        still has the text it was found with, and a duplicate only while the
+        copy that stays still has it too."""
+        expected = candidate.signals.get("text_hash")
+        try:
+            if not Path(candidate.target).is_file():
+                return "the file is gone"
+            if not expected or text_hash(candidate.target) != expected:
+                return "changed since it was found"
+            kept = candidate.signals.get("kept")
+            if kept and (not Path(str(kept)).is_file() or text_hash(str(kept)) != expected):
+                return "the copy that stays is gone or changed, so this one is no longer a duplicate"
+        except Exception as e:
+            return f"could not be read ({e})"
+        return None
+
+    def _apply_candidate(self, candidate: Candidate, *, who: str, trigger: PruneTrigger,
+                         policy: PrunePolicy) -> PruneLogEntry:
+        """Archive = move the file into the archive, log it, drop it from the
+        index. The log row is written before the index changes, so whatever
+        happens next the log knows where the file went."""
+        from ctxvault.core.identifiers import get_doc_id
+        source = Path(candidate.target)
+        relative = self._log_target(candidate.target)
+        doc_id = get_doc_id(candidate.target)
+        records = chroma_store.get_document_records(doc_id=doc_id, config=self.config)
+        agent_metadata = indexer._extract_agent_metadata(records.get("metadatas") or [])
+
+        stamp = log.now().replace(":", "").replace("-", "").replace("+", "_").replace(".", "_")
+        archived = f"{stamp}-{doc_id[:12]}/{relative}"
+        destination = self.archive_path / archived
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(source, destination)
+        try:
+            row = log.append(self.prune_log_path, "archive", who, trigger=trigger, target=relative,
+                             reason=candidate.reason, action=candidate.suggested_action.value,
+                             signals=candidate.signals, archived=archived, doc_id=doc_id,
+                             text_hash=candidate.signals.get("text_hash"), agent_metadata=agent_metadata)
+        except Exception:
+            os.replace(destination, source)
+            self._sweep_archive(destination.parent)
+            raise
+        indexer.delete_file(file_path=candidate.target, config=self.config)
+        return next(e for e in self.prune_log(policy) if e.n == row["n"])
+
+    def _restore_entry(self, entry: PruneLogEntry, *, overwrite: bool) -> None:
+        archived = self.archive_path / entry.archived_path
+        destination = (self.vault_path / entry.target).resolve()
+        if not archived.is_file():
+            raise FileNotFoundError(f"The archived file for {entry.target} is gone from {ARCHIVE_DIR}/{entry.archived_path}.")
+        if entry.text_hash and text_hash(str(archived)) != entry.text_hash:
+            raise ValueError(f"{ARCHIVE_DIR}/{entry.archived_path} changed after it was archived; "
+                             "look at it before restoring it by hand.")
+        if destination.exists():
+            if not overwrite:
+                raise FileAlreadyExistError(f"{entry.target} exists again in the vault. "
+                                            "Restore with overwrite to replace it.")
+            indexer.delete_file(file_path=str(destination), config=self.config)
+            destination.unlink()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(archived, destination)
+        self._sweep_archive(archived.parent)
+
+    def _after_restore(self, entry: PruneLogEntry) -> None:
+        # the file keeps its mtime through the move, so a restored agent
+        # document is still agent-written
+        self.index_file(file_path=(self.vault_path / entry.target).resolve(), agent_metadata=entry.agent_metadata)
+
+    def _purge_entry(self, entry: PruneLogEntry) -> None:
+        archived = self.archive_path / entry.archived_path
+        archived.unlink(missing_ok=True)
+        self._sweep_archive(archived.parent)
+
+    def _evaluate_quietly(self, trigger: PruneTrigger) -> PruneReport | None:
+        """The policy's own pass after an index or a sync. It never fails the
+        operation it follows: what went wrong is a warning, and nothing that
+        was not logged was moved."""
+        try:
+            return self._evaluate(trigger)
+        except Exception as e:
+            warnings.warn(f"Pruning after {trigger} did not run: {e}")
+            return None
+
+    def _evaluate_write(self, abs_path: Path) -> PruneReport | None:
+        """After write_doc, only what one write can do: copy a document that is
+        already there. One filtered read on the new document's text hash, not
+        a scan of the vault; then purge what has expired."""
+        try:
+            policy = self.prune_policy()
+            if not policy.enabled:
+                return None
+            report = None
+            if SEMANTIC_REASONS[DUPLICATE].auto_eligible and policy.mode(DUPLICATE) == PruneMode.AUTO:
+                from ctxvault.core.identifiers import get_doc_id
+                records = chroma_store.get_document_records(doc_id=get_doc_id(str(abs_path)), config=self.config)
+                digest = next((m.get("text_hash") for m in records.get("metadatas") or [] if m and m.get("text_hash")), None)
+                if digest:
+                    report = find_semantic_candidates(vault_name=self.vault_name, config=self.config, policy=policy,
+                                                      reasons={DUPLICATE}, same_text_as=digest)
+                    self._apply(report, policy=policy, named=False, trigger="write_doc")
+            self.purge_expired(policy)
+            return report
+        except Exception as e:
+            warnings.warn(f"Pruning after write_doc did not run: {e}")
+            return None
 
     def delete_file(self, file_path: Path)-> None:
         indexer.delete_file(file_path=str(file_path), config=self.config)
@@ -212,3 +343,4 @@ class SemanticVault(BaseVault):
 
         abs_path = (self.vault_path / file_path).resolve()
         self.index_file(file_path=abs_path, agent_metadata=agent_metadata, new_write=True)
+        self._evaluate_write(abs_path)

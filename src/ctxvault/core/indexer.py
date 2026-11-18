@@ -1,6 +1,6 @@
 def index_file(file_path: str, config: dict, agent_metadata: dict | None = None, *, new_write: bool = False)-> dict:
     from ctxvault.utils.text_extraction import extract_text
-    from ctxvault.core.identifiers import get_doc_id
+    from ctxvault.core.identifiers import get_doc_id, get_text_hash
     from ctxvault.utils.chuncking import chunk_text
     from ctxvault.core import embedding
     from ctxvault.storage.chroma_store import add_document, delete_document, get_document_records
@@ -27,7 +27,8 @@ def index_file(file_path: str, config: dict, agent_metadata: dict | None = None,
     embeddings = embedding.embed_list(chunks=[c.text for c in chunks], model_name=model_name)
 
     chunk_ids, metadatas = build_chunks_metadatas(doc_id=doc_id, chunks_size=len(chunks), source=file_path, filetype=file_type,
-                                                  agent_metadata=agent_metadata, repeated_words=[c.repeated_words for c in chunks])
+                                                  agent_metadata=agent_metadata, repeated_words=[c.repeated_words for c in chunks],
+                                                  text_hash=get_text_hash(text))
 
     # Chunk ids are the doc_id plus the chunk's position, so an upsert only
     # replaces the chunks the new text still has: a document rewritten

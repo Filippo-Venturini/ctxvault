@@ -6,7 +6,7 @@ nothing. Applying a report, the archive and `restore` are built on this.
 """
 
 from enum import Enum
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from pydantic import BaseModel, Field
 
@@ -57,6 +57,14 @@ class PrunePolicy(BaseModel):
         rule = self.rules.get(reason)
         return rule.mode if rule else PruneMode.OFF
 
+    def to_config(self) -> dict:
+        """The shape stored under the vault's "prune" key."""
+        return {
+            "enabled": self.enabled,
+            "retention_days": self.retention_days,
+            "rules": {name: rule.model_dump(mode="json", exclude_none=True) for name, rule in self.rules.items()},
+        }
+
 class Candidate(BaseModel):
     target: str                  # semantic: the document's source path; episodic: an episode id
     reason: str                  # one of the vault type's declared reasons
@@ -80,3 +88,35 @@ class PruneReport(BaseModel):
     # What the report could not look at, and why: a check left off, files gone.
     notes: list[str] = Field(default_factory=list)
     signals: dict[str, str | int | float] = Field(default_factory=dict)  # e.g. the model
+    # What applying the report did: empty unless it was applied.
+    applied: list["PruneLogEntry"] = Field(default_factory=list)
+    # Candidates applying left alone, and why: e.g. the file changed since it was found.
+    skipped: list[str] = Field(default_factory=list)
+
+PruneTrigger = Literal["manual", "index", "sync", "write_doc"]
+
+class PruneLogEntry(BaseModel):
+    """One archived document, as the log tells it: the archive row, and
+    whether a later row restored or purged it."""
+
+    id: str                      # the archive row's hash, short
+    n: int                       # the archive row's place in the log
+    at: str
+    who: Literal["human", "policy"]   # a person naming the target, or the policy unattended
+    trigger: PruneTrigger
+    target: str                  # path relative to the vault
+    reason: str
+    action: PruneAction
+    signals: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    archived_path: str | None = None  # relative to the archive directory
+    text_hash: str | None = None
+    agent_metadata: dict | None = None  # restore re-indexes with it, generated_by intact
+    restored_at: str | None = None
+    purged_at: str | None = None
+    purge_due: str | None = None  # when the policy will purge it; None while the policy is off
+
+    @property
+    def state(self) -> str:
+        return "purged" if self.purged_at else "restored" if self.restored_at else "archived"
+
+PruneReport.model_rebuild()

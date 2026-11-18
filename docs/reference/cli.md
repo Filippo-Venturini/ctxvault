@@ -570,9 +570,11 @@ Found 3 vaults (1 local, 2 global)
 ```
 
 ## `prune`
-Report what a **semantic** vault would prune, and why. Changes nothing.
+Report what a **semantic** vault would prune, and why. Changes nothing unless `--apply` is given.
 ```bash
-ctxvault prune <vault> [--reason <reason>] [--doc <path>] [--threshold <0-1>] [--older-than <days>] [--json]
+ctxvault prune <vault> [--reason <reason>] [--doc <path>] [--threshold <0-1>] [--older-than <days>] [--apply] [--json]
+ctxvault prune <vault> [--enable | --disable] [--retention-days <days>] [--rule <reason>=<mode>[,<setting>=<value>]]
+ctxvault prune <vault> --log [--json]
 ```
 
 **Arguments:**
@@ -581,7 +583,12 @@ ctxvault prune <vault> [--reason <reason>] [--doc <path>] [--threshold <0-1>] [-
 - `--doc <path>` - Only this document, by its path in the vault, repeatable (optional)
 - `--threshold <0-1>` - Cosine similarity at which two chunks of different documents count as the same passage, for this report (optional, default: 0.95 for the default model)
 - `--older-than <days>` - A document is stale after this many days without its file changing, e.g. `90` or `90d` (optional, default: 180)
-- `--json` - Print the report as JSON
+- `--apply` - Archive what is found. With `--doc`, the named documents, whoever wrote them: that is a person's decision. Without it, only what the policy allows unattended (see below)
+- `--enable` / `--disable` - Turn the vault's policy on or off. Disabling keeps its rules
+- `--retention-days <days>` - How long archived files are kept before the policy purges them (default: 30)
+- `--rule <reason>=<mode>[,threshold=<0-1>][,older_than_days=<days>]` - Store a rule, repeatable. `<mode>` is `off`, `report` or `auto`. `duplicate_partial` is never `auto`
+- `--log` - List what pruning archived, restored and purged
+- `--json` - Print the report, the policy or the log as JSON
 
 The report is grouped by reason, and each finding carries the signal behind it, not a score:
 
@@ -593,12 +600,46 @@ The threshold depends on the embedding model. A vault pinned to a model with no 
 
 **Agent-written documents.** Only a document an agent wrote, and nobody has edited since, can ever be pruned unattended. That means its metadata carries both `generated_by` and `timestamp` (the MCP `write_doc` tool sets both), and its file has not changed after `timestamp`. A document with `generated_by` but no `timestamp` (the Python client takes free-form `agent_metadata`) counts as human-written. Copying or cloning a vault resets file modification times, which makes every document human-written: nothing is auto-pruned, which is the safe way to be wrong. Human-written documents are reported as *needs a human*.
 
+**The policy.** A vault has no policy until one is set, and then it is stored under `"prune"` in the vault's config:
+
+```json
+"prune": {
+  "enabled": true,
+  "retention_days": 30,
+  "rules": {
+    "duplicate":         {"mode": "auto"},
+    "duplicate_partial": {"mode": "report", "threshold": 0.95},
+    "stale":             {"mode": "report", "older_than_days": 180}
+  }
+}
+```
+
+While it is enabled, the policy runs on its own after `index`, after `reindex --stale` and after every `write_doc`, and applies the rules in `auto` mode to agent-written documents only. After `write_doc` it only checks whether the new document is an identical copy of one already there, with one lookup by the text hash stored at index time, so a write never scans the vault. A pass that fails is a warning and never fails the operation it follows.
+
+**Archive, log, restore, purge.** Applying moves the file to `.ctxvault-archive/` inside the vault and drops it from the index. Nothing is deleted. Before moving anything, applying checks that the file still has the text it was found with, and for a duplicate, that the copy that stays still has it too. Otherwise the document is left alone and the output says why. Every archive, restore and purge is a row in `.ctxvault-archive/prune-log.jsonl`. Rows are only ever appended, and each carries the hash of the one before it. If the log has been edited or cut short, pruning refuses to act until a person has looked at it. `ctxvault restore <vault> <path>` puts a document back and indexes it again, with the agent metadata it had. Archived files are purged once they are older than `retention_days`, but only while the policy is enabled: with the policy off, they stay until you remove them.
+
 **Example:**
 ```bash
 ctxvault prune my-vault
 ctxvault prune my-vault --reason stale --older-than 90d
 ctxvault prune my-vault --doc notes/setup.md --json
+ctxvault prune my-vault --apply --doc notes/old/setup.md
+ctxvault prune my-vault --enable --rule stale=auto,older_than_days=365
+ctxvault prune my-vault --log
 ```
+
+---
+
+## `restore`
+Put a document that pruning archived back where it was, and index it again.
+```bash
+ctxvault restore <vault> <path> [--overwrite]
+```
+
+**Arguments:**
+- `<vault>` - Vault name (required)
+- `<path>` - The document's path in the vault, as `prune --log` shows it (required)
+- `--overwrite` - Replace a file written at the same path since it was archived (optional; without it, restore refuses)
 
 ---
 
@@ -624,6 +665,7 @@ ctxvault prune my-vault --doc notes/setup.md --json
 | `reindex`       | ✓              | ✗           | ✗              |
 | `delete`        | ✓              | ✗           | ✗              |
 | `prune`         | ✓              | ✗           | ✗              |
+| `restore`       | ✓              | ✗           | ✗              |
 | `vaults`        | ✓              | ✓           | ✓              |
 | `attach`        | ✓              | ✓           | ✓              |
 | `detach`        | ✓              | ✓           | ✓              |
