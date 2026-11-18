@@ -87,6 +87,12 @@ class Client:
     def make_public(self, name: str) -> None:
         vault_router.make_public(vault_name=name)
 
+    def set_hybrid_search(self, name: str, enabled: bool) -> None:
+        """The vault-level default for ranking by exact words as well as
+        vectors. `vault.query(..., hybrid=...)` overrides it for one call."""
+        from ctxvault.utils import config
+        config.set_hybrid_search(vault_name=name, enabled=enabled)
+
     # --- opening --------------------------------------------------------------
 
     def vault(self, name: str) -> SemanticVault | SkillVault | EpisodicVault:

@@ -1,3 +1,4 @@
+import math
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from ctxvault.core import indexer
@@ -18,6 +19,17 @@ def _instant(value: str | None) -> datetime | None:
         return None
     parsed = datetime.fromisoformat(value)
     return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+
+def _distance(query_embedding: list[float], chunk_embedding: list[float], space: str) -> float:
+    """The same measure the collection uses, so a keyword-only hit's `score`
+    means what every other hit's `score` means."""
+    if space == "cosine":
+        norm = math.sqrt(sum(x * x for x in query_embedding)) * math.sqrt(sum(x * x for x in chunk_embedding))
+        if norm == 0.0:
+            return 1.0
+        return 1.0 - sum(a * b for a, b in zip(query_embedding, chunk_embedding)) / norm
+    # Chroma's "l2" is squared Euclidean, the same number its own hits carry.
+    return sum((a - b) ** 2 for a, b in zip(query_embedding, chunk_embedding))
 
 def _matches_filters(metadata: dict, filters: dict | None) -> bool:
     """Equality only: the keyword leg has no query planner, so a filter the
@@ -83,6 +95,14 @@ class SemanticVault(BaseVault):
                 reindexed_files.append(str(file))
             except Exception as e:
                 skipped_files.append(f"{str(file)} ({e})")
+
+        # A vault prepared ahead of time: `reindex` also builds the keyword
+        # cache, so the first hybrid query does not pay for it (an MCP call can
+        # time out on that build even after it got faster). Indexing hooks keep
+        # it current afterwards.
+        from ctxvault.core import keyword_index
+        if keyword_index.available(self.config) and keyword_index.built_at(self.config) is None:
+            self._build_keyword_index()
 
         return reindexed_files, skipped_files
 
@@ -161,12 +181,16 @@ class SemanticVault(BaseVault):
         super().delete_file(file_path=file_path)
         
     def query(self, text: str, filters: dict | None = None, n_results: int = 5,
-              hybrid: bool = False) -> QueryResult:
+              hybrid: bool | None = None) -> QueryResult:
         from ctxvault.core import querying
         if not text.strip():
             raise EmptyQueryError("Query text cannot be empty.")
 
-        if hybrid:
+        # None means "whatever the vault says": an agent calling over MCP does
+        # not know whether its vault wants exact words, its owner does. The
+        # per-query flag is the override.
+        use_hybrid = bool(self.config.get("hybrid_search")) if hybrid is None else hybrid
+        if use_hybrid:
             return self._query_hybrid(text=text, filters=filters, n_results=n_results)
 
         result_dict = querying.query(query_txt=text, config=self.config, n_results=n_results, filters=filters)
@@ -200,31 +224,58 @@ class SemanticVault(BaseVault):
         ]
         return QueryResult(query=text, results=chunks_match)
 
+    def _build_keyword_index(self) -> bool:
+        """(Re)build the keyword cache from the collection, the source of truth.
+        Returns whether it can be used now."""
+        from ctxvault.core import keyword_index
+
+        try:
+            keyword_index.rebuild(self.config)
+            keyword_index.mark_built(self.config, datetime.now(timezone.utc).isoformat())
+            return True
+        except Exception as exc:
+            import warnings
+            warnings.warn(f"keyword index could not be built ({exc}); answering vector-only")
+            return False
+
+    def _keyword_index_ready(self) -> bool:
+        """An index that exists and still describes the collection. A crash
+        between a vector write and its keyword row leaves the two counts apart;
+        comparing them costs one number per side and catches that."""
+        from ctxvault.core import keyword_index
+
+        try:
+            if keyword_index.built_at(self.config) is not None:
+                if keyword_index.count(self.config) == chroma_store.count(self.config):
+                    return True
+            return self._build_keyword_index()
+        except Exception as exc:
+            import warnings
+            warnings.warn(f"keyword index could not be checked ({exc}); answering vector-only")
+            return False
+
     def _query_hybrid(self, text: str, filters: dict | None, n_results: int) -> QueryResult:
         """Rank by both legs: the vector store and the keyword index.
 
         Reciprocal rank fusion, k=60: a chunk is worth what both legs say about
         it, and neither leg's score scale has to be comparable. Deeper than the
         requested depth on each side, because a chunk the vector leg ranks 30th
-        can still be the exact identifier the keyword leg ranks first."""
-        from ctxvault.core import keyword_index, querying
+        can still be the exact identifier the keyword leg ranks first.
 
-        if not keyword_index.available(self.config):
-            # No FTS5 in this interpreter: answer exactly as before rather than
-            # fail a query over an optional leg.
-            return self.query(text=text, filters=filters, n_results=n_results)
+        A chunk only the keyword leg found still has an embedding, so it gets
+        its real distance from a lookup by id: `score` never invents a number
+        that reads as a perfect match."""
+        from ctxvault.core import embedding, keyword_index, querying
 
-        if keyword_index.built_at(self.config) is None:
-            try:
-                keyword_index.rebuild(self.config)
-                keyword_index.mark_built(self.config, datetime.now(timezone.utc).isoformat())
-            except Exception as exc:
-                import warnings
-                warnings.warn(f"keyword index could not be built ({exc}); answering vector-only")
-                return self.query(text=text, filters=filters, n_results=n_results)
+        if not keyword_index.available(self.config) or not self._keyword_index_ready():
+            # No usable keyword leg: answer exactly as before rather than fail
+            # a query over an optional one.
+            return self.query(text=text, filters=filters, n_results=n_results, hybrid=False)
 
         depth = max(20, n_results * 4)
-        result_dict = querying.query(query_txt=text, config=self.config, n_results=depth, filters=filters)
+        query_embedding = embedding.embed_list(chunks=[text], model_name=self.config.get("embedding_model"))[0]
+        result_dict = querying.query(query_txt=text, config=self.config, n_results=depth,
+                                     filters=filters, query_embedding=query_embedding)
         cosine = chroma_store.space(self.config) == "cosine"
 
         fused: dict[str, dict] = {}
@@ -237,32 +288,44 @@ class SemanticVault(BaseVault):
                 "rank_score": 1.0 / (60 + rank),
             }
 
-        for rank, hit in enumerate(keyword_index.search(self.config, text, depth), start=1):
+        keyword_hits = keyword_index.search(self.config, text, depth)
+        missing = [hit for hit in keyword_hits
+                   if hit["chunk_id"] not in fused and _matches_filters(hit["metadata"], filters)]
+        records = chroma_store.records_by_ids([hit["chunk_id"] for hit in missing], self.config) if missing else {}
+        record_ids = records.get("ids") or []
+        record_texts = records.get("documents") or []
+        record_metadatas = records.get("metadatas") or []
+        record_embeddings = records.get("embeddings")
+        if record_embeddings is None:
+            record_embeddings = [None] * len(record_ids)
+        by_id = {chunk_id: (text_value, metadata_value, vector)
+                 for chunk_id, text_value, metadata_value, vector
+                 in zip(record_ids, record_texts, record_metadatas, record_embeddings)}
+
+        for rank, hit in enumerate(keyword_hits, start=1):
             entry = fused.get(hit["chunk_id"])
-            if entry is None:
-                if not _matches_filters(hit["metadata"], filters):
-                    continue
-                fused[hit["chunk_id"]] = {
-                    "text": hit["text"], "metadata": hit["metadata"], "distance": None,
-                    "rank_score": 1.0 / (60 + rank),
-                }
-            else:
+            if entry is not None:
                 entry["rank_score"] += 1.0 / (60 + rank)
+                continue
+            record = by_id.get(hit["chunk_id"])
+            if record is None or record[2] is None:
+                continue      # the collection cannot give it a real score
+            document, metadata, vector = record
+            fused[hit["chunk_id"]] = {
+                "text": document, "metadata": metadata,
+                "distance": _distance(query_embedding, vector, "cosine" if cosine else "l2"),
+                "rank_score": 1.0 / (60 + rank),
+            }
 
         ordered = sorted(fused.items(),
-                         key=lambda item: (-item[1]["rank_score"],
-                                           item[1]["distance"] if item[1]["distance"] is not None else float("inf"),
-                                           item[1]["metadata"]["chunk_index"]))
+                         key=lambda item: (-item[1]["rank_score"], item[1]["distance"]))
         chunks_match = [
             ChunkMatch(
                 chunk_id=chunk_id,
                 chunk_index=entry["metadata"]["chunk_index"],
                 text=entry["text"],
-                # (a): a keyword-only hit has no distance, so `score` stays the
-                # field it always was and the fusion value ranks the list.
-                score=entry["distance"] if entry["distance"] is not None else 0.0,
-                similarity=(max(0.0, min(1.0, 1.0 - entry["distance"]))
-                            if cosine and entry["distance"] is not None else None),
+                score=entry["distance"],
+                similarity=max(0.0, min(1.0, 1.0 - entry["distance"])) if cosine else None,
                 doc_id=entry["metadata"]["doc_id"],
                 source=entry["metadata"]["source"],
                 metadata={k: v for k, v in entry["metadata"].items() if k not in BUILT_IN_METADATA_KEYS},

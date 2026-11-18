@@ -56,13 +56,21 @@ def _metadata_json(metadata: dict | None) -> str:
     return json.dumps(metadata or {}, sort_keys=True, ensure_ascii=False)
 
 
-def upsert(config: dict, chunk_ids: list[str], metadatas: list[dict], texts: list[str]) -> None:
-    """One document's chunks, replacing any earlier copy of each chunk."""
+def upsert(config: dict, chunk_ids: list[str], metadatas: list[dict], texts: list[str],
+           replace: bool = True) -> None:
+    """One document's chunks, replacing any earlier copy of that document.
+
+    Deleting per chunk would scan the table once per chunk — quadratic, and it
+    showed: a document has one row per chunk but only one `doc_id`. `replace`
+    is off in `rebuild`, where the table was just cleared and there is nothing
+    to remove."""
     if not chunk_ids or path(config) is None:
         return
     with closing(_connect(config)) as connection, connection:
+        if replace:
+            for doc_id in {metadata["doc_id"] for metadata in metadatas}:
+                connection.execute("DELETE FROM chunks WHERE doc_id = ?", (doc_id,))
         for chunk_id, metadata, text in zip(chunk_ids, metadatas, texts):
-            connection.execute("DELETE FROM chunks WHERE chunk_id = ?", (chunk_id,))
             connection.execute(
                 "INSERT INTO chunks (chunk_id, doc_id, chunk_index, source, metadata, text) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
@@ -158,6 +166,6 @@ def rebuild(config: dict) -> int:
     pairs = [(chunk_id, metadata, text) for chunk_id, metadata, text
              in zip(ids, metadatas, documents) if metadata is not None and text is not None]
     if pairs:
-        upsert(config, [p[0] for p in pairs], [p[1] for p in pairs], [p[2] for p in pairs])
+        upsert(config, [p[0] for p in pairs], [p[1] for p in pairs], [p[2] for p in pairs], replace=False)
     return len(pairs)
 

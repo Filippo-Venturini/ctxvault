@@ -98,14 +98,15 @@ def index_files(vault_name: str, path: str | None = None)-> tuple[list[str], lis
     return vault.index_files(path=path)
 
 def query(text: str, vault_name: str, filters: dict | None = None, n_results: int = 5,
-          hybrid: bool = False)-> QueryResult:
+          hybrid: bool | None = None)-> QueryResult:
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.QUERY)
     kwargs = {"text": text, "filters": filters, "n_results": n_results}
-    # Only a semantic vault has a keyword leg; elsewhere the flag is ignored
-    # rather than turned into a TypeError.
-    if hybrid and hasattr(vault, "_query_hybrid"):
-        kwargs["hybrid"] = True
+    # None leaves it to the vault's own setting. Only a semantic vault has a
+    # keyword leg; elsewhere the flag is ignored rather than turned into a
+    # TypeError.
+    if hybrid is not None and hasattr(vault, "_query_hybrid"):
+        kwargs["hybrid"] = hybrid
     return vault.query(**kwargs)
 
 def delete_files(vault_name: str, path: str | None = None)-> tuple[list[str], list[str]]:

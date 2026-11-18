@@ -94,6 +94,11 @@ def test_hybrid_ranks_a_chunk_both_legs_agree_on_above_the_vector_leader(tmp_pat
         }
 
     monkeypatch.setattr(chroma_store, "query", fake_query)
+    # The collection holds the same one chunk, so the drift check leaves the
+    # index alone instead of rebuilding from an empty fake collection.
+    monkeypatch.setattr(chroma_store, "count", lambda config: 1)
+    monkeypatch.setattr(chroma_store, "records_by_ids", lambda ids, config: {
+        "ids": [], "documents": [], "metadatas": [], "embeddings": []})
 
     vault = SemanticVault("v", config)
     result = vault.query("ERR_4021", n_results=2, hybrid=True)
@@ -101,9 +106,70 @@ def test_hybrid_ranks_a_chunk_both_legs_agree_on_above_the_vector_leader(tmp_pat
     assert result.mode == "hybrid"
     assert result.results[0].chunk_id == "c2"
     assert result.results[0].rank_score == pytest.approx(1 / 61 + 1 / 62)
-    # (a): the field still means the distance the vector leg gave it.
+    # The field still means the distance the vector leg gave it.
     assert result.results[0].score == 0.90
     assert result.results[1].rank_score == pytest.approx(1 / 61)
+
+
+def test_reindexing_a_shorter_document_drops_its_old_tail(tmp_path):
+    """The document is the unit of replacement, not the chunk: deleting by
+    doc_id once also removes chunks the new version no longer has."""
+    config = _config(tmp_path)
+    keyword_index.upsert(config, ["c1", "c2"],
+                         [_chunk("c1", "alpha"), _chunk("c2", "beta", chunk_index=1)],
+                         ["alpha", "beta"])
+    keyword_index.upsert(config, ["c1"], [_chunk("c1", "alpha only")], ["alpha only"])
+
+    assert keyword_index.count(config) == 1
+    assert keyword_index.search(config, "beta", limit=5) == []
+
+
+def test_a_keyword_only_hit_gets_its_real_distance(tmp_path, monkeypatch):
+    """A chunk the keyword leg found and the vector leg did not still has an
+    embedding. `score` must be its true distance, not 0.0, which would read as
+    a perfect match in a field where lower is closer."""
+    config = _config(tmp_path)
+    keyword_index.upsert(config, ["c2"], [_chunk("c2", "see ERR_4021", doc_id="doc2")], ["see ERR_4021"])
+    keyword_index.mark_built(config, "2026-01-01T00:00:00+00:00")
+
+    def fake_query(query_embedding, config, n_results=5, filters=None):
+        return {"documents": [["alpha apple"]], "metadatas": [[_chunk("c1", "alpha apple")]],
+                "distances": [[0.10]]}
+
+    # cosine distance between the query and c2's vector is 1.0: orthogonal.
+    monkeypatch.setattr(chroma_store, "query", fake_query)
+    monkeypatch.setattr(chroma_store, "count", lambda config: 1)
+    monkeypatch.setattr(chroma_store, "records_by_ids", lambda ids, config: {
+        "ids": ["c2"], "documents": ["see ERR_4021"],
+        "metadatas": [_chunk("c2", "see ERR_4021", doc_id="doc2")],
+        "embeddings": [[0.0, 1.0]]})
+    from ctxvault.core import embedding
+    monkeypatch.setattr(embedding, "embed_list", lambda chunks, model_name=None: [[1.0, 0.0]])
+
+    result = SemanticVault("v", config).query("ERR_4021", n_results=2, hybrid=True)
+
+    by_id = {chunk.chunk_id: chunk for chunk in result.results}
+    assert by_id["c2"].score == pytest.approx(1.0)
+    assert by_id["c2"].similarity == pytest.approx(0.0)
+    assert by_id["c2"].rank_score == pytest.approx(1 / 61)
+
+
+def test_the_vault_setting_decides_unless_a_flag_overrides_it(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    config["hybrid_search"] = True
+    monkeypatch.setattr(SemanticVault, "_query_hybrid",
+                        lambda self, text, filters, n_results: _hybrid_result(text))
+    monkeypatch.setattr("ctxvault.core.querying.query",
+                        lambda **kwargs: {"documents": [[]], "metadatas": [[]], "distances": [[]]})
+
+    vault = SemanticVault("v", config)
+    assert vault.query("x").mode == "hybrid"           # no flag: the vault says on
+    assert vault.query("x", hybrid=False).mode == "vector"   # per-query override
+
+
+def _hybrid_result(text: str):
+    from ctxvault.models.query_result import QueryResult
+    return QueryResult(query=text, results=[], mode="hybrid")
 
 
 def test_hybrid_without_fts5_answers_vector_only(tmp_path, monkeypatch):

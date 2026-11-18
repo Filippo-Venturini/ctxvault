@@ -84,7 +84,7 @@ def check_access(vault_name: str, agent_name: str):
         raise PermissionError(f"Agent '{agent_name}' is not authorized to access vault '{vault_name}'")
 
 @mcp.tool(description="Search for relevant information in a CtxVault vault using semantic similarity. Use this when the user asks a question that might be answered by their personal knowledge base or documents. Returns the most relevant text chunks with their source files.")
-async def query(vault_name: str, query: str, hybrid: bool = False) -> QueryResponse:
+async def query(vault_name: str, query: str, hybrid: bool | None = None) -> QueryResponse:
     await ensure_warmup()
     
     try:

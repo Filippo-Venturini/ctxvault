@@ -52,10 +52,15 @@ def build_documents_from_metadatas(metadatas)-> list[SemanticDocumentInfo]:
 
     return [SemanticDocumentInfo(doc_id=doc_id, **fields) for doc_id, fields in acc.items()]
 
-def query(query_txt: str, config: dict, n_results: int = 5, filters: dict | None = None)-> dict:
+def query(query_txt: str, config: dict, n_results: int = 5, filters: dict | None = None,
+          query_embedding: list[float] | None = None)-> dict:
     # Query must embed with the same model used to index this vault, or the
-    # vectors are not comparable; both read it from the vault config.
-    query_embedding = embed_list(chunks=[query_txt], model_name=config.get("embedding_model"))
+    # vectors are not comparable; both read it from the vault config. A caller
+    # that already embedded the query (the hybrid path, which needs the vector
+    # to give keyword-only hits their distance) passes it in rather than paying
+    # for a second forward pass.
+    if query_embedding is None:
+        query_embedding = embed_list(chunks=[query_txt], model_name=config.get("embedding_model"))
     return chroma_store.query(query_embedding=query_embedding, config=config, n_results=n_results, filters=filters)
 
 def list_documents(config: dict)-> list[SemanticDocumentInfo]:

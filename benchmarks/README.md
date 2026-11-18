@@ -14,7 +14,6 @@ benchmarks/
   retrieval/
     beir_vs_alternatives.py         CtxVault vs ChromaDB vs LangChain on BEIR
     coir_vs_alternatives.py         CtxVault vs ChromaDB vs LangChain on CoIR
-    hybrid_vs_vector.py             vector-only vs hybrid (keyword leg fused by RRF)
 ```
 
 `internal/` benchmarks compare CtxVault's own chunking strategies against each other.
@@ -35,6 +34,17 @@ pip install -r benchmarks/retrieval/requirements.txt
 ```bash
 python benchmarks/retrieval/beir_vs_alternatives.py
 python benchmarks/retrieval/coir_vs_alternatives.py
+```
+
+Both scripts include a `CtxVault (hybrid)` row: the same chunks and index as
+`CtxVault (full)`, with the keyword leg fused in at query time. To compare only
+the two CtxVault rows (one indexing pass each, same pipeline), pass:
+
+```bash
+python benchmarks/retrieval/beir_vs_alternatives.py --datasets nfcorpus scifact \
+    --strategies ctxvault ctxvault_hybrid
+python benchmarks/retrieval/coir_vs_alternatives.py --datasets cosqa stackoverflow-qa \
+    --strategies ctxvault ctxvault_hybrid
 ```
 
 ### Results
