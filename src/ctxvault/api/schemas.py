@@ -152,6 +152,7 @@ class ReopenEpisodeRequest(BaseModel):
     vault_name: str
     at: str | None = None
     reason: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 class SupersedeEpisodeRequest(BaseModel):
     vault_name: str
@@ -163,6 +164,7 @@ class SupersedeEpisodeRequest(BaseModel):
     occurred_at: str | None = None
     valid_from: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    event_metadata: dict[str, Any] = Field(default_factory=dict)
 
 class ReviseEpisodeRequest(BaseModel):
     vault_name: str
@@ -172,6 +174,7 @@ class ReviseEpisodeRequest(BaseModel):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     salience: float | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    event_metadata: dict[str, Any] = Field(default_factory=dict)
 
 class ConfirmEpisodeRequest(BaseModel):
     vault_name: str

@@ -271,7 +271,7 @@ ctxvault episodes <vault> [text] [--entity <name>]... [--valid-at <iso>] [--know
 - `--entities` - List the vault's entities and how often each is mentioned, instead of episodes. Honours `--all` and `--valid-at`
 - `--min-episodes <n>` - With `--entities`, hide entities mentioned fewer than `n` times
 - `--values <key>` - List the distinct values of this metadata key and how many episodes carry each, instead of episodes. Honours `--all` and `--valid-at`
-- `--event-metadata <json>` - Only episodes whose confirm, dispute or close carries these keys (JSON object). All keys must hold on the same event
+- `--event-metadata <json>` - Only episodes whose confirm, dispute, close or reopen carries these keys (JSON object). All keys must hold on the same event. A confirmation copied onto a revision still matches, so the current wording is returned too. With `--known-at`, only events recorded at or before that instant match
 
 **Example:**
 ```bash
@@ -294,7 +294,7 @@ ctxvault episode <vault> <episode_id> [--history]
 **Arguments:**
 - `<vault>` - Vault name (required)
 - `<episode_id>` - Episode id (required)
-- `--history` - Print every version of the statement, oldest first, then any confirmations, disputes and closes on that chain (with their metadata)
+- `--history` - Print every version of the statement, oldest first, then any confirmations, disputes and closes on that chain (with their metadata). A confirmation copied onto a revision is listed once
 
 **Example:**
 ```bash
@@ -339,7 +339,7 @@ A dispute that ended because this side was closed becomes open again if the
 other side is still current.
 
 ```bash
-ctxvault reopen <vault> <episode_id> [--at <iso>] [--reason <text>]
+ctxvault reopen <vault> <episode_id> [--at <iso>] [--reason <text>] [--metadata <json>]
 ```
 
 **Arguments:**
@@ -347,6 +347,7 @@ ctxvault reopen <vault> <episode_id> [--at <iso>] [--reason <text>]
 - `<episode_id>` - Episode id (required); must already be closed
 - `--at <iso>` - When the reopen was recorded (optional, default: now); cannot precede the close
 - `--reason <text>` - Why it was reopened (optional)
+- `--metadata <json>` - Optional JSON object stored with this reopen (run id, model, prompt version, ...); kept on the closure as `reopen_metadata`, separate from the close's metadata
 
 **Example:**
 ```bash
@@ -360,7 +361,7 @@ Replace an episode with a corrected version. The old statement closes exactly
 where the new one opens, in one transaction, and the two stay linked.
 
 ```bash
-ctxvault supersede <vault> <episode_id> <content> [--entity <name>]... [--source <who>] [--salience <0-1>] [--valid-from <iso>]
+ctxvault supersede <vault> <episode_id> <content> [--entity <name>]... [--source <who>] [--salience <0-1>] [--valid-from <iso>] [--event-metadata <json>]
 ```
 
 **Arguments:**
@@ -371,6 +372,7 @@ ctxvault supersede <vault> <episode_id> <content> [--entity <name>]... [--source
 - `--source <who>` - Who reported the correction
 - `--salience <0-1>` - Defaults to the superseded episode's salience
 - `--valid-from <iso>` - The boundary between the two versions (optional, default: now)
+- `--event-metadata <json>` - Optional JSON object stored with this close (run id, model, prompt version, ...); not mixed into the new statement's metadata
 
 **Example:**
 ```bash
@@ -385,13 +387,14 @@ the wording can be said better: "lives in Padova" becomes "lives in Padova,
 in the Arcella". Unlike `supersede`, nothing changes in valid time: the
 revision opens where the original did and inherits its attestations, its
 entities, its salience and its metadata, and any dispute still open against
-it. The original is closed in transaction time only, with
+it. Copied attestations still match `--event-metadata`, so a query can find
+the current wording; `episode --history` lists each confirmation once. The original is closed in transaction time only, with
 `invalidation_reason: revised`: it is no longer what the vault states, it
 stays in the history, and a query with `--known-at` before the revision
 still finds it.
 
 ```bash
-ctxvault revise <vault> <episode_id> <content> [--entity <name>]... [--source <who>] [--salience <0-1>]
+ctxvault revise <vault> <episode_id> <content> [--entity <name>]... [--source <who>] [--salience <0-1>] [--event-metadata <json>]
 ```
 
 **Arguments:**
@@ -401,6 +404,7 @@ ctxvault revise <vault> <episode_id> <content> [--entity <name>]... [--source <w
 - `--entity <name>`, `-e <name>` - Entities of the revision; repeatable. Defaults to the original's
 - `--source <who>` - Who restated it. Defaults to the original's source
 - `--salience <0-1>` - Defaults to the original's salience
+- `--event-metadata <json>` - Optional JSON object stored with the close of the original (run id, model, prompt version, ...); not mixed into the new statement's metadata
 
 **Example:**
 ```bash

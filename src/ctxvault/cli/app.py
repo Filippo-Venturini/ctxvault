@@ -454,7 +454,7 @@ def episodes(
     entities: bool = typer.Option(False, "--entities", help="List the vault's entities instead of episodes"),
     min_episodes: int = typer.Option(1, "--min-episodes", help="With --entities, hide entities mentioned fewer times"),
     values: str = typer.Option(None, "--values", help="List the distinct values of this metadata key instead of episodes"),
-    event_metadata: str = typer.Option(None, "--event-metadata", help="JSON object; keep episodes whose confirm, dispute or close carries these keys"),
+    event_metadata: str = typer.Option(None, "--event-metadata", help="JSON object; keep episodes whose confirm, dispute, close or reopen carries these keys"),
 ):
     try:
         if values:
@@ -560,6 +560,13 @@ def episode(
                     if row.get("metadata"):
                         typer.echo(f"  metadata={row['metadata']}", nl=False)
                     typer.echo("")
+                    if row.get("reopened_at"):
+                        typer.secho(f"  reopened {row['reopened_at']}", fg=typer.colors.BRIGHT_BLACK, nl=False)
+                        if row.get("reopen_reason"):
+                            typer.echo(f"  reason={row['reopen_reason']}", nl=False)
+                        if row.get("reopen_metadata"):
+                            typer.echo(f"  metadata={row['reopen_metadata']}", nl=False)
+                        typer.echo("")
             return
 
         _print_episode(vault_router.get_episode(vault_name=name, episode_id=episode_id))
@@ -589,10 +596,11 @@ def reopen(
     episode_id: str = typer.Argument(...),
     at: str = typer.Option(None, "--at", help="ISO timestamp the reopen was recorded (default: now)"),
     reason: str = typer.Option(None, "--reason"),
+    metadata: str = typer.Option(None, "--metadata", help="JSON object stored with this reopen (run_id, model, ...)"),
 ):
     """Make a closed episode current again, without erasing the close."""
     try:
-        episode = vault_router.reopen_episode(vault_name=name, episode_id=episode_id, at=at, reason=reason)
+        episode = vault_router.reopen_episode(vault_name=name, episode_id=episode_id, at=at, reason=reason, metadata=_parse_metadata(metadata))
         typer.secho("Episode reopened.", fg=typer.colors.GREEN, bold=True)
         _print_episode(episode)
     except Exception as e:
@@ -608,6 +616,7 @@ def supersede(
     source: str = typer.Option(None, "--source"),
     salience: float = typer.Option(None, "--salience"),
     valid_from: str = typer.Option(None, "--valid-from"),
+    event_metadata: str = typer.Option(None, "--event-metadata", help="JSON object stored with this close (run_id, model, ...); not mixed into the new statement"),
 ):
     try:
         episode = vault_router.supersede_episode(
@@ -618,6 +627,7 @@ def supersede(
             source=source,
             salience=salience,
             valid_from=valid_from,
+            event_metadata=_parse_metadata(event_metadata),
         )
         typer.secho("Episode superseded.", fg=typer.colors.GREEN, bold=True)
         _print_episode(episode)
@@ -633,6 +643,7 @@ def revise(
     entity: list[str] = typer.Option([], "--entity", "-e"),
     source: str = typer.Option(None, "--source"),
     salience: float = typer.Option(None, "--salience"),
+    event_metadata: str = typer.Option(None, "--event-metadata", help="JSON object stored with this close (run_id, model, ...); not mixed into the new statement"),
 ):
     """Restate an episode more precisely; it keeps its attestations."""
     try:
@@ -643,6 +654,7 @@ def revise(
             entities=list(entity) or None,
             source=source,
             salience=salience,
+            event_metadata=_parse_metadata(event_metadata),
         )
         typer.secho("Episode revised.", fg=typer.colors.GREEN, bold=True)
         _print_episode(episode)

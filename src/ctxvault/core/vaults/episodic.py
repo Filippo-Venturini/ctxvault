@@ -194,6 +194,7 @@ class EpisodicVault(BaseVault):
         occurred_at: str | None = None,
         valid_from: str | None = None,
         metadata: dict | None = None,
+        event_metadata: dict | None = None,
         at: str | None = None,
     ) -> Episode:
         if not content.strip():
@@ -210,6 +211,7 @@ class EpisodicVault(BaseVault):
             occurred_at=occurred_at,
             valid_from=valid_from,
             metadata=metadata,
+            event_metadata=event_metadata,
             embedding=self._embed(content),
             at=at,
         )
@@ -225,6 +227,7 @@ class EpisodicVault(BaseVault):
         confidence: float | None = None,
         salience: float | None = None,
         metadata: dict | None = None,
+        event_metadata: dict | None = None,
         at: str | None = None,
     ) -> Episode:
         if not content.strip():
@@ -239,14 +242,17 @@ class EpisodicVault(BaseVault):
             confidence=confidence,
             salience=salience,
             metadata=metadata,
+            event_metadata=event_metadata,
             embedding=self._embed(content),
             at=at,
         )
         return self._to_episode(data)
 
     def reopen_episode(self, episode_id: str, *, at: str | None = None,
-                       reason: str | None = None) -> Episode:
-        data = sqlite_store.reopen_episode(self.config, episode_id, at=at, reason=reason)
+                       reason: str | None = None, metadata: dict | None = None) -> Episode:
+        data = sqlite_store.reopen_episode(
+            self.config, episode_id, at=at, reason=reason, metadata=metadata
+        )
         return self._to_episode(data)
 
     def confirm_episode(self, episode_id: str, *, at: str | None = None,
@@ -271,7 +277,9 @@ class EpisodicVault(BaseVault):
         return EpisodeHistory(
             episode_id=episode_id,
             chain=[self._to_episode(item) for item in raw],
-            attestations=sqlite_store.list_attestations(self.config, episode_ids=ids),
+            attestations=sqlite_store.list_attestations(
+                self.config, episode_ids=ids, include_inherited=False
+            ),
             disputes=sqlite_store.list_disputes(self.config, episode_ids=ids),
             closures=sqlite_store.list_closures(self.config, episode_ids=ids),
         )
@@ -290,7 +298,11 @@ class EpisodicVault(BaseVault):
         return [self._to_episode(row) for row in rows]
 
     def attestations(self) -> list[dict]:
-        """Each time a statement was asserted again: episode_id, at, source, metadata."""
+        """Each time a statement was asserted again: episode_id, at, source, metadata, inherited.
+
+        Includes attestations copied onto a revision; `history()` hides those
+        copies so each confirmation is listed once.
+        """
         return sqlite_store.list_attestations(self.config)
 
     def disputes(self) -> list[dict]:
