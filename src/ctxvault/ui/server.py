@@ -59,6 +59,28 @@ ACTIVITY_DAYS = 30
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
+# mimetypes.guess_type does not know .woff2 on every platform (Windows), so the
+# exported page inlined fonts as application/octet-stream and the page could
+# not load them. Map the types we inline explicitly instead of relying on the OS.
+_INLINE_MIME_TYPES = {
+    ".woff2": "font/woff2",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+}
+
+
+def _guess_mime(filename: str) -> str:
+    mime = mimetypes.guess_type(filename)[0]
+    if mime is None:
+        mime = _INLINE_MIME_TYPES.get(Path(filename).suffix.lower())
+    return mime or "application/octet-stream"
+
+
+def _data_uri(path: Path) -> str:
+    mime = _guess_mime(path.name)
+    return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
+
+
 def _is_local(request: Request) -> bool:
     return request.client is not None and request.client.host in _LOOPBACK
 
@@ -390,10 +412,6 @@ def _contents(name: str, documents: list[dict]) -> dict:
         except Exception as error:
             out[entry["doc_id"]] = {"error": f"{type(error).__name__}: {error}"}
     return out
-
-def _data_uri(path: Path) -> str:
-    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
 
 def _inline_fonts(css: str) -> str:
     for font in sorted((STATIC / "fonts").glob("*.woff2")):
