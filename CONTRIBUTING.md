@@ -21,6 +21,7 @@ Contributions are welcome, and if you find CtxVault useful, leaving a star is th
 
 - Tests for the new behavior, and the full suite passing (`pytest`).
 - Docs updated when behavior or an interface changes (`docs/`, and the README where relevant).
+- A CHANGELOG entry under `Unreleased` when the change is user-visible (`CHANGELOG.md`, Keep a Changelog format).
 - A feature exposed on one interface (CLI, HTTP, MCP, Python client) is exposed on the others too, unless the issue says otherwise.
 - A vault created by an earlier release must keep working: storage changes need a migration and a test for it.
 
