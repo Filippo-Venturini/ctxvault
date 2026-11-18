@@ -35,7 +35,7 @@ List all indexed documents inside a specific vault. Use this to understand what 
 
 ### `write_doc`
 
-Save new information or agent-generated content to a semantic vault for future retrieval. Use this only with semantic vaults, to persist important context, summaries, or notes that should be remembered across sessions. Supports .txt, .md, and .docx formats.
+Save new information or agent-generated content to a semantic vault for future retrieval. Use this only with semantic vaults, to persist important context, summaries, or notes that should be remembered across sessions. Supports .txt, .md, .docx, .html, and .csv formats.
 
 | Parameter | Type | Default |
 |-----------|------|---------|

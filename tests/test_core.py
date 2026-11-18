@@ -203,6 +203,85 @@ def test_markdown_is_extracted_as_written_so_the_chunker_sees_its_headings(tmp_p
     assert text.startswith("# Guide")
     assert chunks[1].text == "Guide > Audit log\nEvery write is logged."
 
+def test_html_extraction_drops_scripts_styles_and_markup(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    html = tmp_path / "page.html"
+    html.write_text(
+        "<!DOCTYPE html><html><head><title>Menu</title>"
+        "<style>body { color: red; }</style>"
+        "<script>window.track = true;</script></head>"
+        "<body><h1>Bakery</h1><p>Fresh <b>sourdough</b> daily.</p>"
+        "<script>alert('x')</script></body></html>"
+    )
+
+    text, filetype = extract_text(str(html))
+
+    assert filetype == ".html"
+    assert text == "Menu Bakery Fresh sourdough daily."
+    assert "script" not in text.lower()
+    assert "color:" not in text
+    assert "alert" not in text
+    assert "<" not in text
+
+def test_csv_extraction_keeps_headers_beside_each_row(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    csv_path = tmp_path / "menu.csv"
+    csv_path.write_text("name,price\nSourdough,6.50\nBaguette,3.00\n")
+
+    text, filetype = extract_text(str(csv_path))
+
+    assert filetype == ".csv"
+    assert text == "name: Sourdough, price: 6.50\nname: Baguette, price: 3.00"
+
+def test_malformed_html_and_csv_raise_extraction_error(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    from ctxvault.core.exceptions import ExtractionError
+
+    bad_html = tmp_path / "broken.html"
+    bad_csv = tmp_path / "broken.csv"
+    bad_html.write_bytes(b"\xff\xfe not utf-8 <html>")
+    bad_csv.write_bytes(b"\xff\xfe name,price\n")
+
+    with pytest.raises(ExtractionError):
+        extract_text(str(bad_html))
+    with pytest.raises(ExtractionError):
+        extract_text(str(bad_csv))
+
+def test_broken_html_markup_still_yields_readable_text(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    # Unclosed tags and a stray script: the parser should not crash, and
+    # script bodies still stay out of the indexed text.
+    html = tmp_path / "messy.html"
+    html.write_text("<div><p>Hello <b>world<script>secret()</script> there")
+
+    text, filetype = extract_text(str(html))
+
+    assert filetype == ".html"
+    assert "Hello" in text and "world" in text and "there" in text
+    assert "secret" not in text
+
+def test_html_and_csv_index_query_and_reindex_like_other_formats(mock_vault_config):
+    vault_router.write_doc(
+        vault_name="test_vault",
+        file_path="pages/menu.html",
+        content="<html><body><h1>Sourdough special</h1></body></html>",
+    )
+    vault_router.write_doc(
+        vault_name="test_vault",
+        file_path="data/prices.csv",
+        content="name,price\nSourdough,6.50\n",
+    )
+    assert (mock_vault_config / "pages" / "menu.html").exists()
+    assert (mock_vault_config / "data" / "prices.csv").exists()
+
+    result = vault_router.query(text="sourdough", vault_name="test_vault")
+    assert len(result.results) == 1
+
+    reindexed, skipped = vault_router.reindex_files(vault_name="test_vault")
+    assert any(path.endswith("menu.html") for path in reindexed)
+    assert any(path.endswith("prices.csv") for path in reindexed)
+    assert skipped == []
+
 def test_a_markdown_continuation_repeats_its_heading_path_and_its_overlap():
     from ctxvault.utils.chuncking import chunk_text
     body = " ".join(f"w{i}" for i in range(10))

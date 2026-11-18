@@ -2,9 +2,40 @@ from pypdf import PdfReader
 from docx import Document
 from pathlib import Path, PurePosixPath
 from ctxvault.core.exceptions import UnsupportedFileTypeError, ExtractionError
+import csv
 import hashlib
+from html.parser import HTMLParser
 
-SUPPORTED_EXT = {'.txt', '.md', '.pdf', '.docx'}
+SUPPORTED_EXT = {'.txt', '.md', '.pdf', '.docx', '.html', '.csv'}
+
+# Tags whose contents are not readable document text.
+_HTML_SKIP_TAGS = frozenset({'script', 'style'})
+
+
+class _ReadableHTMLExtractor(HTMLParser):
+    """Collect visible text; drop scripts, styles and all markup."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag.lower() in _HTML_SKIP_TAGS:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() in _HTML_SKIP_TAGS and self._skip_depth > 0:
+            self._skip_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth == 0 and data:
+            self._parts.append(data)
+
+    def text(self) -> str:
+        # Join discrete text nodes with a space so adjacent tags (</h1><p>)
+        # do not glue words together, then collapse leftover whitespace.
+        return " ".join(part.strip() for part in self._parts if part.strip())
 
 def _extract_from_txt(path: str)->str:
     try:
@@ -43,6 +74,37 @@ def _extract_from_docx(path: str)->str:
     except Exception as e:
         raise ExtractionError(f"Failed to extract .docx {path}: {e}")
 
+def _extract_from_html(path: str)->str:
+    try:
+        with open(file=path, mode='r', encoding='utf-8') as f:
+            raw = f.read()
+        parser = _ReadableHTMLExtractor()
+        parser.feed(raw)
+        parser.close()
+        return parser.text()
+    except Exception as e:
+        raise ExtractionError(f"Failed to extract .html {path}: {e}")
+
+def _extract_from_csv(path: str)->str:
+    # One retrievable line per data row, with header names kept beside values:
+    # "name: Sourdough, price: 6.50".
+    try:
+        with open(file=path, mode='r', encoding='utf-8', newline='') as f:
+            rows = list(csv.reader(f))
+        if not rows:
+            return ""
+        headers = rows[0]
+        lines: list[str] = []
+        for row in rows[1:]:
+            pairs = [
+                f"{header}: {row[i] if i < len(row) else ''}"
+                for i, header in enumerate(headers)
+            ]
+            lines.append(", ".join(pairs))
+        return "\n".join(lines)
+    except Exception as e:
+        raise ExtractionError(f"Failed to extract .csv {path}: {e}")
+
 def extract_text(path: str)-> tuple[str, str]:
     suffix = PurePosixPath(path).suffix
 
@@ -57,3 +119,7 @@ def extract_text(path: str)-> tuple[str, str]:
         return _extract_from_pdf(path=path), suffix
     elif suffix == '.docx':
         return _extract_from_docx(path=path), suffix
+    elif suffix == '.html':
+        return _extract_from_html(path=path), suffix
+    elif suffix == '.csv':
+        return _extract_from_csv(path=path), suffix
