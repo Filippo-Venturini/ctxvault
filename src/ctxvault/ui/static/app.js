@@ -883,13 +883,28 @@ const meter = (v) => html`<span style="display:inline-flex;align-items:center;ga
 
 // Event metadata (run_id, model, …), collapsed; the keys are the control.
 function EventMeta({ meta }) {
+  const [open, setOpen] = useState(false);
   const entries = Object.entries(meta || {}).filter(([, v]) => v != null && v !== "");
   if (!entries.length) return null;
-  const [open, setOpen] = useState(false);
   const rows = entries.map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : String(v)]);
   return html`<div style="margin-top:4px">
 <button class="hv-ac" type="button" style="${BTN};font-size:14px;color:var(--mt)" onClick=${(ev) => { ev.preventDefault(); ev.stopPropagation(); setOpen((o) => !o); }}>${rows.map(([k]) => k).join(", ")}</button>
 ${open && html`<div style="${KV};margin-top:8px">${rows.map(([k, v]) => html`<span style="${LABEL};text-transform:none;letter-spacing:0;font-size:14px">${k}</span><span style="${TEXT};overflow-wrap:anywhere">${v}</span>`)}</div>`}
+</div>`;
+}
+
+// Confirmations stay a count; click to see each one and its metadata.
+function Confirmations({ atts, bySource }) {
+  const [open, setOpen] = useState(false);
+  const expandable = atts.some((a) => Object.entries(a.meta || {}).some(([, v]) => v != null && v !== ""));
+  const summary = html`<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px"><span style=${TEXT}>${atts.length} ${atts.length === 1 ? "time" : "times"}</span><span style=${DATA}>last ${CV.fmtShort(atts[atts.length - 1].t)}</span></div>
+${bySource.length > 0 && html`<div style="${SMALL};margin-top:4px">by ${bySource.map(([k, n]) => k + (n > 1 ? " ×" + n : "")).join(", ")}</div>`}`;
+  return html`<div>
+${expandable
+  ? html`<div class="hv-ac" style="cursor:pointer" onClick=${() => setOpen((o) => !o)}>${summary}</div>`
+  : summary}
+${open && expandable && html`<div>${atts.map((a) => html`<div style="margin-top:10px"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px"><span style=${TEXT}>${a.source || "—"}</span><span style=${DATA}>${CV.fmtShort(a.t)}</span></div>
+<${EventMeta} meta=${a.meta} /></div>`)}</div>`}
 </div>`;
 }
 
@@ -989,11 +1004,7 @@ ${versions.map(({ v, kind, diff, was }) => html`<div class="hv-acs" onClick=${C_
 <div style=${KV}>
 <span style=${LABEL}>Source</span><span style=${TEXT}>${raw.source}</span>
 <span style=${LABEL}>Confirmed</span>${atts.length
-  ? atts.some((a) => a.meta && Object.keys(a.meta).length)
-    ? html`<div>${atts.map((a, i) => html`<div style="${i ? "margin-top:10px" : ""}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px"><span style=${TEXT}>${a.source || "—"}</span><span style=${DATA}>${CV.fmtShort(a.t)}</span></div>
-<${EventMeta} meta=${a.meta} /></div>`)}</div>`
-    : html`<div><div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px"><span style=${TEXT}>${atts.length} ${atts.length === 1 ? "time" : "times"}</span><span style=${DATA}>last ${CV.fmtShort(atts[atts.length - 1].t)}</span></div>
-${bySource.length > 0 && html`<div style="${SMALL};margin-top:4px">by ${bySource.map(([k, n]) => k + (n > 1 ? " ×" + n : "")).join(", ")}</div>`}</div>`
+  ? html`<${Confirmations} atts=${atts} bySource=${bySource} />`
   : html`<span style="${TEXT};color:var(--mt)">never</span>`}
 <span style=${LABEL} title="How sure the writer was. Recall can leave out statements below a threshold.">Confidence</span>${meter(raw.conf)}
 </div>
