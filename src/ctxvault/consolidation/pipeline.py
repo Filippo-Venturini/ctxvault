@@ -241,6 +241,9 @@ def consolidate(
     conversation = [Turn.model_validate(turn) for turn in turns]
     given = TypeAdapter(list[Provenance]).validate_python(list(provenance or []))
     moment = _moment(at, conversation)
+    # An undated turn is read as said at the time of the conversation, so the
+    # model has a date to work relative ones ("last March") out from.
+    conversation = [turn if turn.at else turn.model_copy(update={"at": moment}) for turn in conversation]
     result = ConsolidationResult(
         run_id=run_id or uuid.uuid4().hex, model=model.name, prompt_version=model.prompt_version,
         at=moment, dry_run=dry_run,

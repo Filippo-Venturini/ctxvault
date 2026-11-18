@@ -19,6 +19,7 @@ from ctxvault.consolidation.claims import (
     ValidFromPrecision,
     parse_claims,
 )
+from ctxvault.consolidation.endpoint import ModelEndpointError, OpenAICompatibleModel, Prompts
 from ctxvault.consolidation.model import ConsolidationModel, Relation, RelationDecision, Turn
 from ctxvault.consolidation.pipeline import ConsolidationResult, Operation, consolidate
 
@@ -38,4 +39,7 @@ __all__ = [
     "Operation",
     "ConsolidationResult",
     "consolidate",
+    "OpenAICompatibleModel",
+    "Prompts",
+    "ModelEndpointError",
 ]
