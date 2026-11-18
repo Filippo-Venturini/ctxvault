@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from ctxvault.core import indexer
+from ctxvault.core.pruning import SEMANTIC_REASONS, find_semantic_candidates
 from ctxvault.core.vaults.base import BaseVault
+from ctxvault.models.pruning import PrunePolicy, PruneReport
 from ctxvault.models.documents import DocumentStatus, SemanticDocumentInfo, DocumentContent, VaultStatus
 from ctxvault.models.query_result import ChunkMatch, QueryResult
 from ctxvault.core.exceptions import EmptyQueryError, FileOutsideVaultError, UnsupportedFileTypeError
@@ -28,7 +30,9 @@ class SemanticVault(BaseVault):
         VaultOperation.WRITE_DOC,
         VaultOperation.LIST_DOCUMENTS,
         VaultOperation.READ_DOC_CONTENT,
+        VaultOperation.PRUNE,
     })
+    prune_reasons = SEMANTIC_REASONS
 
     def index_file(self, file_path:Path, agent_metadata: dict | None = None)-> None:
         from ctxvault.core import indexer
@@ -47,7 +51,7 @@ class SemanticVault(BaseVault):
         indexed_files = []
         skipped_files = []
         
-        for file in self.iter_files(path=base_path, exclude_dirs=[self.db_path]):
+        for file in self.iter_files(path=base_path, exclude_dirs=self._excluded_dirs()):
             try:
                 self.index_file(file_path=file)
                 indexed_files.append(str(file))
@@ -67,7 +71,7 @@ class SemanticVault(BaseVault):
         reindexed_files = []
         skipped_files = []
 
-        for file in self.iter_files(path=base_path, exclude_dirs=[self.db_path]):
+        for file in self.iter_files(path=base_path, exclude_dirs=self._excluded_dirs()):
             try:
                 self.reindex_file(file_path=file)
                 reindexed_files.append(str(file))
@@ -93,7 +97,7 @@ class SemanticVault(BaseVault):
         kept = {doc.source: doc.metadata or None for doc in self.list_documents()}
         chroma_store.reset_collection(self.config)
         indexed, skipped = [], []
-        for file in self.iter_files(path=self.vault_path, exclude_dirs=[self.db_path]):
+        for file in self.iter_files(path=self.vault_path, exclude_dirs=self._excluded_dirs()):
             try:
                 self.index_file(file_path=file, agent_metadata=kept.get(str(file)))
                 indexed.append(str(file))
@@ -120,7 +124,7 @@ class SemanticVault(BaseVault):
                 state = "in_sync"
             documents.append(DocumentStatus(doc_id=doc.doc_id, source=doc.source, state=state, indexed_at=doc.indexed_at,
                                             modified_at=modified.isoformat() if modified else None))
-        unindexed = [str(f) for f in self.iter_files(path=self.vault_path, exclude_dirs=[self.db_path])
+        unindexed = [str(f) for f in self.iter_files(path=self.vault_path, exclude_dirs=self._excluded_dirs())
                      if f.suffix in SUPPORTED_EXT and f.resolve() not in indexed]
         return VaultStatus(documents=documents, unindexed=unindexed)
 
@@ -141,6 +145,13 @@ class SemanticVault(BaseVault):
             self.index_file(file_path=Path(file))
             indexed.append(file)
         return reindexed, indexed, dropped
+
+    def _find_candidates(self, policy: PrunePolicy, reasons: set[str]) -> PruneReport:
+        return find_semantic_candidates(vault_name=self.vault_name, config=self.config, policy=policy, reasons=reasons)
+
+    def _prune_target(self, target: str) -> str:
+        path = Path(target)
+        return str(path if path.is_absolute() else (self.vault_path / path).resolve())
 
     def delete_file(self, file_path: Path)-> None:
         indexer.delete_file(file_path=str(file_path), config=self.config)

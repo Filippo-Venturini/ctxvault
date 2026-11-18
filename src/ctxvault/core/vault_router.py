@@ -7,6 +7,7 @@ from ctxvault.core.vaults.skill import SkillVault
 from ctxvault.models.documents import SemanticDocumentInfo, SkillDocumentInfo, DocumentContent, VaultStatus
 from ctxvault.models.episodes import Episode, EpisodeHistory, EpisodeQueryResult, VaultEntity
 from ctxvault.models.query_result import QueryResult
+from ctxvault.models.pruning import PruneReport
 from ctxvault.models.vaults import SkillOutput, SkillInput, VaultOperation, VaultType
 from ctxvault.utils.config import create_vault, delete_vault, get_vault_config, get_vaults, set_embedding_model as _set_embedding_model
 
@@ -119,6 +120,19 @@ def index_status(vault_name: str) -> VaultStatus:
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.REINDEX)
     return vault.status()
+
+def prune(vault_name: str, reasons: list[str] | None = None, targets: list[str] | None = None,
+          threshold: float | None = None, older_than_days: int | None = None) -> PruneReport:
+    """What the vault would prune, and why. Changes nothing. `threshold` and
+    `older_than_days` override the vault's rules for this report only."""
+    vault = open_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.PRUNE)
+    policy = vault.prune_policy()
+    if threshold is not None and "duplicate_partial" in policy.rules:
+        policy.rules["duplicate_partial"].threshold = threshold
+    if older_than_days is not None and "stale" in policy.rules:
+        policy.rules["stale"].older_than_days = older_than_days
+    return vault.prune(reasons=set(reasons) if reasons else None, targets=targets, policy=policy)
 
 def sync_index(vault_name: str) -> tuple[list[str], list[str], list[str]]:
     vault = open_vault(vault_name=vault_name)

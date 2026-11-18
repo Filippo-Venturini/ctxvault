@@ -569,6 +569,39 @@ Found 3 vaults (1 local, 2 global)
   path:               ~/.ctxvault/vaults/account-memory
 ```
 
+## `prune`
+Report what a **semantic** vault would prune, and why. Changes nothing.
+```bash
+ctxvault prune <vault> [--reason <reason>] [--doc <path>] [--threshold <0-1>] [--older-than <days>] [--json]
+```
+
+**Arguments:**
+- `<vault>` - Vault name (required)
+- `--reason <reason>` - Only this reason, repeatable: `duplicate`, `duplicate_partial`, `stale` (optional, default: all)
+- `--doc <path>` - Only this document, by its path in the vault, repeatable (optional)
+- `--threshold <0-1>` - Cosine similarity at which two chunks of different documents count as the same passage, for this report (optional, default: 0.95 for the default model)
+- `--older-than <days>` - A document is stale after this many days without its file changing, e.g. `90` or `90d` (optional, default: 180)
+- `--json` - Print the report as JSON
+
+The report is grouped by reason, and each finding carries the signal behind it, not a score:
+
+- **duplicate** - the same document under two paths: the normalized extracted text is identical. The newest file is kept; the others are what pruning would archive.
+- **duplicate_partial** - two documents that share passages, by cosine similarity over the stored embeddings. Chunks of one document overlap by design and are never compared with each other. Both sides are shown and nothing is suggested: review both.
+- **stale** - the file has not been modified in `--older-than` days. This reads the file's modification time, not when it was last indexed.
+
+The threshold depends on the embedding model. A vault pinned to a model with no known default gets no `duplicate_partial` check until a threshold is given, and the report says so.
+
+**Agent-written documents.** Only a document an agent wrote, and nobody has edited since, can ever be pruned unattended. That means its metadata carries both `generated_by` and `timestamp` (the MCP `write_doc` tool sets both), and its file has not changed after `timestamp`. A document with `generated_by` but no `timestamp` (the Python client takes free-form `agent_metadata`) counts as human-written. Copying or cloning a vault resets file modification times, which makes every document human-written: nothing is auto-pruned, which is the safe way to be wrong. Human-written documents are reported as *needs a human*.
+
+**Example:**
+```bash
+ctxvault prune my-vault
+ctxvault prune my-vault --reason stale --older-than 90d
+ctxvault prune my-vault --doc notes/setup.md --json
+```
+
+---
+
 ## Which command works on which vault
 
 | Command         | Semantic vault | Skill vault | Episodic vault |
@@ -590,6 +623,7 @@ Found 3 vaults (1 local, 2 global)
 | `dispute`       | ✗              | ✗           | ✓              |
 | `reindex`       | ✓              | ✗           | ✗              |
 | `delete`        | ✓              | ✗           | ✗              |
+| `prune`         | ✓              | ✗           | ✗              |
 | `vaults`        | ✓              | ✓           | ✓              |
 | `attach`        | ✓              | ✓           | ✓              |
 | `detach`        | ✓              | ✓           | ✓              |

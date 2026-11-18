@@ -153,6 +153,107 @@ def _doc_status_command(name: str) -> None:
         typer.secho(f"\nRun `ctxvault reindex {name} --stale` to bring the index back.", fg=typer.colors.BRIGHT_BLACK)
     typer.echo("")
 
+def _parse_days(value: str | None) -> int | None:
+    if value is None:
+        return None
+    text = value.strip().lower()
+    text = text[:-1] if text.endswith("d") else text
+    if not text.isdigit() or int(text) < 1:
+        raise typer.BadParameter(f"expected a number of days such as 90 or 90d, got {value!r}")
+    return int(text)
+
+def _rule_line(title: str, summary: str) -> None:
+    head = f"── {title} "
+    typer.secho(f"{head:─<45} {summary}", bold=True)
+
+def _print_prune_report(name: str, report, vault_path: Path) -> None:
+    def rel(source: str) -> str:
+        try:
+            return Path(source).resolve().relative_to(vault_path.resolve()).as_posix()
+        except ValueError:
+            return source
+
+    def mark(c) -> str:
+        if c.signals.get("keep"):
+            return "keep"
+        if c.auto_allowed:
+            return "auto"
+        if c in report.held:
+            return "needs a human"
+        return ""
+
+    counts = report.counts
+    typer.echo(f"\nVault: {name}  ({counts.get('documents', 0)} documents, {counts.get('chunks', 0)} chunks, "
+               f"model {report.signals.get('model', '?')})")
+    if not report.policy_enabled:
+        typer.secho("Policy: disabled. Nothing runs unattended; this shows what the default rules find.",
+                    fg=typer.colors.BRIGHT_BLACK)
+
+    groups: dict[str, list] = {}
+    for c in report.candidates:
+        if c.group:
+            groups.setdefault(c.group, []).append(c)
+    stale = [c for c in report.candidates if c.reason == "stale"]
+
+    if groups:
+        typer.echo("")
+        _rule_line("DUPLICATE", f"{len(groups)} group{'s' if len(groups) != 1 else ''}")
+        for n, members in enumerate(groups.values(), 1):
+            first = members[0]
+            if first.reason == "duplicate":
+                chunks = first.signals.get('chunks')
+                typer.echo(f"  Group {n}  identical document ({chunks} chunk{'s' if chunks != 1 else ''})")
+                width = max(len(rel(c.target)) for c in members)
+                for c in members:
+                    typer.echo(f"    {rel(c.target):<{width}}  modified {c.signals.get('modified', '?')}   {mark(c)}".rstrip())
+            else:
+                typer.echo(f"  Group {n}  cosine_sim: {first.signals.get('cosine_sim')}  "
+                           f"(threshold {first.signals.get('threshold')})")
+                width = max(len(rel(c.target)) for c in members)
+                for c in members:
+                    typer.echo(f"    {rel(c.target):<{width}}  \"{c.signals.get('preview', '')}\"  "
+                               f"{c.signals.get('matched_chunks')} of {c.signals.get('total_chunks')} chunks  "
+                               f"modified {c.signals.get('modified', '?')}")
+                typer.secho("    partial overlap: no keep hint, review both", fg=typer.colors.BRIGHT_BLACK)
+
+    if stale:
+        days = stale[0].signals.get("older_than_days")
+        typer.echo("")
+        _rule_line("STALE", f"{len(stale)} document{'s' if len(stale) != 1 else ''}  (older than {days} days)")
+        width = max(len(rel(c.target)) for c in stale)
+        for c in stale:
+            typer.echo(f"  {rel(c.target):<{width}}  modified {c.signals.get('modified', '?')}  "
+                       f"({c.signals.get('age_days')} days)   {mark(c)}".rstrip())
+
+    for note in report.notes:
+        typer.secho(f"\nNote: {note}", fg=typer.colors.YELLOW)
+
+    flagged = {c.target for c in report.candidates if not c.signals.get("keep")}
+    typer.echo(f"\n{len(flagged)} candidate document{'s' if len(flagged) != 1 else ''}. Nothing was changed.\n")
+
+@app.command()
+def prune(
+    name: str = typer.Argument("my-vault"),
+    reason: list[str] = typer.Option(None, "--reason", help="Only this reason (repeatable): duplicate, duplicate_partial, stale."),
+    doc: list[str] = typer.Option(None, "--doc", help="Only this document, by its path in the vault (repeatable)."),
+    threshold: float = typer.Option(None, "--threshold", min=0.0, max=1.0, help="Cosine similarity for a partial overlap, for this report. The default is tuned for the default model."),
+    older_than: str = typer.Option(None, "--older-than", help="Stale after this many days, e.g. 90 or 90d (default 180)."),
+    json_output: bool = typer.Option(False, "--json", help="Print the report as JSON."),
+):
+    """What the vault would prune, and why. Changes nothing."""
+    days = _parse_days(older_than)
+    try:
+        report = vault_router.prune(vault_name=name, reasons=reason or None, targets=doc or None,
+                                    threshold=threshold, older_than_days=days)
+    except Exception as e:
+        typer.secho(f"Error during prune: {e}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+    if json_output:
+        typer.echo(report.model_dump_json(indent=2))
+        return
+    vault_path = vault_router.open_vault(vault_name=name).vault_path
+    _print_prune_report(name, report, vault_path)
+
 @app.command()
 def reindex(name: str = typer.Argument("my-vault"), path: str = typer.Option(None, "--path"),
             stale: bool = typer.Option(False, "--stale", help="Only what the index got wrong: reindex changed files, index new ones, drop documents whose file is gone."),
