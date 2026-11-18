@@ -980,7 +980,7 @@ ${history.length > 0 && html`<div style="margin-top:40px">${history.map((h) => h
 <div style="min-width:0">
 ${h.reason && html`<div style=${TEXT}>${h.reason}</div>`}
 ${h.succ && html`<div style="${SMALL}${h.reason ? ";margin-top:4px" : ""}">${h.succ.text}</div>`}
-<${EventMeta} meta=${h.meta} />
+<${EventMeta} key=${raw.id + ":" + h.kind + ":" + h.t} meta=${h.meta} />
 </div>
 <span style=${DATA}>${CV.fmtShort(h.t)}</span>
 </div>`)}</div>`}
@@ -990,7 +990,7 @@ ${disputes.length > 0 && html`
 ${disputes.map((d) => html`<div class="hv-acs" onClick=${C_select(setState, d.o.id)} style="padding:12px 8px 12px 14px;border-bottom:1px solid var(--ln);border-left:2px solid ${otherOpen.includes(d.o) ? "var(--rd)" : "var(--ln)"};cursor:pointer">
 <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:baseline"><span style=${TEXT}>${d.o.text}</span><span style=${DATA}>${otherOpen.includes(d.o) ? "since " + CV.fmtShort(d.t) : "resolved"}</span></div>
 ${d.note && html`<div style="${SMALL};margin-top:4px">${d.note}</div>`}
-<${EventMeta} meta=${d.meta} />
+<${EventMeta} key=${raw.id + ":" + d.with + ":" + d.t} meta=${d.meta} />
 </div>`)}`}
 
 ${versions.length > 1 && html`
@@ -1004,7 +1004,7 @@ ${versions.map(({ v, kind, diff, was }) => html`<div class="hv-acs" onClick=${C_
 <div style=${KV}>
 <span style=${LABEL}>Source</span><span style=${TEXT}>${raw.source}</span>
 <span style=${LABEL}>Confirmed</span>${atts.length
-  ? html`<${Confirmations} atts=${atts} bySource=${bySource} />`
+  ? html`<${Confirmations} key=${raw.id} atts=${atts} bySource=${bySource} />`
   : html`<span style="${TEXT};color:var(--mt)">never</span>`}
 <span style=${LABEL} title="How sure the writer was. Recall can leave out statements below a threshold.">Confidence</span>${meter(raw.conf)}
 </div>

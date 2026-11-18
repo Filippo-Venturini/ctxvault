@@ -324,3 +324,12 @@ def test_static_files_are_revalidated_so_an_upgrade_is_never_served_stale():
     response = client.get("/ui/static/app.js")
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-cache"
+
+
+def test_published_demo_inlines_the_current_viewer_scripts():
+    # The public demo is an export, not a second UI implementation. In
+    # particular it must keep the same confirmation controls and state keys.
+    demo = (server.STATIC.parents[3] / "docs" / "demo.html").read_text(encoding="utf-8")
+    scripts = re.findall(r"<script>\s*(.*?)</script>", demo, re.DOTALL)
+    for name in ("app.js", "data.js"):
+        assert (server.STATIC / name).read_text(encoding="utf-8").strip() in [s.strip() for s in scripts]
