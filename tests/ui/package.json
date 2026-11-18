@@ -1,0 +1,12 @@
+{
+  "name": "ctxvault-ui-tests",
+  "private": true,
+  "type": "module",
+  "description": "DOM tests for the memory viewer. Node's test runner and one dev dependency; the viewer itself stays buildless.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}

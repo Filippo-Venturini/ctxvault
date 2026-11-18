@@ -35,6 +35,18 @@ The memory viewer has an existing visual language. A change should look like it 
 - **Raw values over decoration.** Show the timestamp, the reason, the id. No status pills or icons where plain text does the job.
 - **Screenshots in the PR:** before and after, same data, light and dark. UI PRs without them won't be reviewed.
 
+### Running the viewer's tests
+
+The viewer's behaviour has DOM tests under `tests/ui`. They open the real `index.html` in jsdom, run the real `data.js` / `app.js`, and drive the page the way a reader does. Node's own test runner and one dev dependency: there is still no build step.
+
+```bash
+cd tests/ui
+npm ci
+npm test
+```
+
+`pytest` stays independent of Node, and `npm test` needs no Python and no vault: it reads a fixed snapshot in `tests/ui/fixture.mjs`.
+
 ### Development setup
 
 ```bash
