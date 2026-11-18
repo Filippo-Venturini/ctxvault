@@ -68,6 +68,7 @@ def test_init_lists_and_purge_roundtrip(mock_global_config):
     listed = {v["name"]: v for v in memory.vaults()}
 
     assert listed["facts"]["type"] == VaultType.EPISODIC.value
+    assert path == (mock_global_config / "vaults" / "facts").as_posix()
     assert listed["facts"]["vault_path"] == path
 
     memory.purge("facts")

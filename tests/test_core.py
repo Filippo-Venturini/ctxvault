@@ -561,7 +561,7 @@ def test_attaching_an_agent_keeps_a_project_vault_path_relative(tmp_path, monkey
     project = tmp_path / "project"
     project.mkdir()
     monkeypatch.chdir(project)
-    config.create_vault("notes", VaultType.SKILL, False, None, global_vault=False)
+    path, _ = config.create_vault("notes", VaultType.SKILL, False, None, global_vault=False)
 
     config.attach_agent_to_vault("notes", "writer")
     config.detach_agent_from_vault("notes", "writer")
@@ -569,7 +569,8 @@ def test_attaching_an_agent_keeps_a_project_vault_path_relative(tmp_path, monkey
 
     saved = json.loads((project / ".ctxvault" / "config.json").read_text())["vaults"]["notes"]
     assert saved["vault_path"] == ".ctxvault/vaults/notes"          # as created: the project can move
-    assert Path(config.get_vault_config("notes")["vault_path"]).is_absolute()   # readers still get it resolved
+    assert path == (project / ".ctxvault" / "vaults" / "notes").as_posix()
+    assert config.get_vault_config("notes")["vault_path"] == path
 
 def test_a_skill_whose_file_is_gone_is_skipped_and_said(mock_skill_vault_config, temp_skills):
     import warnings
