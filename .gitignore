@@ -215,3 +215,6 @@ assistant-memory/
 
 # mkdocs build output
 site/
+
+# the viewer's DOM tests (tests/ui)
+node_modules/

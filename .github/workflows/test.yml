@@ -44,3 +44,26 @@ jobs:
     
     - name: Run tests
       run: pytest -v --tb=short
+
+  ui:
+    # the memory viewer's DOM tests: Node's own runner and one dev dependency,
+    # so no Python is installed here and the job stays a minute
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+        cache: npm
+        cache-dependency-path: tests/ui/package-lock.json
+
+    - name: Install
+      working-directory: tests/ui
+      run: npm ci
+
+    - name: Run the viewer's DOM tests
+      working-directory: tests/ui
+      run: npm test
