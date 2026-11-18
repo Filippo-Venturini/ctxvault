@@ -115,6 +115,62 @@ def test_episodic_payload_says_who_confirmed_and_when_a_dispute_was_noticed(mock
         (dispute,) = episodes[one.id]["disputes"]
         assert dispute["with"] == other.id and dispute["noticed_at"].startswith("2026-11-01") and dispute["note"] == "different times"
 
+def test_episodic_payload_lists_closes_reopens_and_event_metadata(mock_episodic_vault_config):
+    bread = vault_router.write_episode(
+        EPISODIC, "Unsold bread goes to the food bank crate",
+        recorded_at="2026-04-19T09:00:00+00:00", valid_from="2026-04-19T09:00:00+00:00",
+    )
+    vault_router.confirm_episode(
+        EPISODIC, bread.id, at="2026-10-20T09:00:00+00:00", source="counter staff",
+        metadata={"run_id": "run-2026-10-20", "model": "gpt-4.1"},
+    )
+    thrown = vault_router.write_episode(
+        EPISODIC, "Unsold bread is thrown away",
+        recorded_at="2026-10-21T08:00:00+00:00", valid_from="2026-10-21T08:00:00+00:00",
+    )
+    vault_router.dispute_episodes(
+        EPISODIC, bread.id, thrown.id, at="2026-10-21T09:00:00+00:00", note="different policy",
+        metadata={"run_id": "run-2026-10-21"},
+    )
+    vault_router.invalidate_episode(
+        EPISODIC, bread.id, at="2026-11-12T09:00:00+00:00", reason="crate withdrawn for repairs",
+        metadata={"run_id": "run-2026-11-12", "model": "gpt-4.1"},
+    )
+    vault_router.reopen_episode(
+        EPISODIC, bread.id, at="2026-11-16T09:00:00+00:00", reason="crate back in the alley",
+        metadata={"run_id": "run-2026-11-16", "model": "gpt-4.1"},
+    )
+    minimum = vault_router.write_episode(
+        EPISODIC, "Card payments are accepted from 5 euro",
+        recorded_at="2025-12-10T09:00:00+00:00", valid_from="2025-12-10T09:00:00+00:00",
+    )
+    successor = vault_router.supersede_episode(
+        EPISODIC, minimum.id, "Card payments are accepted with no minimum",
+        at="2026-06-08T09:00:00+00:00", event_metadata={"run_id": "run-2026-06-08"},
+    )
+
+    episodes = {e["id"]: e for e in client.get(f"/ui/api/vaults/{EPISODIC}").json()["episodes"]}
+    row = episodes[bread.id]
+
+    assert row["attestations"][0]["metadata"] == {"run_id": "run-2026-10-20", "model": "gpt-4.1"}
+    (dispute,) = row["disputes"]
+    assert dispute["with"] == thrown.id and dispute["metadata"] == {"run_id": "run-2026-10-21"}
+    (closure,) = row["closures"]
+    assert closure["closed_at"].startswith("2026-11-12")
+    assert closure["reason"] == "crate withdrawn for repairs"
+    assert closure["metadata"] == {"run_id": "run-2026-11-12", "model": "gpt-4.1"}
+    assert closure["reopened_at"].startswith("2026-11-16")
+    assert closure["reopen_reason"] == "crate back in the alley"
+    assert closure["reopen_metadata"] == {"run_id": "run-2026-11-16", "model": "gpt-4.1"}
+    assert closure["superseded_by"] is None and closure["revised_by"] is None
+
+    (close,) = episodes[minimum.id]["closures"]
+    assert close["superseded_by"] == successor.id
+    assert close["reason"] is None
+    assert close["reopened_at"] is None
+    assert close["metadata"] == {"run_id": "run-2026-06-08"}
+    assert episodes[successor.id]["closures"] == []
+
 def test_reading_the_payload_leaves_no_trace(mock_episodic_vault_config):
     episode = vault_router.write_episode(EPISODIC, "Giuseppe lives in Mestre")
 

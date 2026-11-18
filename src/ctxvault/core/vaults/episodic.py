@@ -309,6 +309,11 @@ class EpisodicVault(BaseVault):
         """Each dispute noticed, settled or not: episode_a, episode_b, noticed_at, note, metadata."""
         return sqlite_store.list_disputes(self.config)
 
+    def closures(self) -> list[dict]:
+        """Every close on file, including ones later reopened: when, why, any
+        successor, the reopen if any, and the metadata stored on each event."""
+        return sqlite_store.list_closures(self.config)
+
     def changes(self) -> list[str]:
         """Every instant the vault changed, as ISO timestamps."""
         return sqlite_store.change_moments(self.config)

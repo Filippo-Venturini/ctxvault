@@ -565,6 +565,7 @@ const CHANGE = {
   superseded: { label: "Superseded", c: "var(--se2)" },
   revised: { label: "Revised", c: "var(--ep2)" },
   closed: { label: "Closed", c: "var(--mt)" },
+  reopened: { label: "Reopened", c: "var(--ok)" },
 };
 // Over time: the bars read against the chosen day, three ways only.
 const BAR_LOOK = {
@@ -880,6 +881,18 @@ const PANEL_HEAD = "display:flex;align-items:center;height:40px;border-bottom:1p
 const KV = "display:grid;grid-template-columns:104px minmax(0,1fr);gap:14px 16px;align-items:baseline;margin-top:16px";
 const meter = (v) => html`<span style="display:inline-flex;align-items:center;gap:12px"><span style="display:inline-block;width:120px;height:4px;background:var(--cl)"><span style="display:block;height:4px;width:${Math.round(Math.max(0, Math.min(1, v)) * 100)}%;background:var(--bar)"></span></span><span style=${DATA}>${v.toFixed(2)}</span></span>`;
 
+// Event metadata (run_id, model, …), collapsed; the keys are the control.
+function EventMeta({ meta }) {
+  const entries = Object.entries(meta || {}).filter(([, v]) => v != null && v !== "");
+  if (!entries.length) return null;
+  const [open, setOpen] = useState(false);
+  const rows = entries.map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : String(v)]);
+  return html`<div style="margin-top:4px">
+<button class="hv-ac" type="button" style="${BTN};font-size:14px;color:var(--mt)" onClick=${(ev) => { ev.preventDefault(); ev.stopPropagation(); setOpen((o) => !o); }}>${rows.map(([k]) => k).join(", ")}</button>
+${open && html`<div style="${KV};margin-top:8px">${rows.map(([k, v]) => html`<span style="${LABEL};text-transform:none;letter-spacing:0;font-size:14px">${k}</span><span style="${TEXT};overflow-wrap:anywhere">${v}</span>`)}</div>`}
+</div>`;
+}
+
 function SidePanel({ s, setState, all, byId, next, dec, at, past }) {
   const raw = s.sel ? byId.get(s.sel) : null;
   if (!raw) return null;
@@ -927,6 +940,11 @@ ${past && html`<div style="position:absolute;top:-4px;bottom:-4px;width:1px;back
   const atts = raw.attestations;
   const bySource = [...atts.reduce((m, a) => (a.source ? m.set(a.source, (m.get(a.source) || 0) + 1) : m), new Map())].sort((a, b) => b[1] - a[1]);
   const meta = Object.entries(raw.meta).filter(([k]) => !LIBRARY_META.has(k));
+  const history = [];
+  for (const c of raw.closures || []) {
+    if (c.t != null && c.t <= at) history.push({ kind: "closed", t: c.t, reason: c.reason, succ: byId.get(c.superseded_by) || byId.get(c.revised_by) || null, meta: c.meta });
+    if (c.reopened_at != null && c.reopened_at <= at) history.push({ kind: "reopened", t: c.reopened_at, reason: c.reopen_reason, succ: null, meta: c.reopen_meta });
+  }
 
   return html`
 <div style="${DATA};white-space:normal;overflow-wrap:anywhere;margin-bottom:18px">id ${raw.id}</div>
@@ -942,11 +960,23 @@ ${raw.entities.length > 0 && html`<div style="margin-top:12px;display:flex;flex-
 </div>
 ${lagTxt && html`<div style="${SMALL};margin-top:12px">${lagTxt}</div>`}
 
+${history.length > 0 && html`<div style="margin-top:40px">${history.map((h) => html`<div style="display:grid;grid-template-columns:96px minmax(0,1fr) auto;gap:14px;align-items:baseline;padding:12px 8px;border-bottom:1px solid var(--ln)${h.succ ? ";cursor:pointer" : ""}" class=${h.succ ? "hv-acs" : ""} onClick=${h.succ ? C_select(setState, h.succ.id) : undefined}>
+<span style="${LABEL};color:${CHANGE[h.kind].c}">${CHANGE[h.kind].label}</span>
+<div style="min-width:0">
+${h.reason && html`<div style=${TEXT}>${h.reason}</div>`}
+${h.succ && html`<div style="${SMALL}${h.reason ? ";margin-top:4px" : ""}">${h.succ.text}</div>`}
+<${EventMeta} meta=${h.meta} />
+</div>
+<span style=${DATA}>${CV.fmtShort(h.t)}</span>
+</div>`)}</div>`}
+
 ${disputes.length > 0 && html`
 <div style=${PANEL_HEAD}><span style=${TITLE(otherOpen.length ? "var(--rd)" : "var(--fg)")}>Contradicted by</span></div>
 ${disputes.map((d) => html`<div class="hv-acs" onClick=${C_select(setState, d.o.id)} style="padding:12px 8px 12px 14px;border-bottom:1px solid var(--ln);border-left:2px solid ${otherOpen.includes(d.o) ? "var(--rd)" : "var(--ln)"};cursor:pointer">
 <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:baseline"><span style=${TEXT}>${d.o.text}</span><span style=${DATA}>${otherOpen.includes(d.o) ? "since " + CV.fmtShort(d.t) : "resolved"}</span></div>
-${d.note && html`<div style="${SMALL};margin-top:4px">${d.note}</div>`}</div>`)}`}
+${d.note && html`<div style="${SMALL};margin-top:4px">${d.note}</div>`}
+<${EventMeta} meta=${d.meta} />
+</div>`)}`}
 
 ${versions.length > 1 && html`
 <div style=${PANEL_HEAD}><span style=${TITLE()}>Versions</span></div>
@@ -959,7 +989,10 @@ ${versions.map(({ v, kind, diff, was }) => html`<div class="hv-acs" onClick=${C_
 <div style=${KV}>
 <span style=${LABEL}>Source</span><span style=${TEXT}>${raw.source}</span>
 <span style=${LABEL}>Confirmed</span>${atts.length
-  ? html`<div><div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px"><span style=${TEXT}>${atts.length} ${atts.length === 1 ? "time" : "times"}</span><span style=${DATA}>last ${CV.fmtShort(atts[atts.length - 1].t)}</span></div>
+  ? atts.some((a) => a.meta && Object.keys(a.meta).length)
+    ? html`<div>${atts.map((a, i) => html`<div style="${i ? "margin-top:10px" : ""}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px"><span style=${TEXT}>${a.source || "—"}</span><span style=${DATA}>${CV.fmtShort(a.t)}</span></div>
+<${EventMeta} meta=${a.meta} /></div>`)}</div>`
+    : html`<div><div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px"><span style=${TEXT}>${atts.length} ${atts.length === 1 ? "time" : "times"}</span><span style=${DATA}>last ${CV.fmtShort(atts[atts.length - 1].t)}</span></div>
 ${bySource.length > 0 && html`<div style="${SMALL};margin-top:4px">by ${bySource.map(([k, n]) => k + (n > 1 ? " ×" + n : "")).join(", ")}</div>`}</div>`
   : html`<span style="${TEXT};color:var(--mt)">never</span>`}
 <span style=${LABEL} title="How sure the writer was. Recall can leave out statements below a threshold.">Confidence</span>${meter(raw.conf)}
