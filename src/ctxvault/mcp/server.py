@@ -205,7 +205,7 @@ def write_episode(vault_name: str, content: str, entities: list[str] = [], sourc
         raise ValueError(f"Unexpected error writing episode: {e}")
 
 @mcp.tool(description="Retrieve episodes from an episodic vault. By default only statements that still hold are returned. Filter by entity for 'everything about X', pass valid_at to ask what was true at a past moment, or known_at to ask what the vault had already learned by then. Query text is optional and ranks results; without it the newest come first.")
-def query_episodes(vault_name: str, query: str = "", entities: list[str] = [], valid_at: str | None = None, known_at: str | None = None, include_closed: bool = False, order_by: str | None = None, limit: int = 10) -> QueryEpisodesResponse:
+def query_episodes(vault_name: str, query: str = "", entities: list[str] = [], valid_at: str | None = None, known_at: str | None = None, include_closed: bool = False, order_by: str | None = None, limit: int = 10, event_metadata_filters: dict | None = None) -> QueryEpisodesResponse:
     try:
         check_access(vault_name, AGENT_ID)
         result = vault_router.query_episodes(
@@ -217,6 +217,7 @@ def query_episodes(vault_name: str, query: str = "", entities: list[str] = [], v
             include_closed=include_closed,
             order_by=order_by,
             limit=limit,
+            event_metadata_filters=event_metadata_filters or None,
         )
         return QueryEpisodesResponse(
             vault_name=vault_name,
@@ -232,10 +233,10 @@ def query_episodes(vault_name: str, query: str = "", entities: list[str] = [], v
         raise ValueError(e)
 
 @mcp.tool(description="Mark an episode as no longer true, without deleting it. Use this when something ends and nothing replaces it. If a corrected version exists instead, use supersede_episode so the two stay linked.")
-def invalidate_episode(vault_name: str, episode_id: str, valid_to: str | None = None, reason: str = "") -> EpisodeResponse:
+def invalidate_episode(vault_name: str, episode_id: str, valid_to: str | None = None, reason: str = "", metadata: dict | None = None) -> EpisodeResponse:
     try:
         check_access(vault_name, AGENT_ID)
-        episode = vault_router.invalidate_episode(vault_name=vault_name, episode_id=episode_id, valid_to=valid_to, reason=reason or None)
+        episode = vault_router.invalidate_episode(vault_name=vault_name, episode_id=episode_id, valid_to=valid_to, reason=reason or None, metadata=metadata)
         return EpisodeResponse(vault_name=vault_name, episode=episode)
     except VaultNotFoundError:
         raise ValueError(f"Vault '{vault_name}' does not exist.")
@@ -298,11 +299,11 @@ def revise_episode(vault_name: str, episode_id: str, content: str, entities: lis
         raise ValueError(e)
 
 @mcp.tool(description="Record that a statement already in the vault was asserted again. Use this when you hear something the vault already holds, instead of writing it a second time: the episode stays as it is and gains one attestation, so a fact heard once can be told from one heard many times.")
-def confirm_episode(vault_name: str, episode_id: str, at: str | None = None, source: str | None = None) -> EpisodeResponse:
+def confirm_episode(vault_name: str, episode_id: str, at: str | None = None, source: str | None = None, metadata: dict | None = None) -> EpisodeResponse:
     try:
         check_access(vault_name, AGENT_ID)
         episode = vault_router.confirm_episode(
-            vault_name=vault_name, episode_id=episode_id, at=at, source=source or AGENT_ID
+            vault_name=vault_name, episode_id=episode_id, at=at, source=source or AGENT_ID, metadata=metadata
         )
         return EpisodeResponse(vault_name=vault_name, episode=episode)
     except VaultNotFoundError:
@@ -313,11 +314,11 @@ def confirm_episode(vault_name: str, episode_id: str, at: str | None = None, sou
         raise ValueError(e)
 
 @mcp.tool(description="Record that two open statements cannot both hold, when you cannot tell which one is wrong. Neither is closed: both keep coming back from queries, each flagged with the other in disputed_with, so you can ask instead of assert. The dispute ends by itself when one side is invalidated or superseded. If you do know which one is wrong, use supersede_episode or invalidate_episode instead.")
-def dispute_episodes(vault_name: str, episode_id: str, other_id: str, note: str = "") -> EpisodeResponse:
+def dispute_episodes(vault_name: str, episode_id: str, other_id: str, note: str = "", metadata: dict | None = None) -> EpisodeResponse:
     try:
         check_access(vault_name, AGENT_ID)
         episode = vault_router.dispute_episodes(
-            vault_name=vault_name, episode_id=episode_id, other_id=other_id, note=note or None
+            vault_name=vault_name, episode_id=episode_id, other_id=other_id, note=note or None, metadata=metadata
         )
         return EpisodeResponse(vault_name=vault_name, episode=episode)
     except VaultNotFoundError:
@@ -332,7 +333,14 @@ def episode_history(vault_name: str, episode_id: str) -> EpisodeHistoryResponse:
     try:
         check_access(vault_name, AGENT_ID)
         history = vault_router.episode_history(vault_name=vault_name, episode_id=episode_id)
-        return EpisodeHistoryResponse(vault_name=vault_name, episode_id=history.episode_id, chain=history.chain)
+        return EpisodeHistoryResponse(
+            vault_name=vault_name,
+            episode_id=history.episode_id,
+            chain=history.chain,
+            attestations=history.attestations,
+            disputes=history.disputes,
+            closures=history.closures,
+        )
     except VaultNotFoundError:
         raise ValueError(f"Vault '{vault_name}' does not exist.")
     except EpisodeNotFoundError as e:

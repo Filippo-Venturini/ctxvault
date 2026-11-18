@@ -37,7 +37,7 @@ from pathlib import Path
 
 from ctxvault.core.exceptions import EpisodeAlreadyClosedError, EpisodeAlreadyOpenError, EpisodeNotFoundError, EpisodeSuccessorStillOpenError, EpisodeWasRevisedError, SchemaVersionError
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # A connection is reused per database file: SQLite serialises writers itself,
 # and the vault is a single-process store. check_same_thread is off because the
@@ -91,7 +91,8 @@ CREATE INDEX IF NOT EXISTS idx_entities_norm ON episode_entities(entity_norm);
 CREATE TABLE IF NOT EXISTS episode_attestations (
     episode_id  TEXT NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
     at          TEXT NOT NULL,
-    source      TEXT
+    source      TEXT,
+    metadata    TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX IF NOT EXISTS idx_attestations_episode ON episode_attestations(episode_id, at);
@@ -104,6 +105,7 @@ CREATE TABLE IF NOT EXISTS episode_disputes (
     episode_b   TEXT NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
     noticed_at  TEXT NOT NULL,
     note        TEXT,
+    metadata    TEXT NOT NULL DEFAULT '{}',
     PRIMARY KEY (episode_a, episode_b)
 );
 
@@ -129,6 +131,7 @@ CREATE TABLE IF NOT EXISTS episode_closures (
     reason         TEXT,
     reopened_at    TEXT,
     reopen_reason  TEXT,
+    metadata       TEXT NOT NULL DEFAULT '{}',
     PRIMARY KEY (episode_id, closed_at)
 );
 
@@ -160,11 +163,42 @@ _MIGRATIONS: dict[int, list[str]] = {
         FROM episodes
         WHERE invalidated_at IS NOT NULL
         """,
-    ]
+    ],
+    4: [  # v5: event metadata on confirm, dispute and close
+        "ALTER TABLE episode_attestations ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'",
+        "ALTER TABLE episode_disputes ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'",
+        "ALTER TABLE episode_closures ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'",
+    ],
 }
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+def _normalise_metadata(metadata: dict | None) -> dict:
+    """Accept optional event metadata; store it as a JSON object.
+
+    None becomes an empty object, so a caller that does not pass metadata
+    and one that passes `{}` leave the same row. A non-object is refused:
+    the column is a map (run_id, model, prompt version), not a list or a
+    bare string.
+    """
+    if metadata is None:
+        return {}
+    if not isinstance(metadata, dict):
+        raise ValueError("Event metadata must be a JSON object.")
+    try:
+        json.dumps(metadata)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Event metadata must be JSON-serialisable.") from exc
+    return metadata
+
+def _metadata_from_row(value) -> dict:
+    if not value:
+        return {}
+    if isinstance(value, dict):
+        return value
+    loaded = json.loads(value)
+    return loaded if isinstance(loaded, dict) else {}
 
 def new_episode_id() -> str:
     return uuid.uuid4().hex
@@ -187,6 +221,20 @@ def decode_embedding(blob: bytes | None) -> list[float] | None:
 _LATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_episodes_revised ON episodes(revised_by)",
 ]
+
+def _run_migration_statement(conn: sqlite3.Connection, statement: str) -> None:
+    # _SCHEMA runs first with IF NOT EXISTS, so a table that an older file
+    # did not have is created already at the current shape. An ADD COLUMN
+    # for that table would then fail; skip it when the column is present.
+    compact = " ".join(statement.split())
+    mid = " ADD COLUMN "
+    if compact.startswith("ALTER TABLE ") and mid in compact:
+        table = compact[len("ALTER TABLE "):].split()[0]
+        column = compact.split(mid, 1)[1].split()[0]
+        names = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column in names:
+            return
+    conn.execute(statement)
 
 def _apply_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
@@ -212,7 +260,7 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
 
     while version < SCHEMA_VERSION:
         for statement in _MIGRATIONS.get(version, []):
-            conn.execute(statement)
+            _run_migration_statement(conn, statement)
         version += 1
         conn.execute("UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(version),))
 
@@ -338,13 +386,15 @@ def _insert_closure(
     superseded_by: str | None = None,
     revised_by: str | None = None,
     reason: str | None = None,
+    metadata: dict | None = None,
 ) -> None:
     conn.execute(
         """
         INSERT INTO episode_closures (
             episode_id, closed_at, valid_to, prior_valid_to,
-            superseded_by, revised_by, reason, reopened_at, reopen_reason
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+            superseded_by, revised_by, reason, reopened_at, reopen_reason,
+            metadata
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
         """,
         (
             row["id"],
@@ -354,6 +404,7 @@ def _insert_closure(
             superseded_by,
             revised_by,
             reason,
+            json.dumps(_normalise_metadata(metadata)),
         ),
     )
 
@@ -710,6 +761,7 @@ def invalidate_episode(
     valid_to: str | None = None,
     reason: str | None = None,
     at: str | None = None,
+    metadata: dict | None = None,
 ) -> dict:
     """`at` is when the closing was recorded, for callers replaying the
     past; it defaults to now. `valid_to` is when the statement stopped
@@ -729,17 +781,23 @@ def invalidate_episode(
         _check_close_after_reopen(conn, episode_id, now)
         _check_boundary(row, valid_to or now, "valid_to")
 
-        metadata = json.loads(row["metadata"] or "{}")
+        event_metadata = _normalise_metadata(metadata)
+        episode_metadata = json.loads(row["metadata"] or "{}")
         if reason:
-            metadata["invalidation_reason"] = reason
+            episode_metadata["invalidation_reason"] = reason
 
         end = valid_to or now
         # The closure is the source of truth for this close; invalidation_reason
         # stays on the row so older readers still see it.
-        _insert_closure(conn, row, closed_at=now, valid_to=end, reason=reason)
+        # Event metadata lives on the closure, not on the episode row:
+        # that row is the statement, and this payload attributes the close.
+        _insert_closure(
+            conn, row, closed_at=now, valid_to=end, reason=reason,
+            metadata=event_metadata,
+        )
         conn.execute(
             "UPDATE episodes SET valid_to = ?, invalidated_at = ?, metadata = ? WHERE id = ?",
-            (end, now, json.dumps(metadata), episode_id),
+            (end, now, json.dumps(episode_metadata), episode_id),
         )
 
     return get_episode(config, episode_id)
@@ -976,8 +1034,8 @@ def revise_episode(
             embedding=embedding,
         )
         conn.execute(
-            "INSERT INTO episode_attestations (episode_id, at, source) "
-            "SELECT ?, at, source FROM episode_attestations WHERE episode_id = ?",
+            "INSERT INTO episode_attestations (episode_id, at, source, metadata) "
+            "SELECT ?, at, source, metadata FROM episode_attestations WHERE episode_id = ?",
             (new_id, episode_id),
         )
         conn.execute("UPDATE episode_disputes SET episode_a = ? WHERE episode_a = ?", (new_id, episode_id))
@@ -1029,6 +1087,7 @@ def confirm_episode(
     *,
     at: str | None = None,
     source: str | None = None,
+    metadata: dict | None = None,
 ) -> dict:
     """Record that an open statement was asserted again.
 
@@ -1055,8 +1114,9 @@ def confirm_episode(
             )
 
         conn.execute(
-            "INSERT INTO episode_attestations (episode_id, at, source) VALUES (?, ?, ?)",
-            (episode_id, moment, source),
+            "INSERT INTO episode_attestations (episode_id, at, source, metadata) "
+            "VALUES (?, ?, ?, ?)",
+            (episode_id, moment, source, json.dumps(_normalise_metadata(metadata))),
         )
 
     return get_episode(config, episode_id)
@@ -1068,6 +1128,7 @@ def dispute_episodes(
     *,
     at: str | None = None,
     note: str | None = None,
+    metadata: dict | None = None,
 ) -> dict:
     """Record that two open statements cannot both hold, without picking one.
 
@@ -1090,10 +1151,12 @@ def dispute_episodes(
         _open_row(conn, episode_id, "disputed")
         _open_row(conn, other_id, "disputed")
 
+        payload = json.dumps(_normalise_metadata(metadata))
         conn.execute(
-            "INSERT OR IGNORE INTO episode_disputes (episode_a, episode_b, noticed_at, note) "
-            "VALUES (?, ?, ?, ?)",
-            (first, second, at or now_iso(), note),
+            "INSERT OR IGNORE INTO episode_disputes "
+            "(episode_a, episode_b, noticed_at, note, metadata) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (first, second, at or now_iso(), note, payload),
         )
 
     return get_episode(config, episode_id)
@@ -1132,6 +1195,29 @@ def history(config: dict, episode_id: str) -> list[dict]:
 
     return chain
 
+def _event_metadata_match_sql(filters: dict) -> tuple[str, list]:
+    """Episode ids that have at least one confirm, dispute or close whose
+    metadata contains every key/value in `filters` (AND, on that same event)."""
+    if not filters:
+        raise ValueError("event_metadata_filters cannot be empty.")
+    predicates = []
+    params: list = []
+    for key, value in filters.items():
+        if not isinstance(key, str) or not key or '"' in key:
+            raise ValueError('A metadata key cannot contain a double quote.')
+        path = f'$."{key}"'
+        predicates.append("json_extract(metadata, ?) = json_extract(?, ?)")
+        params.extend([path, json.dumps({key: value}), path])
+    where = " AND ".join(predicates)
+    sql = (
+        f"SELECT episode_id FROM episode_attestations WHERE {where} "
+        f"UNION SELECT episode_a FROM episode_disputes WHERE {where} "
+        f"UNION SELECT episode_b FROM episode_disputes WHERE {where} "
+        f"UNION SELECT episode_id FROM episode_closures WHERE {where}"
+    )
+    return sql, params * 4
+
+
 def select_episodes(
     config: dict,
     *,
@@ -1142,6 +1228,7 @@ def select_episodes(
     known_at: str | None = None,
     include_closed: bool = False,
     metadata_filters: dict | None = None,
+    event_metadata_filters: dict | None = None,
     disputed: bool | None = None,
     scan_limit: int | None = 5000,
 ) -> list[dict]:
@@ -1152,6 +1239,8 @@ def select_episodes(
     belief state of a past moment. With `include_closed` the time filters are
     dropped and the full history comes back. `disputed` keeps only the
     episodes that are (True) or are not (False) in an open dispute.
+    `event_metadata_filters` keeps episodes that have a confirm, dispute
+    or close whose metadata contains every given key/value.
     `scan_limit` caps the rows read before ranking; None reads them all, for
     a caller that wants the whole vault rather than the best of it.
     """
@@ -1213,6 +1302,14 @@ def select_episodes(
                 f"id IN (SELECT episode_id FROM episode_entities WHERE entity_norm IN ({placeholders}))"
             )
             params.extend(normalised)
+
+    # Event metadata is its own filter, applied in SQL so scan_limit cannot
+    # drop a matching episode that is not among the first N of the unfiltered
+    # set. All keys must hold on the same confirm, dispute or close.
+    if event_metadata_filters:
+        event_sql, event_params = _event_metadata_match_sql(event_metadata_filters)
+        clauses.append(f"id IN ({event_sql})")
+        params.extend(event_params)
 
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     limit = "" if scan_limit is None else " LIMIT ?"
@@ -1363,25 +1460,82 @@ def count_episodes(config: dict) -> dict:
     ).fetchone()["n"]
     return {"total": total, "open": open_now, "closed": total - open_now, "holding": holding, "disputes": disputes}
 
-def list_attestations(config: dict) -> list[dict]:
+def _optional_id_clause(column: str, episode_ids: list[str] | None) -> tuple[str, list]:
+    if not episode_ids:
+        return "", []
+    placeholders = ", ".join("?" for _ in episode_ids)
+    return f" WHERE {column} IN ({placeholders})", list(episode_ids)
+
+def list_attestations(config: dict, episode_ids: list[str] | None = None) -> list[dict]:
     """Every attestation in the vault, oldest first: which episode, when, by whom.
 
     The episode row carries only their count and the last one; whoever wants
-    to show each reassertion reads them here.
+    to show each reassertion reads them here. `episode_ids` limits the list
+    to one chain, as history() does.
     """
     conn = get_connection(config)
-    rows = conn.execute("SELECT episode_id, at, source FROM episode_attestations ORDER BY at").fetchall()
-    return [dict(row) for row in rows]
+    clause, params = _optional_id_clause("episode_id", episode_ids)
+    rows = conn.execute(
+        f"SELECT episode_id, at, source, metadata FROM episode_attestations{clause} ORDER BY at",
+        params,
+    ).fetchall()
+    return [
+        {"episode_id": row["episode_id"], "at": row["at"], "source": row["source"],
+         "metadata": _metadata_from_row(row["metadata"])}
+        for row in rows
+    ]
 
-def list_disputes(config: dict) -> list[dict]:
+def list_disputes(config: dict, episode_ids: list[str] | None = None) -> list[dict]:
     """Every dispute ever noticed, oldest first, settled or not: the two
     episodes, when it was noticed and the note. The episode row only carries
     the ones still open."""
     conn = get_connection(config)
+    clause, params = "", []
+    if episode_ids:
+        placeholders = ", ".join("?" for _ in episode_ids)
+        clause = f" WHERE episode_a IN ({placeholders}) OR episode_b IN ({placeholders})"
+        params = list(episode_ids) + list(episode_ids)
     rows = conn.execute(
-        "SELECT episode_a, episode_b, noticed_at, note FROM episode_disputes ORDER BY noticed_at"
+        f"SELECT episode_a, episode_b, noticed_at, note, metadata FROM episode_disputes{clause} "
+        "ORDER BY noticed_at",
+        params,
     ).fetchall()
-    return [dict(row) for row in rows]
+    return [
+        {"episode_a": row["episode_a"], "episode_b": row["episode_b"],
+         "noticed_at": row["noticed_at"], "note": row["note"],
+         "metadata": _metadata_from_row(row["metadata"])}
+        for row in rows
+    ]
+
+def list_closures(config: dict, episode_ids: list[str] | None = None) -> list[dict]:
+    """Every close on file, oldest first, including ones later reopened."""
+    conn = get_connection(config)
+    clause, params = _optional_id_clause("episode_id", episode_ids)
+    rows = conn.execute(
+        f"""
+        SELECT episode_id, closed_at, valid_to, prior_valid_to,
+               superseded_by, revised_by, reason, reopened_at, reopen_reason,
+               metadata
+        FROM episode_closures{clause}
+        ORDER BY closed_at
+        """,
+        params,
+    ).fetchall()
+    return [
+        {
+            "episode_id": row["episode_id"],
+            "closed_at": row["closed_at"],
+            "valid_to": row["valid_to"],
+            "prior_valid_to": row["prior_valid_to"],
+            "superseded_by": row["superseded_by"],
+            "revised_by": row["revised_by"],
+            "reason": row["reason"],
+            "reopened_at": row["reopened_at"],
+            "reopen_reason": row["reopen_reason"],
+            "metadata": _metadata_from_row(row["metadata"]),
+        }
+        for row in rows
+    ]
 
 def change_moments(config: dict) -> list[str]:
     """Every instant the vault changed, as it recorded them: a statement

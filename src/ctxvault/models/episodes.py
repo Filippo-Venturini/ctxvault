@@ -84,10 +84,18 @@ class EpisodeQueryResult(BaseModel):
     results: list[EpisodeMatch]
 
 class EpisodeHistory(BaseModel):
-    """The full supersession chain an episode belongs to, oldest first."""
+    """The full supersession chain an episode belongs to, oldest first.
+
+    Event lists belong to the chain, not to a single row: confirmations,
+    disputes and closes on any version, each with the metadata the caller
+    stored on that verb.
+    """
 
     episode_id: str
     chain: list[Episode]
+    attestations: list[dict[str, Any]] = Field(default_factory=list)
+    disputes: list[dict[str, Any]] = Field(default_factory=list)
+    closures: list[dict[str, Any]] = Field(default_factory=list)
 
 class VaultEntity(BaseModel):
     """One entity the vault knows about, and how much it is talked about.

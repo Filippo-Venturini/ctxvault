@@ -179,10 +179,11 @@ def query_episodes(vault_name: str, text: str | None = None, **kwargs)-> Episode
     return vault.query_episodes(text=text, **kwargs)
 
 def invalidate_episode(vault_name: str, episode_id: str, valid_to: str | None = None, reason: str | None = None,
-                       at: str | None = None)-> Episode:
+                       at: str | None = None, metadata: dict | None = None)-> Episode:
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.INVALIDATE_EPISODE)
-    return vault.invalidate_episode(episode_id=episode_id, valid_to=valid_to, reason=reason, at=at)
+    return vault.invalidate_episode(episode_id=episode_id, valid_to=valid_to, reason=reason, at=at,
+                                   metadata=metadata)
 
 def supersede_episode(vault_name: str, episode_id: str, content: str, **kwargs)-> Episode:
     vault = open_vault(vault_name=vault_name)
@@ -206,16 +207,18 @@ def episode_history(vault_name: str, episode_id: str)-> EpisodeHistory:
     return vault.history(episode_id=episode_id)
 
 def confirm_episode(vault_name: str, episode_id: str, at: str | None = None,
-                    source: str | None = None)-> Episode:
+                    source: str | None = None, metadata: dict | None = None)-> Episode:
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.WRITE_EPISODE)
-    return vault.confirm_episode(episode_id=episode_id, at=at, source=source)
+    return vault.confirm_episode(episode_id=episode_id, at=at, source=source, metadata=metadata)
 
 def dispute_episodes(vault_name: str, episode_id: str, other_id: str,
-                     at: str | None = None, note: str | None = None)-> Episode:
+                     at: str | None = None, note: str | None = None,
+                     metadata: dict | None = None)-> Episode:
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.WRITE_EPISODE)
-    return vault.dispute_episodes(episode_id=episode_id, other_id=other_id, at=at, note=note)
+    return vault.dispute_episodes(episode_id=episode_id, other_id=other_id, at=at, note=note,
+                                 metadata=metadata)
 
 def mark_recalled(vault_name: str, episode_ids: list[str])-> None:
     vault = open_vault(vault_name=vault_name)

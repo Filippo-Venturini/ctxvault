@@ -231,11 +231,11 @@ def _evidence(vault: EpisodicVault) -> tuple[dict, dict]:
     dispute it is in (with which episode, noticed when, with what note)."""
     attestations: dict[str, list] = {}
     for row in vault.attestations():
-        attestations.setdefault(row["episode_id"], []).append({"at": row["at"], "source": row["source"]})
+        attestations.setdefault(row["episode_id"], []).append({"at": row["at"], "source": row["source"], "metadata": row.get("metadata") or {}})
     disputes: dict[str, list] = {}
     for row in vault.disputes():
         for one, other in ((row["episode_a"], row["episode_b"]), (row["episode_b"], row["episode_a"])):
-            disputes.setdefault(one, []).append({"with": other, "noticed_at": row["noticed_at"], "note": row["note"]})
+            disputes.setdefault(one, []).append({"with": other, "noticed_at": row["noticed_at"], "note": row["note"], "metadata": row.get("metadata") or {}})
     return attestations, disputes
 
 def vault_payload(name: str) -> dict:

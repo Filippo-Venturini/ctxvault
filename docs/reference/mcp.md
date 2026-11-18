@@ -107,6 +107,7 @@ Retrieve episodes from an episodic vault. By default only statements that still 
 | `include_closed` | `bool` | `False` |
 | `order_by` | `str | None` | `None` |
 | `limit` | `int` | `10` |
+| `event_metadata_filters` | `dict | None` | `None` |
 
 ### `confirm_episode`
 
@@ -118,6 +119,7 @@ Record that a statement already in the vault was asserted again. Use this when y
 | `episode_id` | `str` | required |
 | `at` | `str | None` | `None` |
 | `source` | `str | None` | `None` |
+| `metadata` | `dict | None` | `None` |
 
 ### `supersede_episode`
 
@@ -155,6 +157,7 @@ Mark an episode as no longer true, without deleting it. Use this when something 
 | `episode_id` | `str` | required |
 | `valid_to` | `str | None` | `None` |
 | `reason` | `str` | `''` |
+| `metadata` | `dict | None` | `None` |
 
 ### `reopen_episode`
 
@@ -177,10 +180,11 @@ Record that two open statements cannot both hold, when you cannot tell which one
 | `episode_id` | `str` | required |
 | `other_id` | `str` | required |
 | `note` | `str` | `''` |
+| `metadata` | `dict | None` | `None` |
 
 ### `episode_history`
 
-Show every version of a statement, oldest first. Use this to explain why the vault believes something, or to see what an episode used to say before it was corrected.
+Show every version of a statement, oldest first, plus the confirmations, disputes and closes on that chain, each with any metadata stored on the event. Use this to explain why the vault believes something, or to see what an episode used to say before it was corrected.
 
 | Parameter | Type | Default |
 |-----------|------|---------|
