@@ -597,3 +597,178 @@ def test_a_vault_whose_folder_is_gone_can_still_be_purged(mock_vault_config):
     vault_router.purge_vault("test_vault")
 
     assert all(v["name"] != "test_vault" for v in config.get_vaults())
+
+# ── Query-time sync (#56) ───────────────────────────────────────────────────
+
+def test_a_query_leaves_the_index_alone_until_the_vault_asks(mock_vault_config, monkeypatch):
+    from ctxvault.core.vaults.semantic import SemanticVault
+    calls = []
+    monkeypatch.setattr(SemanticVault, "sync_index", lambda self: calls.append("sync") or ([], [], []))
+
+    result = vault_router.query(text="anything", vault_name="test_vault")
+
+    assert calls == []
+    assert result.sync is None
+
+def test_sync_on_query_brings_the_index_up_before_answering(mock_vault_config, monkeypatch):
+    from ctxvault.core.vaults.semantic import SemanticVault
+    from ctxvault.utils.config import set_sync_on_query
+    set_sync_on_query("test_vault", True)
+    changed = str(mock_vault_config / "note.txt")
+    calls = []
+    monkeypatch.setattr(SemanticVault, "sync_index", lambda self: calls.append("sync") or ([changed], [], []))
+
+    result = vault_router.query(text="anything", vault_name="test_vault")
+
+    assert calls == ["sync"]
+    assert result.sync.reindexed == [changed]
+    assert result.sync.changed()
+    assert result.sync.duration_ms >= 0
+
+def test_an_unchanged_vault_is_not_synced_again_on_the_next_query(mock_vault_config, monkeypatch):
+    from ctxvault.core.vaults.semantic import SemanticVault
+    from ctxvault.utils.config import set_sync_on_query
+    set_sync_on_query("test_vault", True)
+    calls = []
+    monkeypatch.setattr(SemanticVault, "sync_index", lambda self: calls.append("sync") or ([], [], []))
+
+    vault_router.query(text="anything", vault_name="test_vault")
+    second = vault_router.query(text="anything", vault_name="test_vault")
+
+    assert len(calls) == 1
+    assert second.sync is None
+
+def test_an_edited_file_makes_the_next_query_sync(mock_vault_config, monkeypatch):
+    import os
+    from ctxvault.core.vaults.semantic import SemanticVault
+    from ctxvault.utils.config import set_sync_on_query
+    set_sync_on_query("test_vault", True)
+    note = mock_vault_config / "note.txt"
+    note.write_text("first")
+    calls = []
+    monkeypatch.setattr(SemanticVault, "sync_index", lambda self: calls.append("sync") or ([], [], []))
+
+    vault_router.query(text="anything", vault_name="test_vault")
+    note.write_text("second")
+    os.utime(note, (1_800_000_000, 1_800_000_000))     # the mtime the fingerprint reads
+    vault_router.query(text="anything", vault_name="test_vault")
+
+    assert len(calls) == 2
+
+def test_a_removed_file_makes_the_next_query_sync(mock_vault_config, monkeypatch):
+    from ctxvault.core.vaults.semantic import SemanticVault
+    from ctxvault.utils.config import set_sync_on_query
+    set_sync_on_query("test_vault", True)
+    note = mock_vault_config / "note.txt"
+    note.write_text("here")
+    calls = []
+    monkeypatch.setattr(SemanticVault, "sync_index", lambda self: calls.append("sync") or ([], [], []))
+
+    vault_router.query(text="anything", vault_name="test_vault")
+    note.unlink()
+    vault_router.query(text="anything", vault_name="test_vault")
+
+    assert len(calls) == 2
+
+def test_two_queries_arriving_together_sync_once(mock_vault_config, monkeypatch):
+    import threading
+    import time
+    from ctxvault.core.vaults.semantic import SemanticVault
+    from ctxvault.utils.config import set_sync_on_query
+    set_sync_on_query("test_vault", True)
+    state = {"calls": 0, "active": 0, "peak": 0}
+    guard = threading.Lock()
+
+    def slow_sync(self):
+        with guard:
+            state["calls"] += 1
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        time.sleep(0.2)
+        with guard:
+            state["active"] -= 1
+        return [], [], []
+
+    monkeypatch.setattr(SemanticVault, "sync_index", slow_sync)
+    start = threading.Barrier(2)
+    answers = []
+
+    def ask():
+        start.wait()
+        answers.append(vault_router.query(text="anything", vault_name="test_vault"))
+
+    threads = [threading.Thread(target=ask) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(answers) == 2
+    assert state["calls"] == 1        # the second waited, then found the vault unchanged
+    assert state["peak"] == 1
+    assert sum(1 for answer in answers if answer.sync is not None) == 1
+
+def test_sync_on_query_is_written_only_when_on(mock_vault_config):
+    from ctxvault.utils.config import get_vault_config, set_sync_on_query
+    assert "sync_on_query" not in get_vault_config("test_vault")
+
+    set_sync_on_query("test_vault", True)
+    assert get_vault_config("test_vault")["sync_on_query"] is True
+    assert vault_router.get_vaults()[0]["sync_on_query"] is True
+
+    set_sync_on_query("test_vault", False)
+    assert "sync_on_query" not in get_vault_config("test_vault")
+    assert vault_router.get_vaults()[0]["sync_on_query"] is False
+
+def test_sync_on_query_is_refused_on_a_vault_with_nothing_to_index(mock_episodic_vault_config):
+    from ctxvault.utils.config import set_sync_on_query
+    with pytest.raises(ValueError, match="semantic"):
+        set_sync_on_query("test_episodic_vault", True)
+
+def test_an_interval_spares_the_check_between_queries(mock_vault_config, monkeypatch):
+    from ctxvault.core.vaults.semantic import SemanticVault
+    from ctxvault.utils.config import set_sync_on_query, set_sync_on_query_interval
+    set_sync_on_query("test_vault", True)
+    set_sync_on_query_interval("test_vault", 3600)
+    calls = []
+    monkeypatch.setattr(SemanticVault, "sync_index", lambda self: calls.append("sync") or ([], [], []))
+    note = mock_vault_config / "note.txt"
+    note.write_text("first")
+
+    vault_router.query(text="anything", vault_name="test_vault")
+    note.write_text("second")
+    vault_router.query(text="anything", vault_name="test_vault")
+
+    assert len(calls) == 1        # the second query was inside the interval, so it did not even stat
+
+def test_a_negative_interval_is_refused(mock_vault_config):
+    from ctxvault.utils.config import set_sync_on_query_interval
+    with pytest.raises(ValueError, match="negative"):
+        set_sync_on_query_interval("test_vault", -1)
+
+def test_an_interval_is_written_only_when_set(mock_vault_config):
+    from ctxvault.utils.config import get_vault_config, set_sync_on_query_interval
+    assert get_vault_config("test_vault").get("sync_on_query_interval") is None
+
+    set_sync_on_query_interval("test_vault", 30)
+    assert get_vault_config("test_vault")["sync_on_query_interval"] == 30
+    assert vault_router.get_vaults()[0]["sync_on_query_interval"] == 30
+
+    set_sync_on_query_interval("test_vault", 0)
+    assert "sync_on_query_interval" not in get_vault_config("test_vault")
+
+def test_a_whole_reindex_forgets_the_sync_fingerprint(mock_vault_config, temp_docs, monkeypatch):
+    from ctxvault.core.vaults.semantic import SemanticVault
+    from ctxvault.storage import chroma_store
+    from ctxvault.utils.config import set_sync_on_query
+    set_sync_on_query("test_vault", True)
+    monkeypatch.setattr(SemanticVault, "sync_index", lambda self: ([], [], []))
+    vault_router.query(text="anything", vault_name="test_vault")
+    vault = vault_router.open_vault("test_vault")
+    state = vault._sync_state_path()
+    assert state.is_file()
+
+    chroma_store.get_collection(vault.config).metadata = {"hnsw:space": "l2"}   # an older collection
+    vault.reindex_files()        # the full path rebuilds it
+
+    assert not state.exists()
