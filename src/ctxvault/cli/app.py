@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 from ctxvault.models.documents import SemanticDocumentInfo, SkillDocumentInfo
 from ctxvault.models.vaults import VaultType
 import typer
@@ -6,6 +7,17 @@ from ctxvault.core import vault_router
 from ctxvault.core.exceptions import PathOutsideVaultError, VaultAlreadyExistsError, VaultNotFoundError, VaultTypeNotValidError
 
 app = typer.Typer()
+
+def _parse_metadata(raw: str | None) -> dict | None:
+    if raw is None:
+        return None
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(f"metadata must be a JSON object: {exc}") from exc
+    if not isinstance(value, dict):
+        raise typer.BadParameter("metadata must be a JSON object.")
+    return value
 
 def _print_vault(v: dict):
     name = v['name']
@@ -442,6 +454,7 @@ def episodes(
     entities: bool = typer.Option(False, "--entities", help="List the vault's entities instead of episodes"),
     min_episodes: int = typer.Option(1, "--min-episodes", help="With --entities, hide entities mentioned fewer times"),
     values: str = typer.Option(None, "--values", help="List the distinct values of this metadata key instead of episodes"),
+    event_metadata: str = typer.Option(None, "--event-metadata", help="JSON object; keep episodes whose confirm, dispute or close carries these keys"),
 ):
     try:
         if values:
@@ -496,6 +509,7 @@ def episodes(
             disputed=True if disputed else None,
             order_by=order_by,
             limit=limit,
+            event_metadata_filters=_parse_metadata(event_metadata),
         )
 
         if not result.results:
@@ -521,6 +535,31 @@ def episode(
             typer.secho(f"\n{len(chain.chain)} versions of this statement\n", fg=typer.colors.GREEN, bold=True)
             for i, item in enumerate(chain.chain, 1):
                 _print_episode(item, index=i)
+            if chain.attestations or chain.disputes or chain.closures:
+                typer.echo("")
+                for row in chain.attestations:
+                    typer.secho(f"  confirmed {row['at']}", fg=typer.colors.BRIGHT_BLACK, nl=False)
+                    if row.get("source"):
+                        typer.echo(f"  source={row['source']}", nl=False)
+                    if row.get("metadata"):
+                        typer.echo(f"  metadata={row['metadata']}", nl=False)
+                    typer.echo("")
+                for row in chain.disputes:
+                    typer.secho(
+                        f"  dispute {row['episode_a']} / {row['episode_b']} at {row['noticed_at']}",
+                        fg=typer.colors.BRIGHT_BLACK,
+                        nl=False,
+                    )
+                    if row.get("metadata"):
+                        typer.echo(f"  metadata={row['metadata']}", nl=False)
+                    typer.echo("")
+                for row in chain.closures:
+                    typer.secho(f"  closed {row['closed_at']}", fg=typer.colors.BRIGHT_BLACK, nl=False)
+                    if row.get("reason"):
+                        typer.echo(f"  reason={row['reason']}", nl=False)
+                    if row.get("metadata"):
+                        typer.echo(f"  metadata={row['metadata']}", nl=False)
+                    typer.echo("")
             return
 
         _print_episode(vault_router.get_episode(vault_name=name, episode_id=episode_id))
@@ -534,9 +573,10 @@ def invalidate(
     episode_id: str = typer.Argument(...),
     valid_to: str = typer.Option(None, "--valid-to", help="ISO timestamp the statement stopped holding"),
     reason: str = typer.Option(None, "--reason"),
+    metadata: str = typer.Option(None, "--metadata", help="JSON object stored with this close (run_id, model, ...)"),
 ):
     try:
-        episode = vault_router.invalidate_episode(vault_name=name, episode_id=episode_id, valid_to=valid_to, reason=reason)
+        episode = vault_router.invalidate_episode(vault_name=name, episode_id=episode_id, valid_to=valid_to, reason=reason, metadata=_parse_metadata(metadata))
         typer.secho("Episode closed.", fg=typer.colors.YELLOW, bold=True)
         _print_episode(episode)
     except Exception as e:
@@ -616,9 +656,10 @@ def confirm(
     episode_id: str = typer.Argument(...),
     at: str = typer.Option(None, "--at", help="ISO timestamp of the reassertion (default: now)"),
     source: str = typer.Option(None, "--source", help="Who reasserted it"),
+    metadata: str = typer.Option(None, "--metadata", help="JSON object stored with this confirmation (run_id, model, ...)"),
 ):
     try:
-        episode = vault_router.confirm_episode(vault_name=name, episode_id=episode_id, at=at, source=source)
+        episode = vault_router.confirm_episode(vault_name=name, episode_id=episode_id, at=at, source=source, metadata=_parse_metadata(metadata))
         typer.secho(f"Episode confirmed ({episode.confirmed_count}x).", fg=typer.colors.GREEN, bold=True)
         _print_episode(episode)
     except Exception as e:
@@ -631,9 +672,10 @@ def dispute(
     episode_id: str = typer.Argument(...),
     other_id: str = typer.Argument(...),
     note: str = typer.Option(None, "--note", help="Why the two cannot both hold"),
+    metadata: str = typer.Option(None, "--metadata", help="JSON object stored with this dispute (run_id, model, ...)"),
 ):
     try:
-        episode = vault_router.dispute_episodes(vault_name=name, episode_id=episode_id, other_id=other_id, note=note)
+        episode = vault_router.dispute_episodes(vault_name=name, episode_id=episode_id, other_id=other_id, note=note, metadata=_parse_metadata(metadata))
         typer.secho("Episodes in dispute.", fg=typer.colors.YELLOW, bold=True)
         _print_episode(episode)
     except Exception as e:

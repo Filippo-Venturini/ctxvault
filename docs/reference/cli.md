@@ -253,7 +253,7 @@ Query an **episodic** vault. By default only statements that still hold are
 returned, ranked by recency, or by relevance when a query text is given.
 
 ```bash
-ctxvault episodes <vault> [text] [--entity <name>]... [--valid-at <iso>] [--known-at <iso>] [--all] [--disputed] [--order-by <mode>] [--limit <n>] [--stats] [--entities]
+ctxvault episodes <vault> [text] [--entity <name>]... [--valid-at <iso>] [--known-at <iso>] [--all] [--disputed] [--event-metadata <json>] [--order-by <mode>] [--limit <n>] [--stats] [--entities]
 ```
 
 **Arguments:**
@@ -271,6 +271,7 @@ ctxvault episodes <vault> [text] [--entity <name>]... [--valid-at <iso>] [--know
 - `--entities` - List the vault's entities and how often each is mentioned, instead of episodes. Honours `--all` and `--valid-at`
 - `--min-episodes <n>` - With `--entities`, hide entities mentioned fewer than `n` times
 - `--values <key>` - List the distinct values of this metadata key and how many episodes carry each, instead of episodes. Honours `--all` and `--valid-at`
+- `--event-metadata <json>` - Only episodes whose confirm, dispute or close carries these keys (JSON object). All keys must hold on the same event
 
 **Example:**
 ```bash
@@ -293,7 +294,7 @@ ctxvault episode <vault> <episode_id> [--history]
 **Arguments:**
 - `<vault>` - Vault name (required)
 - `<episode_id>` - Episode id (required)
-- `--history` - Print every version of the statement, oldest first
+- `--history` - Print every version of the statement, oldest first, then any confirmations, disputes and closes on that chain (with their metadata)
 
 **Example:**
 ```bash
@@ -307,7 +308,7 @@ Close an episode: the statement stops holding, but is never deleted and stays
 reachable with `--all`, `--valid-at` or `--history`.
 
 ```bash
-ctxvault invalidate <vault> <episode_id> [--valid-to <iso>] [--reason <text>]
+ctxvault invalidate <vault> <episode_id> [--valid-to <iso>] [--reason <text>] [--metadata <json>]
 ```
 
 **Arguments:**
@@ -315,6 +316,7 @@ ctxvault invalidate <vault> <episode_id> [--valid-to <iso>] [--reason <text>]
 - `<episode_id>` - Episode id (required)
 - `--valid-to <iso>` - When it stopped holding (optional, default: now). Learning late that something ended in the past is the normal case
 - `--reason <text>` - Why it was closed; stored in the episode metadata
+- `--metadata <json>` - Optional JSON object stored with this close (run id, model, prompt version, ...); not mixed into the episode metadata
 
 **Example:**
 ```bash
@@ -415,7 +417,7 @@ it when you hear something the vault already holds, instead of writing it a
 second time.
 
 ```bash
-ctxvault confirm <vault> <episode_id> [--at <iso>] [--source <who>]
+ctxvault confirm <vault> <episode_id> [--at <iso>] [--source <who>] [--metadata <json>]
 ```
 
 **Arguments:**
@@ -423,6 +425,7 @@ ctxvault confirm <vault> <episode_id> [--at <iso>] [--source <who>]
 - `<episode_id>` - Episode id (required); must still be open
 - `--at <iso>` - When it was reasserted (optional, default: now); cannot precede the episode's `valid_from`
 - `--source <who>` - Who reasserted it (optional)
+- `--metadata <json>` - Optional JSON object stored with this confirmation (run id, model, prompt version, ...)
 
 **Example:**
 ```bash
@@ -441,13 +444,14 @@ side carries the dispute over to the revision. `episodes --disputed`
 lists what is still unsettled.
 
 ```bash
-ctxvault dispute <vault> <episode_id> <other_id> [--note <text>]
+ctxvault dispute <vault> <episode_id> <other_id> [--note <text>] [--metadata <json>]
 ```
 
 **Arguments:**
 - `<vault>` - Vault name (required)
 - `<episode_id>`, `<other_id>` - The two episodes (required); both must still be open
 - `--note <text>` - Why they cannot both hold (optional)
+- `--metadata <json>` - Optional JSON object stored with this dispute (run id, model, prompt version, ...)
 
 **Example:**
 ```bash

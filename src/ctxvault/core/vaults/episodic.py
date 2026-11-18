@@ -174,9 +174,11 @@ class EpisodicVault(BaseVault):
         valid_to: str | None = None,
         reason: str | None = None,
         at: str | None = None,
+        metadata: dict | None = None,
     ) -> Episode:
         data = sqlite_store.invalidate_episode(
-            self.config, episode_id, valid_to=valid_to, reason=reason, at=at
+            self.config, episode_id, valid_to=valid_to, reason=reason, at=at,
+            metadata=metadata,
         )
         return self._to_episode(data)
 
@@ -248,20 +250,31 @@ class EpisodicVault(BaseVault):
         return self._to_episode(data)
 
     def confirm_episode(self, episode_id: str, *, at: str | None = None,
-                        source: str | None = None) -> Episode:
+                        source: str | None = None, metadata: dict | None = None) -> Episode:
         return self._to_episode(
-            sqlite_store.confirm_episode(self.config, episode_id, at=at, source=source)
+            sqlite_store.confirm_episode(
+                self.config, episode_id, at=at, source=source, metadata=metadata
+            )
         )
 
     def dispute_episodes(self, episode_id: str, other_id: str, *, at: str | None = None,
-                         note: str | None = None) -> Episode:
+                         note: str | None = None, metadata: dict | None = None) -> Episode:
         return self._to_episode(
-            sqlite_store.dispute_episodes(self.config, episode_id, other_id, at=at, note=note)
+            sqlite_store.dispute_episodes(
+                self.config, episode_id, other_id, at=at, note=note, metadata=metadata
+            )
         )
 
     def history(self, episode_id: str) -> EpisodeHistory:
-        chain = [self._to_episode(item) for item in sqlite_store.history(self.config, episode_id)]
-        return EpisodeHistory(episode_id=episode_id, chain=chain)
+        raw = sqlite_store.history(self.config, episode_id)
+        ids = [item["id"] for item in raw]
+        return EpisodeHistory(
+            episode_id=episode_id,
+            chain=[self._to_episode(item) for item in raw],
+            attestations=sqlite_store.list_attestations(self.config, episode_ids=ids),
+            disputes=sqlite_store.list_disputes(self.config, episode_ids=ids),
+            closures=sqlite_store.list_closures(self.config, episode_ids=ids),
+        )
 
     def mark_recalled(self, episode_ids: list[str]) -> None:
         sqlite_store.mark_recalled(self.config, episode_ids)
@@ -277,11 +290,11 @@ class EpisodicVault(BaseVault):
         return [self._to_episode(row) for row in rows]
 
     def attestations(self) -> list[dict]:
-        """Each time a statement was asserted again: episode_id, at, source."""
+        """Each time a statement was asserted again: episode_id, at, source, metadata."""
         return sqlite_store.list_attestations(self.config)
 
     def disputes(self) -> list[dict]:
-        """Each dispute noticed, settled or not: episode_a, episode_b, noticed_at, note."""
+        """Each dispute noticed, settled or not: episode_a, episode_b, noticed_at, note, metadata."""
         return sqlite_store.list_disputes(self.config)
 
     def changes(self) -> list[str]:
@@ -335,6 +348,7 @@ class EpisodicVault(BaseVault):
         known_at: str | None = None,
         include_closed: bool = False,
         metadata_filters: dict | None = None,
+        event_metadata_filters: dict | None = None,
         disputed: bool | None = None,
         order_by: str | None = None,
         limit: int = DEFAULT_LIMIT,
@@ -351,6 +365,7 @@ class EpisodicVault(BaseVault):
             known_at=known_at,
             include_closed=include_closed,
             metadata_filters=metadata_filters,
+            event_metadata_filters=event_metadata_filters,
             disputed=disputed,
         )
 

@@ -1453,3 +1453,203 @@ class TestReviewRegressions:
             )
         assert vault_router.get_episode(vault_name=VAULT, episode_id=other.id).is_open
 
+
+
+class TestEventMetadata:
+    def test_confirm_dispute_and_invalidate_store_and_return_metadata(self, mock_episodic_vault_config):
+        coffee = write("Giuseppe likes coffee")
+        tea = write("Giuseppe likes tea")
+        run = {"run_id": "run-1", "model": "test-model", "prompt_version": "v3"}
+
+        confirm(coffee.id, source="conversation", metadata=run)
+        dispute(coffee.id, tea.id, note="he said both", metadata=run)
+        vault_router.invalidate_episode(
+            vault_name=VAULT, episode_id=tea.id, reason="settled", metadata=run
+        )
+
+        attestations = vault_router.open_vault(VAULT).attestations()
+        disputes = vault_router.open_vault(VAULT).disputes()
+        tea_history = vault_router.episode_history(vault_name=VAULT, episode_id=tea.id)
+        coffee_history = vault_router.episode_history(vault_name=VAULT, episode_id=coffee.id)
+
+        assert attestations == [{
+            "episode_id": coffee.id,
+            "at": attestations[0]["at"],
+            "source": "conversation",
+            "metadata": run,
+        }]
+        assert disputes[0]["metadata"] == run
+        assert {disputes[0]["episode_a"], disputes[0]["episode_b"]} == {coffee.id, tea.id}
+        assert coffee_history.attestations[0]["metadata"] == run
+        assert coffee_history.disputes[0]["metadata"] == run
+        assert tea_history.closures[0]["reason"] == "settled"
+        assert tea_history.closures[0]["metadata"] == run
+        # Event metadata stays on the event; it is not mixed into the episode row.
+        assert "run_id" not in vault_router.get_episode(vault_name=VAULT, episode_id=tea.id).metadata
+
+    def test_a_v4_vault_file_migrates_and_keeps_existing_events(self, tmp_path, monkeypatch):
+        from ctxvault.storage import sqlite_store
+
+        sqlite_store.close_connections()
+        db = tmp_path / "episodes.db"
+        config = {"db_path": str(db)}
+        conn = sqlite3.connect(db)
+        conn.executescript(
+            """
+            CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO meta (key, value) VALUES ('schema_version', '4');
+            CREATE TABLE episodes (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                source TEXT,
+                confidence REAL NOT NULL DEFAULT 1.0,
+                salience REAL NOT NULL DEFAULT 0.5,
+                occurred_at TEXT,
+                valid_from TEXT NOT NULL,
+                valid_to TEXT,
+                recorded_at TEXT NOT NULL,
+                invalidated_at TEXT,
+                superseded_by TEXT,
+                revised_by TEXT,
+                recall_count INTEGER NOT NULL DEFAULT 0,
+                last_recalled_at TEXT,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                embedding BLOB
+            );
+            CREATE TABLE episode_entities (
+                episode_id TEXT NOT NULL,
+                entity TEXT NOT NULL,
+                entity_norm TEXT NOT NULL,
+                PRIMARY KEY (episode_id, entity_norm)
+            );
+            CREATE TABLE episode_attestations (
+                episode_id TEXT NOT NULL,
+                at TEXT NOT NULL,
+                source TEXT
+            );
+            CREATE TABLE episode_disputes (
+                episode_a TEXT NOT NULL,
+                episode_b TEXT NOT NULL,
+                noticed_at TEXT NOT NULL,
+                note TEXT,
+                PRIMARY KEY (episode_a, episode_b)
+            );
+            CREATE TABLE episode_closures (
+                episode_id TEXT NOT NULL,
+                closed_at TEXT NOT NULL,
+                valid_to TEXT,
+                prior_valid_to TEXT,
+                superseded_by TEXT,
+                revised_by TEXT,
+                reason TEXT,
+                reopened_at TEXT,
+                reopen_reason TEXT,
+                PRIMARY KEY (episode_id, closed_at)
+            );
+            INSERT INTO episodes (id, content, valid_from, recorded_at, metadata)
+            VALUES ('e1', 'old fact', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', '{}');
+            INSERT INTO episode_attestations (episode_id, at, source)
+            VALUES ('e1', '2026-01-02T00:00:00+00:00', 'carer');
+            INSERT INTO episode_disputes (episode_a, episode_b, noticed_at, note)
+            VALUES ('e1', 'e1', '2026-01-03T00:00:00+00:00', 'legacy');
+            INSERT INTO episode_closures (
+                episode_id, closed_at, valid_to, prior_valid_to,
+                superseded_by, revised_by, reason, reopened_at, reopen_reason
+            )
+            VALUES ('e1', '2026-01-04T00:00:00+00:00', NULL, NULL, NULL, NULL, 'ended', NULL, NULL);
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        sqlite_store.get_connection(config)
+        version = sqlite_store.get_connection(config).execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()[0]
+        attestations = sqlite_store.list_attestations(config)
+        disputes = sqlite_store.list_disputes(config)
+        closures = sqlite_store.list_closures(config)
+
+        assert int(version) == sqlite_store.SCHEMA_VERSION
+        assert attestations == [{
+            "episode_id": "e1",
+            "at": "2026-01-02T00:00:00+00:00",
+            "source": "carer",
+            "metadata": {},
+        }]
+        assert disputes[0]["metadata"] == {} and disputes[0]["note"] == "legacy"
+        assert closures[0]["metadata"] == {} and closures[0]["reason"] == "ended"
+        sqlite_store.close_connections()
+
+    def test_episodes_can_be_queried_by_event_metadata(self, mock_episodic_vault_config):
+        tagged = write("Giuseppe likes coffee")
+        other = write("Giuseppe lives in Mestre")
+        confirm(tagged.id, metadata={"run_id": "run-1"})
+        confirm(other.id, metadata={"run_id": "run-2"})
+
+        found = query(event_metadata_filters={"run_id": "run-1"}, include_closed=True)
+        assert [e.id for e in found] == [tagged.id]
+
+        # Keys must hold on the same event: a confirm with only run_id does
+        # not match a filter that also asks for a model.
+        assert query(event_metadata_filters={"run_id": "run-1", "model": "x"}) == []
+
+    def test_a_revision_copies_attestation_metadata(self, mock_episodic_vault_config):
+        episode = write("Giuseppe lives in Padova")
+        confirm(episode.id, source="conversation", metadata={"run_id": "run-1"})
+        revised = vault_router.revise_episode(
+            vault_name=VAULT, episode_id=episode.id, content="Giuseppe lives in Padova, in the Arcella"
+        )
+        copied = [
+            row for row in vault_router.open_vault(VAULT).attestations()
+            if row["episode_id"] == revised.id
+        ]
+        assert copied[0]["metadata"] == {"run_id": "run-1"}
+        assert copied[0]["source"] == "conversation"
+
+    def test_omitted_event_metadata_is_an_empty_object(self, mock_episodic_vault_config):
+        episode = write("Giuseppe likes coffee")
+        confirm(episode.id)
+        assert vault_router.open_vault(VAULT).attestations()[0]["metadata"] == {}
+
+    def test_a_duplicate_dispute_keeps_the_first_metadata(self, mock_episodic_vault_config):
+        coffee = write("Giuseppe likes coffee")
+        tea = write("Giuseppe likes tea")
+        dispute(coffee.id, tea.id, metadata={"run_id": "first"})
+        dispute(coffee.id, tea.id, metadata={"run_id": "second"})
+        assert vault_router.open_vault(VAULT).disputes()[0]["metadata"] == {"run_id": "first"}
+
+    def test_non_object_event_metadata_is_refused(self, mock_episodic_vault_config):
+        episode = write("Giuseppe likes coffee")
+        with pytest.raises(ValueError, match="JSON object"):
+            confirm(episode.id, metadata=["run-1"])
+
+    def test_endpoint_stores_confirm_metadata(self, mock_episodic_vault_config):
+        from fastapi.testclient import TestClient
+        from ctxvault.api.app import app, ctxvault_router
+
+        app.include_router(ctxvault_router)
+        client = TestClient(app)
+        episode = write("Giuseppe likes coffee")
+
+        response = client.post(
+            f"/ctxvault/episodes/{episode.id}/confirm",
+            json={"vault_name": VAULT, "source": "api", "metadata": {"run_id": "run-9"}},
+        )
+        assert response.status_code == 200
+
+        history = client.get(
+            f"/ctxvault/episodes/{episode.id}/history",
+            params={"vault_name": VAULT},
+        )
+        assert history.status_code == 200
+        body = history.json()
+        assert body["attestations"][0]["metadata"] == {"run_id": "run-9"}
+        assert body["attestations"][0]["source"] == "api"
+
+        found = client.post(
+            "/ctxvault/episodes/query",
+            json={"vault_name": VAULT, "event_metadata_filters": {"run_id": "run-9"}},
+        )
+        assert found.status_code == 200
+        assert [row["id"] for row in found.json()["results"]] == [episode.id]

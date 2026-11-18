@@ -301,6 +301,7 @@ async def query_episodes(query_request: QueryEpisodesRequest, request: Request)-
             known_at=query_request.known_at,
             include_closed=query_request.include_closed,
             metadata_filters=query_request.metadata_filters or None,
+            event_metadata_filters=query_request.event_metadata_filters or None,
             disputed=query_request.disputed,
             order_by=query_request.order_by,
             limit=query_request.limit,
@@ -391,7 +392,14 @@ async def episode_history(episode_id: str, vault_name: str, request: Request)-> 
         check_vault_access(vault_name=vault_name, request=request)
 
         history = vault_router.episode_history(vault_name=vault_name, episode_id=episode_id)
-        return EpisodeHistoryResponse(vault_name=vault_name, episode_id=history.episode_id, chain=history.chain)
+        return EpisodeHistoryResponse(
+            vault_name=vault_name,
+            episode_id=history.episode_id,
+            chain=history.chain,
+            attestations=history.attestations,
+            disputes=history.disputes,
+            closures=history.closures,
+        )
     except EpisodeNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except VaultNotFoundError as e:
@@ -417,6 +425,7 @@ async def invalidate_episode(episode_id: str, invalidate_request: InvalidateEpis
             episode_id=episode_id,
             valid_to=invalidate_request.valid_to,
             reason=invalidate_request.reason,
+            metadata=invalidate_request.metadata or None,
         )
 
         return EpisodeResponse(vault_name=invalidate_request.vault_name, episode=episode)
@@ -554,6 +563,7 @@ async def confirm_episode(episode_id: str, confirm_request: ConfirmEpisodeReques
             episode_id=episode_id,
             at=confirm_request.at,
             source=confirm_request.source,
+            metadata=confirm_request.metadata or None,
         )
 
         return EpisodeResponse(vault_name=confirm_request.vault_name, episode=episode)
@@ -587,6 +597,7 @@ async def dispute_episodes(episode_id: str, dispute_request: DisputeEpisodeReque
             other_id=dispute_request.other_id,
             at=dispute_request.at,
             note=dispute_request.note,
+            metadata=dispute_request.metadata or None,
         )
 
         return EpisodeResponse(vault_name=dispute_request.vault_name, episode=episode)
