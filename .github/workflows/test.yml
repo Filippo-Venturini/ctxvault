@@ -8,7 +8,11 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     
     steps:
     - uses: actions/checkout@v4
@@ -24,6 +28,7 @@ jobs:
         pip install -e ".[dev]"
     
     - name: Debug - Show structure
+      shell: bash
       run: |
         ls -la
         ls -la src/ || echo "No src directory"

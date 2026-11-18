@@ -31,6 +31,8 @@ memory.init("notes", "episodic")
 memory.vaults()
 ```
 
+`init()` and `vaults()` return vault directory paths with `/` separators on all platforms.
+
 `vault(name)` returns whatever type the name resolves to; `semantic`, `skills` and `episodic` insist on one type and fail before a wrong method call would. The `agent` plays the part of the `X-CtxVault-Agent` header: a restricted vault opens only for an agent attached to it.
 
 The client is for the process that owns the vault. SQLite and Chroma are built for a single writer, so two processes that must share a vault (an agent writing while a consolidation job runs) go through one HTTP server instead.

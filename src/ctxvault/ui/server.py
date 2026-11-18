@@ -308,7 +308,7 @@ def _reveal(path: str) -> None:
     if sys.platform == "darwin":
         subprocess.Popen(["open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     elif sys.platform == "win32":
-        os.startfile(path)  # noqa: S606 - a folder, opened in Explorer
+        os.startfile(os.path.normpath(path))  # noqa: S606 - a folder, opened in Explorer
     else:
         subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -405,7 +405,8 @@ def _contents(name: str, documents: list[dict]) -> dict:
     return out
 
 def _data_uri(path: Path) -> str:
-    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    mime = "font/woff2" if path.suffix == ".woff2" else mimetypes.guess_type(path.name)[0]
+    mime = mime or "application/octet-stream"
     return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
 
 def _inline_fonts(css: str) -> str:

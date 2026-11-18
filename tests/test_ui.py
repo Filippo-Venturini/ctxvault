@@ -233,8 +233,8 @@ def test_reveal_opens_the_registered_folder_and_only_for_local_requests(mock_ski
     assert opened == []
 
     monkeypatch.setattr(server, "_is_local", lambda request: True)
-    assert client.post("/ui/api/vaults/test_skill_vault/reveal").json()["opened"] == str(mock_skill_vault_config)
-    assert opened == [str(mock_skill_vault_config)]
+    assert client.post("/ui/api/vaults/test_skill_vault/reveal").json()["opened"] == mock_skill_vault_config.as_posix()
+    assert opened == [mock_skill_vault_config.as_posix()]
     assert client.post("/ui/api/vaults/nowhere/reveal").status_code == 404
 
 def test_unknown_vault_is_404(mock_global_config):
@@ -248,8 +248,10 @@ def test_the_page_and_its_assets_are_served(mock_global_config):
 
 # ── Export ──────────────────────────────────────────────────────────────────
 
-def test_export_is_one_self_contained_file(mock_episodic_vault_config, tmp_path):
+def test_export_is_one_self_contained_file(mock_episodic_vault_config, tmp_path, monkeypatch):
     vault_router.write_episode(EPISODIC, "Content with </script> inside", entities=["Giuseppe"])
+    guess_type = server.mimetypes.guess_type
+    monkeypatch.setattr(server.mimetypes, "guess_type", lambda name: (None, None) if name.endswith(".woff2") else guess_type(name))
 
     html = server.export(tmp_path / "memory.html").read_text(encoding="utf-8")
 
