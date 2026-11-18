@@ -10,7 +10,7 @@ All three vault types share the same infrastructure primitives: public or restri
 
 ## Semantic vaults
 
-A semantic vault is a directory of documents (`.pdf`, `.docx`, `.md`, `.txt`) and a local Chroma index next to them. `ctxvault index` extracts each document's text and cuts it into chunks in the vault's own embedding model's tokens, up to that model's input limit (254 tokens for the default model, with 15% of overlap between consecutive chunks), so every chunk is embedded whole. Markdown is chunked on its headings, and each section carries its heading path, so a chunk keeps the context it came from.
+A semantic vault is a directory of documents (`.pdf`, `.docx`, `.md`, `.txt`, `.html`, `.csv`) and a local Chroma index next to them. `ctxvault index` extracts each document's text and cuts it into chunks in the vault's own embedding model's tokens, up to that model's input limit (254 tokens for the default model, with 15% of overlap between consecutive chunks), so every chunk is embedded whole. Markdown is chunked on its headings, and each section carries its heading path, so a chunk keeps the context it came from.
 
 A query embeds the question with the same model and returns the closest chunks, each with its document, the metadata the writing agent attached, and a `similarity` in `[0, 1]`. Agents can write documents too: they are indexed the moment they are written.
 

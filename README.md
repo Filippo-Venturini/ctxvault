@@ -220,7 +220,7 @@ Five minutes from nothing to an agent that remembers. Run these from your projec
 ctxvault init notes
 ```
 
-**2. Give it something to know.** Drop `.md`, `.txt`, `.pdf` or `.docx` files into `.ctxvault/vaults/notes/` and index them.
+**2. Give it something to know.** Drop `.md`, `.txt`, `.pdf`, `.docx`, `.html` or `.csv` files into `.ctxvault/vaults/notes/` and index them.
 
 ```bash
 ctxvault index notes

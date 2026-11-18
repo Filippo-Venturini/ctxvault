@@ -98,7 +98,7 @@ async def query(vault_name: str, query: str) -> QueryResponse:
     except UnsupportedVaultOperationError as e:
         raise ValueError(e)
 
-@mcp.tool(description="Save new information or agent-generated content to a semantic vault for future retrieval. Use this only with semantic vaults, to persist important context, summaries, or notes that should be remembered across sessions. Supports .txt, .md, and .docx formats.")
+@mcp.tool(description="Save new information or agent-generated content to a semantic vault for future retrieval. Use this only with semantic vaults, to persist important context, summaries, or notes that should be remembered across sessions. Supports .txt, .md, .docx, .html, and .csv formats.")
 async def write_doc(vault_name: str, file_path: str, content: str, generated_by: str, overwrite: bool = False)-> WriteDocResponse:
     await ensure_warmup()
     
