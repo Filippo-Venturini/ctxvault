@@ -583,7 +583,7 @@ The report is grouped by reason, and each finding carries the signal behind it, 
 
 The threshold depends on the embedding model. A vault pinned to a model with no known default gets no `duplicate_partial` check until a threshold is given, and the report says so.
 
-**Agent-written documents.** Only a document an agent wrote, and nobody has edited since, can ever be pruned unattended. That means its metadata carries both `generated_by` and `timestamp` (the MCP `write_doc` tool sets both), and its file has not changed after `timestamp`. A document with `generated_by` but no `timestamp` (the Python client takes free-form `agent_metadata`) counts as human-written. Copying or cloning a vault resets file modification times, which makes every document human-written: nothing is auto-pruned, which is the safe way to be wrong. Human-written documents are reported as *needs a human, use --doc*.
+**Agent-written documents.** Only a document an agent wrote, and nobody has edited since, can ever be pruned unattended. That means its metadata carries both `generated_by` and `timestamp` (the MCP `write_doc` tool sets both), and its file has not changed after `timestamp`. A document with `generated_by` but no `timestamp` (the Python client takes free-form `agent_metadata`) counts as human-written. Copying or cloning a vault resets file modification times, which makes every document human-written: nothing is auto-pruned, which is the safe way to be wrong. Human-written documents are reported as *needs a human*.
 
 **Example:**
 ```bash

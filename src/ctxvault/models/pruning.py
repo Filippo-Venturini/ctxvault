@@ -16,7 +16,7 @@ class PruneMode(str, Enum):
     AUTO = "auto"        # applied unattended, when the target is auto-allowed
 
 class PruneAction(str, Enum):
-    ARCHIVE = "archive"        # semantic: move the file to .archive/ and drop it from the index
+    ARCHIVE = "archive"        # semantic: move the file to .ctxvault-archive/ and drop it from the index
     INVALIDATE = "invalidate"  # episodic, later: maps onto invalidate_episode
     NONE = "none"              # reported only: nothing to apply
 

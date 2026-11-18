@@ -167,7 +167,7 @@ def _print_prune_report(name: str, report, vault_path: Path) -> None:
         if c.auto_allowed:
             return "auto"
         if c in report.held:
-            return "needs a human, use --doc"
+            return "needs a human"
         return ""
 
     counts = report.counts

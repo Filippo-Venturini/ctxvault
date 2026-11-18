@@ -9,7 +9,7 @@ from ctxvault.utils.text_extraction import SUPPORTED_EXT
 
 # Where pruned files wait to be restored or purged, inside the vault and
 # outside everything that walks it.
-ARCHIVE_DIR = ".archive"
+ARCHIVE_DIR = ".ctxvault-archive"
 
 class BaseVault(ABC):
     supported_operations: frozenset[VaultOperation] = frozenset()

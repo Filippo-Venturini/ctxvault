@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 from ctxvault.cli.app import app
 from ctxvault.core import vault_router
 from ctxvault.core.exceptions import UnsupportedVaultOperationError
+from ctxvault.core.vaults.base import ARCHIVE_DIR
 from ctxvault.models.pruning import PruneAction, PrunePolicy
 from ctxvault.storage import chroma_store
 
@@ -268,18 +269,20 @@ def test_other_vault_types_do_not_prune_yet(fixture, request):
 def test_the_archive_is_outside_every_walk_of_the_vault(mock_vault_config, monkeypatch):
     from ctxvault.core.vaults.semantic import SemanticVault
     kept = write(mock_vault_config / "kept.txt", "kept")
-    archived = write(mock_vault_config / ".archive" / "old.txt", "archived")
+    # A user's own .archive/ is ordinary content; only ctxvault's archive is skipped.
+    users = write(mock_vault_config / ".archive" / "notes.txt", "my old notes")
+    archived = write(mock_vault_config / ARCHIVE_DIR / "old.txt", "archived")
     monkeypatch.setattr(chroma_store, "get_all_metadatas", lambda config: [])
     indexed = []
     monkeypatch.setattr(SemanticVault, "index_file", lambda self, file_path, agent_metadata=None: indexed.append(str(file_path)))
 
     vault_router.index_files("test_vault")
-    assert indexed == [str(kept)]
-    assert vault_router.index_status("test_vault").unindexed == [str(kept)]
+    assert sorted(indexed) == sorted([str(kept), str(users)])
+    assert sorted(vault_router.index_status("test_vault").unindexed) == sorted([str(kept), str(users)])
 
     monkeypatch.setattr("ctxvault.core.indexer.delete_file", lambda file_path, config: None)
     vault_router.delete_files("test_vault")
-    assert archived.exists() and not kept.exists()
+    assert archived.exists() and not kept.exists() and not users.exists()
 
 def test_delete_file_on_a_file_already_gone_does_not_raise(mock_vault_config):
     vault = vault_router.open_vault("test_vault")
@@ -300,7 +303,7 @@ def test_cli_prune_groups_by_reason_and_changes_nothing(mock_vault_config, colle
     out = result.stdout
     assert "── DUPLICATE" in out and "identical document" in out and "── STALE" in out
     assert "notes/setup.md" in out and "keep" in out
-    assert "needs a human, use --doc" in out
+    assert "needs a human" in out
     assert "Nothing was changed." in out
 
 def test_cli_prune_json_and_older_than(mock_vault_config, collection):
