@@ -119,13 +119,19 @@ def mark_built(config: dict, when: str) -> None:
 
 
 def _match_expression(query: str) -> str:
-    """The query as an OR of quoted words.
+    """The query as an AND of quoted words.
 
     FTS5 has its own grammar: a bare `ctxvault.foo(bar)` is a syntax error, and
     an identifier is what this leg exists for. Quoting every word keeps the
-    user's text from being parsed as operators."""
+    user's text from being parsed as operators.
+
+    AND, not OR: a prose question shares one common word with thousands of
+    chunks, and those matches displaced the vector leader on CoSQA and
+    StackOverflow-QA. Requiring every term makes the leg silent unless the
+    whole query is there, which is exactly the identifier case; single-token
+    queries are unchanged."""
     words = re.findall(r"\w+", query, flags=re.UNICODE)
-    return " OR ".join(f'"{word}"' for word in words)
+    return " AND ".join(f'"{word}"' for word in words)
 
 
 def search(config: dict, query: str, limit: int) -> list[dict]:

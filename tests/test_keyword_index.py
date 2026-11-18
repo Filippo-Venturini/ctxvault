@@ -45,12 +45,23 @@ def test_deleting_a_document_takes_its_chunks_with_it(tmp_path):
 
 def test_fts_operators_in_the_query_are_words_not_syntax(tmp_path):
     config = _config(tmp_path)
-    keyword_index.upsert(config, ["c1"], [_chunk("c1", "ctxvault core keyword index")],
-                         ["ctxvault core keyword index"])
+    keyword_index.upsert(config, ["c1"], [_chunk("c1", "ctxvault foo bar core keyword index")],
+                         ["ctxvault foo bar core keyword index"])
 
     # A bare query like this is an FTS5 syntax error; the leg must not raise.
     assert keyword_index.search(config, "ctxvault.foo(bar)", limit=5) != []
     assert keyword_index.search(config, '"', limit=5) == []
+
+
+def test_a_multi_word_query_needs_every_word(tmp_path):
+    """OR matched one common word and pulled in chunks that shared nothing else;
+    AND keeps the leg for queries whose words all appear."""
+    config = _config(tmp_path)
+    keyword_index.upsert(config, ["c1"], [_chunk("c1", "alpha only", doc_id="d1")], ["alpha only"])
+    keyword_index.upsert(config, ["c2"], [_chunk("c2", "alpha beta", doc_id="d2")], ["alpha beta"])
+
+    hits = keyword_index.search(config, "alpha beta", limit=5)
+    assert [hit["chunk_id"] for hit in hits] == ["c2"]
 
 
 def test_rebuild_reads_the_collection_and_marks_the_index(tmp_path, monkeypatch):
