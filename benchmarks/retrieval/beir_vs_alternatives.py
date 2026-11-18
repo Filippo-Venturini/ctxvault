@@ -91,6 +91,14 @@ def _query_ctxvault(query_txt: str, config: dict, n_results: int = 20) -> dict:
     return query(query_txt=query_txt, config=config, n_results=n_results)
 
 
+def _query_ctxvault_hybrid(query_txt: str, config: dict, n_results: int = 20) -> dict:
+    """The same vault and index, ranking by the keyword leg as well; only the
+    query path differs, so the comparison isolates fusion, not indexing."""
+    from ctxvault.core.vaults.semantic import SemanticVault
+    result = SemanticVault("bench", config).query(text=query_txt, n_results=n_results, hybrid=True)
+    return {"metadatas": [[{"source": chunk.source} for chunk in result.results]]}
+
+
 # ---------------------------------------------------------------------------
 # Strategy 2: ChromaDB raw (direct usage, no CtxVault)
 # ---------------------------------------------------------------------------
@@ -299,6 +307,12 @@ def run_single_strategy(
 # Main
 # ---------------------------------------------------------------------------
 
+def _strategy_key(label: str) -> str:
+    if label.startswith("CtxVault"):
+        return "ctxvault_hybrid" if "hybrid" in label else "ctxvault"
+    return label.split("(")[0].strip().lower().replace(" ", "_")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="BEIR benchmark: CtxVault vs ChromaDB vs LangChain"
@@ -310,6 +324,12 @@ def main():
     )
     parser.add_argument(
         "--top-k", nargs="+", type=int, default=[5, 10],
+    )
+    parser.add_argument(
+        "--strategies", nargs="+",
+        choices=["chromadb", "langchain", "ctxvault", "ctxvault_hybrid"],
+        help="Which systems to run; default all. The two CtxVault rows share an "
+             "indexing pipeline and differ only in the query path.",
     )
     args = parser.parse_args()
 
@@ -323,7 +343,11 @@ def main():
         ("ChromaDB (raw)",       _index_chromadb_raw, _query_chromadb_raw),
         ("LangChain retriever",  _index_langchain,    _query_langchain),
         ("CtxVault (full)",      _index_ctxvault,     _query_ctxvault),
+        ("CtxVault (hybrid)",    _index_ctxvault,     _query_ctxvault_hybrid),
     ]
+    if args.strategies:
+        wanted = set(args.strategies)
+        strategies = [s for s in strategies if _strategy_key(s[0]) in wanted]
 
     for ds_name in args.datasets:
         print(f"\n{'=' * 70}")

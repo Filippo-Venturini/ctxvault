@@ -1,3 +1,6 @@
+import warnings
+
+
 def index_file(file_path: str, config: dict, agent_metadata: dict | None = None)-> dict:
     from ctxvault.utils.text_extraction import extract_text
     from ctxvault.core.identifiers import get_doc_id
@@ -22,6 +25,8 @@ def index_file(file_path: str, config: dict, agent_metadata: dict | None = None)
                                                   agent_metadata=agent_metadata, repeated_words=[c.repeated_words for c in chunks])
 
     add_document(ids=chunk_ids, embeddings=embeddings, metadatas=metadatas, chunks=[c.text for c in chunks], config=config)
+    _update_keyword_index(config=config, chunk_ids=chunk_ids, metadatas=metadatas,
+                          texts=[c.text for c in chunks])
 
 def delete_file(file_path: str, config: dict)-> None:
     from ctxvault.core.identifiers import get_doc_id
@@ -29,6 +34,7 @@ def delete_file(file_path: str, config: dict)-> None:
 
     doc_id = get_doc_id(path=file_path)
     delete_document(doc_id=doc_id, config=config)
+    _update_keyword_index(config=config, doc_id=doc_id)
 
 def reindex_file(file_path: str, config: dict)->None:
     from ctxvault.core.identifiers import get_doc_id
@@ -55,3 +61,24 @@ def _extract_agent_metadata(metadatas: list[dict | None]) -> dict | None:
         if custom:
             return custom
     return None
+
+
+def _update_keyword_index(config: dict, chunk_ids: list[str] | None = None,
+                          metadatas: list[dict] | None = None, texts: list[str] | None = None,
+                          doc_id: str | None = None) -> None:
+    """Keep the keyword cache in step with the vector store.
+
+    It is derived: the collection is the source of truth and a rebuild can always
+    replace it, so a failure here must not fail the write it mirrors. It is not
+    allowed to pass silently either, or a broken leg would only show up as worse
+    ranking, so it warns and the next hybrid query rebuilds."""
+    from ctxvault.core import keyword_index
+
+    try:
+        if doc_id is not None:
+            keyword_index.delete_document(config=config, doc_id=doc_id)
+        else:
+            keyword_index.upsert(config=config, chunk_ids=chunk_ids, metadatas=metadatas, texts=texts)
+    except Exception as exc:
+        warnings.warn(f"keyword index not updated ({exc}); the next hybrid query rebuilds it", RuntimeWarning,
+                      stacklevel=2)

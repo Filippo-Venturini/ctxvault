@@ -35,6 +35,7 @@ class QueryRequest(BaseModel):
     query: str
     filters: dict | None = None
     n_results: int = Field(default=5, ge=1, le=100)
+    hybrid: bool | None = None
 
 class QueryResponse(BaseModel):
     results: list[ChunkMatch]

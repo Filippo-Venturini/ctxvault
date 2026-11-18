@@ -36,6 +36,17 @@ python benchmarks/retrieval/beir_vs_alternatives.py
 python benchmarks/retrieval/coir_vs_alternatives.py
 ```
 
+Both scripts include a `CtxVault (hybrid)` row: the same chunks and index as
+`CtxVault (full)`, with the keyword leg fused in at query time. To compare only
+the two CtxVault rows (one indexing pass each, same pipeline), pass:
+
+```bash
+python benchmarks/retrieval/beir_vs_alternatives.py --datasets nfcorpus scifact \
+    --strategies ctxvault ctxvault_hybrid
+python benchmarks/retrieval/coir_vs_alternatives.py --datasets cosqa stackoverflow-qa \
+    --strategies ctxvault ctxvault_hybrid
+```
+
 ### Results
 
 Tested on BEIR (NFCorpus, SciFact) and CoIR (CoSQA, StackOverflow-QA). CtxVault introduces no retrieval overhead compared to raw ChromaDB or LangChain.
@@ -63,6 +74,47 @@ Tested on BEIR (NFCorpus, SciFact) and CoIR (CoSQA, StackOverflow-QA). CtxVault 
 |                  | CtxVault (full)     | 18.9% | 94.4% | 0.8881 | 0.9023 |
 
 CtxVault matches or marginally exceeds ChromaDB and LangChain across all datasets and metrics. The vault abstraction adds no measurable retrieval overhead.
+
+## Hybrid retrieval
+
+The two scripts above add a `CtxVault (hybrid)` row: same chunks and index as
+`CtxVault (full)`, with the FTS5 keyword leg fused by reciprocal rank fusion at
+query time. Run only the two CtxVault rows (one indexing pass each):
+
+```bash
+python benchmarks/retrieval/beir_vs_alternatives.py --datasets nfcorpus scifact \
+    --strategies ctxvault ctxvault_hybrid
+python benchmarks/retrieval/coir_vs_alternatives.py --datasets cosqa stackoverflow-qa \
+    --strategies ctxvault ctxvault_hybrid
+```
+
+**BEIR** (document-level metrics, same `all-MiniLM-L6-v2`):
+
+| Dataset  | Mode        | P@5   | R@5   | MRR    | nDCG@5 | R@10  | p50    |
+|----------|-------------|-------|-------|--------|--------|-------|--------|
+| NFCorpus | vector-only | 32.4% | 9.7% | 0.5100 | 0.3669 | 12.9% | 15.1ms |
+|          | hybrid      | 34.4% | 12.0% | 0.5333 | 0.3943 | 15.4% | 55.5ms |
+| SciFact  | vector-only | 18.0% | 80.0% | 0.6990 | 0.7214 | 85.0% | 12.6ms |
+|          | hybrid      | 18.0% | 80.0% | 0.6990 | 0.7214 | 85.0% | 50.9ms |
+
+**CoIR** (5 000 documents per dataset):
+
+| Dataset          | Mode        | P@5   | R@5   | MRR    | nDCG@5 | R@10  | p50    |
+|------------------|-------------|-------|-------|--------|--------|-------|--------|
+| CoSQA            | vector-only | 13.3% | 66.4% | 0.4562 | 0.5079 | 78.4% | 10.8ms |
+|                  | hybrid      | 13.3% | 66.4% | 0.4560 | 0.5078 | 78.4% | 43.4ms |
+| StackOverflow-QA | vector-only | 19.0% | 94.9% | 0.9023 | 0.9142 | 96.6% | 26.6ms |
+|                  | hybrid      | 19.0% | 95.0% | 0.9026 | 0.9145 | 96.7% | 68.8ms |
+
+The keyword leg requires every query term (`AND`), not any one (`OR`). With
+`OR`, CoSQA and StackOverflow-QA lost 9–10 points of R@5: a prose question
+shares one common word with thousands of chunks and those hits displaced the
+vector leader. With `AND` the leg is silent unless the whole query is present,
+so CoIR is neutral and the NFCorpus gain survives; single-token queries such as
+`ERR_4021` behave exactly as before.
+
+The index is built during `reindex` or the first hybrid query; 5 000 chunks cost
+1.85 s to write, 3.4 ms to search and 1.5 MB on disk.
 
 ## Internal benchmarks
 

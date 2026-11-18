@@ -215,6 +215,20 @@ def set_embedding_model(vault_name: str, model_name: str) -> None:
     _save_config(data=config, root=save_root)
 
 
+def set_hybrid_search(vault_name: str, enabled: bool) -> None:
+    """The vault owner's answer to "should this vault rank by exact words too".
+    An agent on MCP does not know; a per-query flag still overrides it."""
+    global_config, local_config, local_root = _load_config()
+
+    scope = _get_vault_scope(vault_name, global_config, local_config)
+    if scope is None:
+        raise VaultNotFoundError(f"Vault '{vault_name}' does not exist.")
+
+    config, save_root = _editable_config(scope, local_root)
+    config["vaults"][vault_name]["hybrid_search"] = enabled
+    _save_config(data=config, root=save_root)
+
+
 def detach_agent_from_vault(vault_name: str, agent_name: str) -> None:
     global_config, local_config, local_root = _load_config()
 

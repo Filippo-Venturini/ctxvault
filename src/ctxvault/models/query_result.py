@@ -15,7 +15,15 @@ class ChunkMatch(BaseModel):
     # What the writing agent attached to the document: every chunk metadata
     # key beyond the indexer's own.
     metadata: dict = Field(default_factory=dict)
+    # The reciprocal-rank-fusion value when the query also used the keyword leg:
+    # higher is better, and it is what hybrid results are ordered by. None on
+    # a vector-only result, where `score` still ranks.
+    rank_score: float | None = None
 
 class QueryResult(BaseModel):
     query: str
     results: list[ChunkMatch]
+    # "hybrid" when the keyword leg was consulted and contributed to the
+    # ranking, "vector" otherwise. `score` keeps its meaning either way; a
+    # hybrid result carries `rank_score` and its order follows it.
+    mode: str = "vector"

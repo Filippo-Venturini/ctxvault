@@ -82,3 +82,13 @@ def get_document_records(doc_id: str, config: dict) -> dict:
         where={"doc_id": doc_id},
         include=["documents", "metadatas"],
     )
+
+def count(config: dict) -> int:
+    """How many chunks the collection holds: the keyword index should match it."""
+    return get_collection(config=config).count()
+
+def records_by_ids(ids: list[str], config: dict) -> dict:
+    """The chunks the keyword leg found but the vector leg did not return:
+    text, metadata and the embedding needed to give them a real distance."""
+    collection = get_collection(config=config)
+    return collection.get(ids=ids, include=["embeddings", "documents", "metadatas"])

@@ -4,6 +4,7 @@ from ctxvault.models.documents import SemanticDocumentInfo, SkillDocumentInfo
 from ctxvault.models.vaults import VaultType
 import typer
 from ctxvault.core import vault_router
+from ctxvault.utils import config as config_utils
 from ctxvault.core.exceptions import PathOutsideVaultError, VaultAlreadyExistsError, VaultNotFoundError, VaultTypeNotValidError
 
 app = typer.Typer()
@@ -64,6 +65,20 @@ def init(name: str = typer.Argument("my-vault"), type: str = typer.Option(VaultT
         raise typer.Exit(1)
 
 @app.command()
+def config(name: str = typer.Argument("my-vault"),
+           hybrid_search: bool | None = typer.Option(None, "--hybrid-search/--no-hybrid-search",
+               help="Rank queries by the keyword index as well as the vectors, for everyone using this vault.")):
+    """Show or change one vault's settings. `hybrid_search` is the vault owner's
+    call: an agent on MCP will not know to pass --hybrid, and should not have to."""
+    try:
+        if hybrid_search is not None:
+            config_utils.set_hybrid_search(vault_name=name, enabled=hybrid_search)
+        typer.echo(f"hybrid_search: {bool(config_utils.get_vault_config(name).get('hybrid_search', False))}")
+    except Exception as e:
+        typer.secho(f"Error reading config: {e}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+
+@app.command()
 def index(name: str = typer.Argument("my-vault"), path: str = typer.Option(None, "--path")):
     try:
         indexed_files, skipped_files = vault_router.index_files(vault_name=name, path=path)
@@ -81,9 +96,10 @@ def index(name: str = typer.Argument("my-vault"), path: str = typer.Option(None,
         raise typer.Exit(1)
     
 @app.command()
-def query(name: str = typer.Argument("my-vault"), text: str = typer.Argument(""), limit: int = typer.Option(5, "--limit", "-n", help="Number of chunks to return")):
+def query(name: str = typer.Argument("my-vault"), text: str = typer.Argument(""), limit: int = typer.Option(5, "--limit", "-n", help="Number of chunks to return"),
+          hybrid: bool = typer.Option(None, "--hybrid/--no-hybrid", help="Rank by the keyword index as well as the vectors; defaults to the vault's setting")):
     try:
-        result = vault_router.query(text=text, vault_name=name, n_results=limit)
+        result = vault_router.query(text=text, vault_name=name, n_results=limit, hybrid=hybrid)
         if not result.results:
             typer.secho("No results found.", fg=typer.colors.YELLOW)
             return
@@ -94,6 +110,8 @@ def query(name: str = typer.Argument("my-vault"), text: str = typer.Argument("")
         for idx, chunk in enumerate(result.results, 1):
             typer.secho(f"\n[{idx}] ", fg=typer.colors.CYAN, bold=True, nl=False)
             score = f"similarity: {chunk.similarity:.3f}" if chunk.similarity is not None else f"distance: {chunk.score:.3f}"
+            if chunk.rank_score is not None:
+                score = f"fusion: {chunk.rank_score:.4f} ({score})"
             typer.secho(score, fg=typer.colors.MAGENTA)
             typer.secho(f"    ▸ {chunk.source} ", fg=typer.colors.BLUE, nl=False)
             typer.echo(f"(chunk {chunk.chunk_index})")
