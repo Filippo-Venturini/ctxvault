@@ -41,7 +41,9 @@ def read(path: Path) -> tuple[list[dict], list[str]]:
     """(rows, breaks). Every break is said; an empty list means the log holds."""
     if not path.exists():
         return [], []
-    data = path.read_bytes().decode("utf-8")
+    return _parse(path.read_bytes().decode("utf-8"))
+
+def _parse(data: str) -> tuple[list[dict], list[str]]:
     if data and not data.endswith("\n"):
         return [], ["torn tail: the last line is unterminated"]
     rows, breaks, prev = [], [], GENESIS
@@ -91,15 +93,19 @@ def now() -> str:
 def append(path: Path, kind: str, who: str, **fields) -> dict:
     """One row on the log, under a lock, fsynced."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+", encoding="utf-8", newline="") as f:
+    with path.open("a+b") as f:
         _lock(f)
-        rows, breaks = read(path)  # the true tail, read under the lock
+        # The true tail, read under the lock and through the handle that holds
+        # it: a Windows lock is mandatory, and a second handle may not read
+        # the locked byte. Writes in append mode still go to the end.
+        f.seek(0)
+        rows, breaks = _parse(f.read().decode("utf-8"))
         if breaks:
             raise PruneLogBroken(f"The prune log at {path} does not chain ({'; '.join(breaks)}).")
         row = {"n": len(rows), "kind": kind, "who": who, "at": fields.pop("at", None) or now(), **fields}
         row["prev"] = rows[-1]["hash"] if rows else GENESIS
         row["hash"] = _h256(canon(row))
-        f.write(canon(row) + "\n")
+        f.write((canon(row) + "\n").encode("utf-8"))
         f.flush()
         os.fsync(f.fileno())
     return row

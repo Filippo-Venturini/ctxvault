@@ -322,3 +322,33 @@ def test_the_cli_round_trip(vault_dir):
     assert result.exit_code == 0 and copy.exists()
 
     assert runner.invoke(app, ["prune", "test_vault", "--rule", "duplicate_partial=auto"]).exit_code == 1
+
+def test_append_works_under_a_mandatory_lock(tmp_path, monkeypatch):
+    """Windows locks are mandatory: while the log's first byte is locked, no
+    other handle may read it. Emulated here, so Linux CI catches a read that
+    goes around the locked handle."""
+    held = {"locked": False}
+
+    class FakeMsvcrt:
+        LK_LOCK = 1
+
+        @staticmethod
+        def locking(fd, mode, nbytes):
+            held["locked"] = True
+
+    real_read_bytes = Path.read_bytes
+
+    def read_bytes(self):
+        if held["locked"] and self.name == prune_log.LOG_NAME:
+            raise PermissionError(13, "Permission denied")
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(prune_log, "fcntl", None)
+    monkeypatch.setattr(prune_log, "msvcrt", FakeMsvcrt)
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    path = tmp_path / prune_log.LOG_NAME
+    for n in range(3):
+        prune_log.append(path, "archive", "human", target=f"x{n}")
+        held["locked"] = False   # closing the file releases it
+    rows, breaks = prune_log.read(path)
+    assert breaks == [] and [r["n"] for r in rows] == [0, 1, 2]
