@@ -282,6 +282,88 @@ def test_html_and_csv_index_query_and_reindex_like_other_formats(mock_vault_conf
     assert any(path.endswith("prices.csv") for path in reindexed)
     assert skipped == []
 
+def test_csv_semicolon_delimiter_keeps_decimal_commas(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    # Excel European locale: semicolon fields, comma decimals.
+    csv_path = tmp_path / "menu.csv"
+    csv_path.write_text("nome;prezzo\nPane;6,50\n")
+
+    text, filetype = extract_text(str(csv_path))
+
+    assert filetype == ".csv"
+    assert text == "nome: Pane, prezzo: 6,50"
+
+def test_csv_utf8_bom_is_stripped_from_first_header(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    csv_path = tmp_path / "bom.csv"
+    csv_path.write_bytes("\ufeffname,price\nSourdough,6.50\n".encode("utf-8"))
+
+    text, filetype = extract_text(str(csv_path))
+
+    assert filetype == ".csv"
+    assert text == "name: Sourdough, price: 6.50"
+    assert "\ufeff" not in text
+
+def test_csv_blank_rows_are_skipped(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    csv_path = tmp_path / "gaps.csv"
+    csv_path.write_text("name,price\nSourdough,6.50\n,\n\nBaguette,3.00\n")
+
+    text, filetype = extract_text(str(csv_path))
+
+    assert filetype == ".csv"
+    assert text == "name: Sourdough, price: 6.50\nname: Baguette, price: 3.00"
+    assert "name: , price: " not in text
+
+def test_csv_extra_cells_beyond_header_are_kept(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    csv_path = tmp_path / "wide.csv"
+    csv_path.write_text("name,price\nSourdough,6.50,fresh,daily\n")
+
+    text, filetype = extract_text(str(csv_path))
+
+    assert filetype == ".csv"
+    assert text == "name: Sourdough, price: 6.50, fresh, daily"
+
+def test_html_inline_tags_do_not_insert_spaces_inside_words(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    html = tmp_path / "inline.html"
+    html.write_text("Sour<b>dough</b> is <i>good</i>.")
+
+    text, filetype = extract_text(str(html))
+
+    assert filetype == ".html"
+    assert text == "Sourdough is good."
+    assert "Sour dough" not in text
+    assert "good ." not in text
+
+def test_htm_is_an_alias_of_html(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    htm = tmp_path / "page.htm"
+    htm.write_text("<p>Fresh <b>sourdough</b>.</p>")
+
+    text, filetype = extract_text(str(htm))
+
+    assert filetype == ".htm"
+    assert text == "Fresh sourdough."
+
+def test_html_skips_noscript_and_template(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    html = tmp_path / "hidden.html"
+    html.write_text(
+        "<p>Visible</p>"
+        "<noscript>Enable JavaScript</noscript>"
+        "<template><p>Draft only</p></template>"
+        "<p>Also visible</p>"
+    )
+
+    text, filetype = extract_text(str(html))
+
+    assert filetype == ".html"
+    assert text == "Visible Also visible"
+    assert "Enable JavaScript" not in text
+    assert "Draft only" not in text
+
 def test_a_markdown_continuation_repeats_its_heading_path_and_its_overlap():
     from ctxvault.utils.chuncking import chunk_text
     body = " ".join(f"w{i}" for i in range(10))

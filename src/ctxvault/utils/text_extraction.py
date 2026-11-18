@@ -6,14 +6,27 @@ import csv
 import hashlib
 from html.parser import HTMLParser
 
-SUPPORTED_EXT = {'.txt', '.md', '.pdf', '.docx', '.html', '.csv'}
+SUPPORTED_EXT = {'.txt', '.md', '.pdf', '.docx', '.html', '.htm', '.csv'}
 
 # Tags whose contents are not readable document text.
-_HTML_SKIP_TAGS = frozenset({'script', 'style'})
+_HTML_SKIP_TAGS = frozenset({'script', 'style', 'noscript', 'template'})
+
+# Block / break elements: insert a word separator around these so adjacent
+# blocks do not glue together. Inline tags are concatenated as they are.
+_HTML_BLOCK_TAGS = frozenset({
+    'address', 'article', 'aside', 'blockquote', 'body', 'br', 'caption',
+    'dd', 'div', 'dl', 'dt', 'fieldset', 'figcaption', 'figure', 'footer',
+    'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hr',
+    'html', 'li', 'main', 'nav', 'ol', 'p', 'pre', 'section', 'table',
+    'tbody', 'td', 'tfoot', 'th', 'thead', 'title', 'tr', 'ul',
+})
+
+# Marker inserted at block boundaries; never appears in HTML text nodes.
+_HTML_BLOCK_SEP = '\0'
 
 
 class _ReadableHTMLExtractor(HTMLParser):
-    """Collect visible text; drop scripts, styles and all markup."""
+    """Collect visible text; drop scripts/styles and separate only on blocks."""
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -21,21 +34,39 @@ class _ReadableHTMLExtractor(HTMLParser):
         self._skip_depth = 0
 
     def handle_starttag(self, tag: str, attrs) -> None:
-        if tag.lower() in _HTML_SKIP_TAGS:
+        tag = tag.lower()
+        if tag in _HTML_SKIP_TAGS:
             self._skip_depth += 1
+            return
+        if self._skip_depth == 0 and tag in _HTML_BLOCK_TAGS:
+            self._parts.append(_HTML_BLOCK_SEP)
 
     def handle_endtag(self, tag: str) -> None:
-        if tag.lower() in _HTML_SKIP_TAGS and self._skip_depth > 0:
-            self._skip_depth -= 1
+        tag = tag.lower()
+        if tag in _HTML_SKIP_TAGS:
+            if self._skip_depth > 0:
+                self._skip_depth -= 1
+            return
+        if self._skip_depth == 0 and tag in _HTML_BLOCK_TAGS:
+            self._parts.append(_HTML_BLOCK_SEP)
+
+    def handle_startendtag(self, tag: str, attrs) -> None:
+        # Void / self-closing tags (e.g. <br/>): treat like a block break.
+        tag = tag.lower()
+        if tag in _HTML_SKIP_TAGS:
+            return
+        if self._skip_depth == 0 and tag in _HTML_BLOCK_TAGS:
+            self._parts.append(_HTML_BLOCK_SEP)
 
     def handle_data(self, data: str) -> None:
         if self._skip_depth == 0 and data:
             self._parts.append(data)
 
     def text(self) -> str:
-        # Join discrete text nodes with a space so adjacent tags (</h1><p>)
-        # do not glue words together, then collapse leftover whitespace.
-        return " ".join(part.strip() for part in self._parts if part.strip())
+        # Concatenate inline text as-is; only block boundaries become spaces.
+        joined = "".join(self._parts)
+        chunks = [chunk.strip() for chunk in joined.split(_HTML_BLOCK_SEP) if chunk.strip()]
+        return " ".join(chunks)
 
 def _extract_from_txt(path: str)->str:
     try:
@@ -85,21 +116,37 @@ def _extract_from_html(path: str)->str:
     except Exception as e:
         raise ExtractionError(f"Failed to extract .html {path}: {e}")
 
+def _detect_csv_delimiter(sample: str) -> str:
+    """Sniff comma / semicolon / tab / pipe; fall back to comma."""
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=',;\t|')
+        return dialect.delimiter
+    except csv.Error:
+        return ','
+
 def _extract_from_csv(path: str)->str:
     # One retrievable line per data row, with header names kept beside values:
     # "name: Sourdough, price: 6.50".
     try:
-        with open(file=path, mode='r', encoding='utf-8', newline='') as f:
-            rows = list(csv.reader(f))
+        with open(file=path, mode='r', encoding='utf-8-sig', newline='') as f:
+            sample = f.read(8192)
+            f.seek(0)
+            delimiter = _detect_csv_delimiter(sample) if sample.strip() else ','
+            rows = list(csv.reader(f, delimiter=delimiter))
         if not rows:
             return ""
         headers = rows[0]
         lines: list[str] = []
         for row in rows[1:]:
+            if not any(cell.strip() for cell in row):
+                continue
             pairs = [
                 f"{header}: {row[i] if i < len(row) else ''}"
                 for i, header in enumerate(headers)
             ]
+            # Cells past the header are kept, appended without a header name.
+            for extra in row[len(headers):]:
+                pairs.append(extra)
             lines.append(", ".join(pairs))
         return "\n".join(lines)
     except Exception as e:
@@ -119,7 +166,7 @@ def extract_text(path: str)-> tuple[str, str]:
         return _extract_from_pdf(path=path), suffix
     elif suffix == '.docx':
         return _extract_from_docx(path=path), suffix
-    elif suffix == '.html':
+    elif suffix in ('.html', '.htm'):
         return _extract_from_html(path=path), suffix
     elif suffix == '.csv':
         return _extract_from_csv(path=path), suffix
