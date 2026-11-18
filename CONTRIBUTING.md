@@ -23,6 +23,7 @@ Contributions are welcome, and if you find CtxVault useful, leaving a star is th
 - Docs updated when behavior or an interface changes (`docs/`, and the README where relevant).
 - A feature exposed on one interface (CLI, HTTP, MCP, Python client) is exposed on the others too, unless the issue says otherwise.
 - A vault created by an earlier release must keep working: storage changes need a migration and a test for it.
+- User-visible changes add an entry under Unreleased in [CHANGELOG.md](CHANGELOG.md), in the [Keep a Changelog](https://keepachangelog.com) sections: Added, Changed, Fixed. Internal refactors, tests and tooling do not need one.
 
 ### UI changes
 
