@@ -14,6 +14,7 @@ benchmarks/
   retrieval/
     beir_vs_alternatives.py         CtxVault vs ChromaDB vs LangChain on BEIR
     coir_vs_alternatives.py         CtxVault vs ChromaDB vs LangChain on CoIR
+    hybrid_vs_vector.py             vector-only vs hybrid (keyword leg fused by RRF)
 ```
 
 `internal/` benchmarks compare CtxVault's own chunking strategies against each other.
@@ -63,6 +64,23 @@ Tested on BEIR (NFCorpus, SciFact) and CoIR (CoSQA, StackOverflow-QA). CtxVault 
 |                  | CtxVault (full)     | 18.9% | 94.4% | 0.8881 | 0.9023 |
 
 CtxVault matches or marginally exceeds ChromaDB and LangChain across all datasets and metrics. The vault abstraction adds no measurable retrieval overhead.
+
+## Hybrid retrieval
+
+Vector-only versus hybrid (FTS5 keyword leg fused by reciprocal rank fusion, `--hybrid`), same chunks and same `all-MiniLM-L6-v2` model.
+
+```bash
+python benchmarks/retrieval/hybrid_vs_vector.py --datasets nfcorpus scifact
+```
+
+| Dataset  | Mode        | P@5   | R@5   | MRR    | nDCG@5 | p50    |
+|----------|-------------|-------|-------|--------|--------|--------|
+| NFCorpus | vector-only | 32.4% | 9.7%  | 0.5000 | 0.3628 | 13.3ms |
+|          | hybrid      | 33.6% | 11.4% | 0.5263 | 0.3999 | 26.1ms |
+| SciFact  | vector-only | 18.0% | 80.0% | 0.6990 | 0.7214 | 10.8ms |
+|          | hybrid      | 19.2% | 85.0% | 0.7247 | 0.7532 | 30.3ms |
+
+The first hybrid query on an existing vault builds the keyword index once (about 45s for 2 953 chunks here); later queries pay only the keyword search.
 
 ## Internal benchmarks
 
