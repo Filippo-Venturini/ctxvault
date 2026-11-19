@@ -53,15 +53,26 @@ def test_fts_operators_in_the_query_are_words_not_syntax(tmp_path):
     assert keyword_index.search(config, '"', limit=5) == []
 
 
-def test_a_multi_word_query_needs_every_word(tmp_path):
-    """OR matched one common word and pulled in chunks that shared nothing else;
-    AND keeps the leg for queries whose words all appear."""
+def test_a_common_word_is_dropped_and_the_rare_one_still_matches(tmp_path):
+    """OR over rare words: a prose word shared by most chunks would pull the
+    vector leader off its answer, so it is not a keyword term at all."""
     config = _config(tmp_path)
-    keyword_index.upsert(config, ["c1"], [_chunk("c1", "alpha only", doc_id="d1")], ["alpha only"])
-    keyword_index.upsert(config, ["c2"], [_chunk("c2", "alpha beta", doc_id="d2")], ["alpha beta"])
+    common = "how to fix the service when it times out"
+    for i in range(20):
+        keyword_index.upsert(config, [f"c{i}"], [_chunk(f"c{i}", common, doc_id=f"d{i}")], [common])
+    keyword_index.upsert(config, ["c20"], [_chunk("c20", "ERR_4021 appears on timeout", doc_id="d20")],
+                         ["ERR_4021 appears on timeout"])
 
-    hits = keyword_index.search(config, "alpha beta", limit=5)
-    assert [hit["chunk_id"] for hit in hits] == ["c2"]
+    assert [hit["chunk_id"] for hit in keyword_index.search(config, "how to fix ERR_4021", limit=5)] == ["c20"]
+    assert [hit["chunk_id"] for hit in keyword_index.search(config, "what does ERR_4021 mean?", limit=5)] == ["c20"]
+
+def test_a_query_with_only_common_words_has_no_keyword_hits(tmp_path):
+    config = _config(tmp_path)
+    text = "how to fix the service when it times out"
+    for i in range(20):
+        keyword_index.upsert(config, [f"c{i}"], [_chunk(f"c{i}", text, doc_id=f"d{i}")], [text])
+
+    assert keyword_index.search(config, "how to fix the service", limit=5) == []
 
 
 def test_rebuild_reads_the_collection_and_marks_the_index(tmp_path, monkeypatch):
@@ -177,6 +188,35 @@ def test_the_vault_setting_decides_unless_a_flag_overrides_it(tmp_path, monkeypa
     assert vault.query("x").mode == "hybrid"           # no flag: the vault says on
     assert vault.query("x", hybrid=False).mode == "vector"   # per-query override
 
+def test_turning_hybrid_search_off_removes_the_setting(mock_vault_config):
+    from ctxvault.utils.config import get_vault_config, set_hybrid_search
+    assert "hybrid_search" not in get_vault_config("test_vault")
+    set_hybrid_search("test_vault", True)
+    assert get_vault_config("test_vault")["hybrid_search"] is True
+    set_hybrid_search("test_vault", False)
+    assert "hybrid_search" not in get_vault_config("test_vault")
+
+def test_a_hybrid_query_opens_the_keyword_index_once(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    keyword_index.upsert(config, ["c1"], [_chunk("c1", "see ERR_4021")], ["see ERR_4021"])
+    keyword_index.mark_built(config, "2026-01-01T00:00:00+00:00")
+    opens = []
+    real_connect = keyword_index.connect
+
+    def counted(config):
+        opens.append(config)
+        return real_connect(config)
+
+    monkeypatch.setattr(keyword_index, "connect", counted)
+    monkeypatch.setattr(chroma_store, "query", lambda *args, **kwargs: {
+        "documents": [["see ERR_4021"]], "metadatas": [[_chunk("c1", "see ERR_4021")]],
+        "distances": [[0.1]]})
+    monkeypatch.setattr(chroma_store, "count", lambda config: 1)
+
+    SemanticVault("v", config).query("ERR_4021", n_results=1, hybrid=True)
+
+    assert len(opens) == 1            # available, built_at, count and search share it
+
 
 def _hybrid_result(text: str):
     from ctxvault.models.query_result import QueryResult
@@ -185,7 +225,7 @@ def _hybrid_result(text: str):
 
 def test_hybrid_without_fts5_answers_vector_only(tmp_path, monkeypatch):
     config = _config(tmp_path)
-    monkeypatch.setattr(keyword_index, "available", lambda config: False)
+    monkeypatch.setattr(keyword_index, "available", lambda config, connection=None: False)
 
     def fake_query(query_embedding, config, n_results=5, filters=None):
         return {"documents": [["alpha"]], "metadatas": [[_chunk("c1", "alpha")]], "distances": [[0.2]]}

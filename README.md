@@ -232,6 +232,14 @@ ctxvault index notes
 ctxvault query notes "what did we decide about pricing?"
 ```
 
+By default a query ranks by vectors alone. When the answer turns on an exact token, an error code or a symbol name, add the keyword leg for the whole vault:
+
+```bash
+ctxvault config notes --hybrid-search
+```
+
+A single query can override that with `--hybrid` or `--no-hybrid`. The same switch exists as `hybrid` on the HTTP query body, the MCP `query` tool, and `vault.query(..., hybrid=True)` in the Python client.
+
 **4. Give it to your agent.** The quickest way is MCP: add the server to your client's config (Claude Desktop, Cursor, any MCP client) and restart it. With [uv](https://docs.astral.sh/uv/) installed nothing else is needed:
 
 ```json

@@ -42,6 +42,8 @@ context = "\n".join(r["text"] for r in results)
 # Ground any LLM in it: "Context:\n{context}\n\nQ: What are our cost targets?"
 ```
 
+`/query` also accepts an optional `"hybrid": true` (or `false`) to rank by exact words as well as vectors for that one request, overriding the vault's `--hybrid-search` setting.
+
 Episodic vaults work the same way, with statements instead of documents:
 
 ```python

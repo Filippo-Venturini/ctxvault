@@ -24,6 +24,7 @@ facts.history(contact.id).chain                               # how the belief c
 
 # Semantic and procedural memory, from the same client
 memory.semantic("knowledge").query("transformer architecture", n_results=3).results
+memory.semantic("knowledge").query("ERR_4021", hybrid=True).results   # exact words too
 memory.skills("procedures").read_skill("Deploy Service").instructions
 
 # The registry, as the CLI sees it

@@ -225,7 +225,12 @@ def set_hybrid_search(vault_name: str, enabled: bool) -> None:
         raise VaultNotFoundError(f"Vault '{vault_name}' does not exist.")
 
     config, save_root = _editable_config(scope, local_root)
-    config["vaults"][vault_name]["hybrid_search"] = enabled
+    if enabled:
+        config["vaults"][vault_name]["hybrid_search"] = True
+    else:
+        # off is the default: leaving the key out keeps the shape of a vault
+        # that never set it, and the same shape the CLI's --no- flag restores.
+        config["vaults"][vault_name].pop("hybrid_search", None)
     _save_config(data=config, root=save_root)
 
 

@@ -36,6 +36,8 @@ uv tool install ctxvault        # or: pipx install ctxvault
 
 Restart your client. The agent can now query your existing vaults, write new context, and list available knowledge, all locally and all under your control.
 
+The `query` tool accepts an optional `hybrid` boolean to rank by exact words as well as vectors for one call, overriding the vault's `ctxvault config --hybrid-search` setting.
+
 **Restricted vaults:** if you are integrating programmatically and need to access a restricted vault, pass the agent name at startup:
 ```json
 {

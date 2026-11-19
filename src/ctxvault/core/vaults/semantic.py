@@ -1,4 +1,5 @@
 import math
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from ctxvault.core import indexer
@@ -238,15 +239,15 @@ class SemanticVault(BaseVault):
             warnings.warn(f"keyword index could not be built ({exc}); answering vector-only")
             return False
 
-    def _keyword_index_ready(self) -> bool:
+    def _keyword_index_ready(self, connection=None) -> bool:
         """An index that exists and still describes the collection. A crash
         between a vector write and its keyword row leaves the two counts apart;
         comparing them costs one number per side and catches that."""
         from ctxvault.core import keyword_index
 
         try:
-            if keyword_index.built_at(self.config) is not None:
-                if keyword_index.count(self.config) == chroma_store.count(self.config):
+            if keyword_index.built_at(self.config, connection) is not None:
+                if keyword_index.count(self.config, connection) == chroma_store.count(self.config):
                     return True
             return self._build_keyword_index()
         except Exception as exc:
@@ -265,12 +266,27 @@ class SemanticVault(BaseVault):
         A chunk only the keyword leg found still has an embedding, so it gets
         its real distance from a lookup by id: `score` never invents a number
         that reads as a perfect match."""
-        from ctxvault.core import embedding, keyword_index, querying
+        from ctxvault.core import keyword_index
 
-        if not keyword_index.available(self.config) or not self._keyword_index_ready():
-            # No usable keyword leg: answer exactly as before rather than fail
-            # a query over an optional one.
-            return self.query(text=text, filters=filters, n_results=n_results, hybrid=False)
+        try:
+            connection = keyword_index.connect(self.config)
+        except Exception:
+            connection = None
+        try:
+            if (connection is None or not keyword_index.available(self.config, connection)
+                    or not self._keyword_index_ready(connection)):
+                # No usable keyword leg: answer exactly as before rather than fail
+                # a query over an optional one.
+                return self.query(text=text, filters=filters, n_results=n_results, hybrid=False)
+            return self._fuse_hybrid(text, filters, n_results, keyword_index, connection)
+        finally:
+            if connection is not None:
+                connection.close()
+
+    def _fuse_hybrid(self, text: str, filters: dict | None, n_results: int,
+                     keyword_index, connection) -> QueryResult:
+        """The two-leg ranking, on the one keyword connection opened for it."""
+        from ctxvault.core import embedding, querying
 
         depth = max(20, n_results * 4)
         query_embedding = embedding.embed_list(chunks=[text], model_name=self.config.get("embedding_model"))[0]
@@ -288,7 +304,7 @@ class SemanticVault(BaseVault):
                 "rank_score": 1.0 / (60 + rank),
             }
 
-        keyword_hits = keyword_index.search(self.config, text, depth)
+        keyword_hits = keyword_index.search(self.config, text, depth, connection)
         missing = [hit for hit in keyword_hits
                    if hit["chunk_id"] not in fused and _matches_filters(hit["metadata"], filters)]
         records = chroma_store.records_by_ids([hit["chunk_id"] for hit in missing], self.config) if missing else {}

@@ -14,6 +14,8 @@ A semantic vault is a directory of documents (`.pdf`, `.docx`, `.md`, `.txt`, `.
 
 A query embeds the question with the same model and returns the closest chunks, each with its document, the metadata the writing agent attached, and a `similarity` in `[0, 1]`. Agents can write documents too: they are indexed the moment they are written.
 
+A vault can also rank by exact words, not only by meaning: `ctxvault config <vault> --hybrid-search` turns on the keyword leg, an FTS5 index beside the collection that is rebuilt from it when missing. Both legs are fused by reciprocal rank, so an error code or a symbol name can outrank a vector hit that is merely close in meaning. Words found in more than about 10% of chunks are ignored for that query, which keeps a prose question from matching thousands of chunks; a per-query `--hybrid` / `--no-hybrid` (or `hybrid` on the HTTP body, MCP tool and Python client) overrides the vault setting. Off is the default and costs nothing.
+
 The index can drift from the files: a document edited after indexing, or deleted. `ctxvault docs <vault> --status` says which documents are out of sync and which files were never indexed, and `ctxvault reindex <vault> --stale` brings the index back in line with the folder.
 
 ## Skill vaults

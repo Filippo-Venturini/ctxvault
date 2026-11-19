@@ -36,6 +36,28 @@ ctxvault init my-vault --embedding-model all-mpnet-base-v2   # custom embedding 
 
 ---
 
+## `config`
+Show or change one vault's settings. The settings live in the vault's registry entry, so every query through the CLI, HTTP, MCP or the Python client sees them.
+```bash
+ctxvault config <vault> [--hybrid-search/--no-hybrid-search]
+```
+
+**Arguments:**
+- `<vault>` - Vault name (default: `my-vault`)
+
+**Options:**
+- `--hybrid-search` - Rank queries by the keyword index as well as the vectors. On, exact identifiers (error codes, function names) can outrank a vector hit that is merely close in meaning; off, the default, is vector-only. A per-query `--hybrid` / `--no-hybrid` still overrides it.
+- `--no-hybrid-search` - Turn the keyword leg off and remove the setting, leaving the vault as if it had never been turned on.
+
+**Example:**
+```bash
+ctxvault config my-vault --hybrid-search
+ctxvault config my-vault                 # prints: hybrid_search: True
+ctxvault config my-vault --no-hybrid-search
+```
+
+---
+
 ## `attach`
 Attach an agent to a vault, granting it access. If the vault is public, attaching
 an agent automatically makes it restricted: only explicitly attached agents will

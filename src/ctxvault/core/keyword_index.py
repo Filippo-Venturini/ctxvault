@@ -14,6 +14,11 @@ from pathlib import Path
 
 DB_NAME = "keywords.sqlite3"
 SCHEMA_VERSION = "1"
+# A term that appears in more than this share of chunks is prose, not an
+# identifier: OR-ing it in pulls the vector leader off its answer. The absolute
+# floor keeps small vaults (where one chunk is 50%) from filtering every word.
+_COMMON_SHARE = 0.10
+_COMMON_FLOOR = 10
 
 _SCHEMA = (
     "CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5("
@@ -40,11 +45,19 @@ def _connect(config: dict):
     return connection
 
 
-def available(config: dict) -> bool:
+def connect(config: dict):
+    """One connection for a whole hybrid query: schema ready, caller closes it.
+    Returns None when there is nowhere to put the index."""
+    return _connect(config)
+
+
+def available(config: dict, connection=None) -> bool:
     """Whether this interpreter can build and read the index at all. False
     means SQLite without FTS5; callers then stay on the vector leg."""
     if path(config) is None:
         return False
+    if connection is not None:
+        return True
     try:
         with closing(_connect(config)) as connection:
             return True
@@ -95,16 +108,21 @@ def clear(config: dict) -> None:
         connection.execute("DELETE FROM meta")
 
 
-def count(config: dict) -> int:
+def count(config: dict, connection=None) -> int:
     if path(config) is None:
         return 0
+    if connection is not None:
+        return connection.execute("SELECT count(*) FROM chunks").fetchone()[0]
     with closing(_connect(config)) as connection:
         return connection.execute("SELECT count(*) FROM chunks").fetchone()[0]
 
 
-def built_at(config: dict) -> str | None:
+def built_at(config: dict, connection=None) -> str | None:
     if path(config) is None:
         return None
+    if connection is not None:
+        row = connection.execute("SELECT value FROM meta WHERE key = 'built_at'").fetchone()
+        return row[0] if row else None
     with closing(_connect(config)) as connection:
         row = connection.execute("SELECT value FROM meta WHERE key = 'built_at'").fetchone()
     return row[0] if row else None
@@ -118,35 +136,57 @@ def mark_built(config: dict, when: str) -> None:
         connection.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)", (SCHEMA_VERSION,))
 
 
-def _match_expression(query: str) -> str:
-    """The query as an AND of quoted words.
+def _match_expression(connection: sqlite3.Connection, query: str) -> str:
+    """The query's rare words as an OR of quoted terms; empty if none are rare.
 
     FTS5 has its own grammar: a bare `ctxvault.foo(bar)` is a syntax error, and
     an identifier is what this leg exists for. Quoting every word keeps the
     user's text from being parsed as operators.
 
-    AND, not OR: a prose question shares one common word with thousands of
-    chunks, and those matches displaced the vector leader on CoSQA and
-    StackOverflow-QA. Requiring every term makes the leg silent unless the
-    whole query is there, which is exactly the identifier case; single-token
-    queries are unchanged."""
-    words = re.findall(r"\w+", query, flags=re.UNICODE)
-    return " AND ".join(f'"{word}"' for word in words)
+    OR, but only over words that are not everywhere. An AND made the leg silent
+    for prose ("how to fix ERR_4021"), because every word had to be present in
+    one chunk; a plain OR let "how" match thousands of chunks and displace the
+    vector leader. A term found in more than ~10% of chunks carries no signal,
+    so it is dropped and the identifier is kept; a prose question with no rare
+    word produces no keyword hits at all, which leaves the vector leg alone."""
+    words = list(dict.fromkeys(re.findall(r"\w+", query, flags=re.UNICODE)))
+    if not words:
+        return ""
+    total = connection.execute("SELECT count(*) FROM chunks").fetchone()[0]
+    if total == 0:
+        return ""
+    limit = max(_COMMON_FLOOR, total * _COMMON_SHARE)
+    rare = []
+    for word in words:
+        term = f'"{word}"'
+        try:
+            found = connection.execute(
+                "SELECT count(*) FROM chunks WHERE chunks MATCH ?", (term,)
+            ).fetchone()[0]
+        except sqlite3.Error:
+            continue
+        if 0 < found <= limit:
+            rare.append(term)
+    return " OR ".join(rare)
 
 
-def search(config: dict, query: str, limit: int) -> list[dict]:
-    """The best chunks for the query's words, best first. Empty on any reason
-    to have no keyword leg, never an exception: a query must still answer."""
-    match = _match_expression(query)
-    if not match or not available(config):
-        return []
+def search(config: dict, query: str, limit: int, connection=None) -> list[dict]:
+    """The best chunks for the query's rare words, best first. Empty on any
+    reason to have no keyword leg, never an exception: a query must still
+    answer. One connection covers the frequency scan and the search."""
     try:
-        with closing(_connect(config)) as connection:
+        if connection is not None:
+            match = _match_expression(connection, query)
+            if not match:
+                return []
             rows = connection.execute(
                 "SELECT chunk_id, doc_id, chunk_index, source, metadata, text "
                 "FROM chunks WHERE chunks MATCH ? ORDER BY bm25(chunks) LIMIT ?",
                 (match, limit),
             ).fetchall()
+        else:
+            with closing(_connect(config)) as own:
+                return search(config, query, limit, own)
     except sqlite3.Error:
         return []
     return [
