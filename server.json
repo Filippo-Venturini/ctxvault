@@ -8,12 +8,12 @@
     "source": "github"
   },
   "websiteUrl": "https://filippo-venturini.github.io/ctxvault/",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "ctxvault",
-      "version": "0.9.1",
+      "version": "0.10.0",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
