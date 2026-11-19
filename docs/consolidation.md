@@ -24,7 +24,7 @@ for operation in result.operations:
 
 The model interprets, code decides how to write.
 
-1. **Turns to claims.** The model reads the turns and returns claims: a subject, a statement, who said it, whether it lasts, and a date when the conversation gave one. Each claim is validated against a schema; what does not fit is dropped.
+1. **Turns to claims.** The model reads the turns and returns claims: a subject, a statement, who said it, whether it lasts, a date when the conversation gave one, and the turns it was drawn from. Each claim is validated against a schema; what does not fit is dropped.
 2. **Candidates.** Code asks the vault what it already holds about the claim's subject, as of the time of the conversation.
 3. **Relation.** The model is shown the claim next to those candidates and returns one label and the episode it is about.
 4. **Verb.** A fixed mapping turns the label into a call:
@@ -57,7 +57,58 @@ To see what a run would do without writing anything, pass `dry_run=True`: the sa
 - **`at`**: when the conversation happened, for replaying past sessions. It becomes the transaction time of every write, and the start of validity of a claim that gives no date. Defaults to the last dated turn, else now.
 - **`kinds=["first_party"]`**: refuse claims about people other than the speaker.
 - **`provenance`**: where the turns came from, stored on every claim the model returns without one, e.g. `[{"type": "external", "source": "session-42"}]`.
+- **`turn_provenance`**: the same, per turn: item *i* is where turn *i* came from. A claim that names its turns gets the provenance of those turns; one that names none falls back to `provenance`.
 - **`run_id`**: your own identifier for the run, instead of a generated one.
+
+## Where it writes
+
+`consolidate` takes a vault you opened. `consolidate_session` takes a configuration instead: which vault the facts go to, and whether the conversations themselves are kept. The layer never links two vaults on its own; the configuration is the link, and it is plain data.
+
+**Facts only.** Nothing but the extracted facts is stored.
+
+```python
+from ctxvault.consolidation import consolidate_session, facts_only
+
+config = facts_only("assistant")                      # creates the episodic vault "assistant-facts"
+consolidate_session(config, turns, model, session_id="thread-42", source="slack://C01")
+```
+
+`source` is optional: it names where the turns came from, and is stored on each fact as external provenance, with `session_id` as its locator.
+
+**Facts and transcripts.** Each session is also written to a semantic vault, and every fact points back at the words it came from.
+
+```python
+from ctxvault.consolidation import consolidate_session, facts_and_transcripts, sources
+
+config = facts_and_transcripts("assistant")           # "assistant-facts" and "assistant-transcripts"
+result = consolidate_session(config, turns, model, session_id="42")
+
+fact = Client().episodic("assistant-facts").query_episodes("where does Giuseppe live").results[0]
+for source in sources(fact):
+    print(source.state, source.text)                  # "holds", and the chunk the fact was drawn from
+```
+
+The session is written as `sessions/42.txt` with [`write_session`](#transcripts-and-chunk-references); the same `session_id` again replaces it. The model is asked which turns each claim comes from, and the claim gets a reference to the chunks those turns start in. A claim that names no turn gets no reference: the layer does not guess. `sources(fact)` resolves the references against the transcripts as they are now, so a transcript edited since then answers `changed` and returns no text.
+
+The presets create the vaults, as `ctxvault init` would, and keep the ones that already exist. They return a `ConsolidationConfig`, which you can also write by hand for vaults you already have:
+
+```python
+from ctxvault.consolidation import ConsolidationConfig
+
+config = ConsolidationConfig(facts_vault="account-memory", transcripts_vault="calls", kinds=["first_party"])
+config.save("consolidation.json")
+config = ConsolidationConfig.load("consolidation.json")
+```
+
+| Field | Default | |
+|---|---|---|
+| `facts_vault` | required | the episodic vault facts are written to |
+| `transcripts_vault` | none | a semantic vault; unset means no conversation is stored |
+| `transcripts_dir` | `sessions` | the folder sessions are written to, inside that vault |
+| `kinds` | every kind | e.g. `["first_party"]` to refuse claims about other people |
+| `max_candidates`, `min_similarity` | 5, 0.5 | how many episodes a claim is compared with, and how close they must be |
+
+`consolidate_session` also takes `at`, `run_id` and `dry_run`, as `consolidate` does, and `agent` for restricted vaults. A dry run writes nothing, the transcript included, so its planned operations carry no chunk references.
 
 ## The model
 

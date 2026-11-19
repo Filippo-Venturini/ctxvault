@@ -16,6 +16,7 @@ Each claim is an object with these fields:
 - "confidence": a number from 0 to 1, only when the speaker was explicitly unsure ("I think", "maybe"). Leave it out otherwise.
 - "valid_from": the date the statement started being true, as YYYY-MM-DD, only when the conversation says when. Work out relative dates ("last March", "two weeks ago") from the date of the turn. Leave it out when no time is given: do not guess.
 - "valid_from_precision": required whenever "valid_from" is given. How exact the conversation was: "day", "month", "year", or "approx" for anything vaguer ("about a year ago").
+- "turns": the numbers of the turns the statement was drawn from, as a list. Every turn starts with its number. Leave it out if you cannot tell.
 
 Rules:
 

@@ -8,19 +8,13 @@ are validated here before code acts on them.
 
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, model_validator
 
 from ctxvault.consolidation.claims import Claim
+# One definition of a turn: the layer reads the same turns the core writes as
+# a session, so a transcript and the claims drawn from it cannot drift apart.
+from ctxvault.core.transcripts import Turn
 from ctxvault.models.episodes import Episode
-
-class Turn(BaseModel):
-    """One thing said in a conversation: by whom, and when if known."""
-
-    model_config = ConfigDict(str_strip_whitespace=True)
-
-    speaker: str = Field(min_length=1)
-    text: str = Field(min_length=1)
-    at: str | None = None
 
 # How a claim relates to what the vault already holds. "new" is about nothing
 # on file; "confirms" says the same thing again; "refines" says it more

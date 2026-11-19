@@ -128,11 +128,9 @@ def test_write_session_needs_a_semantic_vault(mock_episodic_vault_config):
     with pytest.raises(UnsupportedVaultOperationError):
         write_session(vault_router.open_vault("test_episodic_vault"), "s.txt", turns(1))
 
-def test_the_core_turn_has_the_layers_fields():
-    from ctxvault.consolidation.model import Turn as LayerTurn
-    assert set(Turn.model_fields) == set(LayerTurn.model_fields)
-    assert {k: v.is_required() for k, v in Turn.model_fields.items()} == \
-        {k: v.is_required() for k, v in LayerTurn.model_fields.items()}
+def test_the_layer_reads_the_core_turn():
+    from ctxvault.consolidation import Turn as LayerTurn
+    assert LayerTurn is Turn
 
 def test_session_keys_are_not_built_in():
     from ctxvault.utils.metadata_builder import BUILT_IN_METADATA_KEYS

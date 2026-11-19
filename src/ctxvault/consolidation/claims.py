@@ -89,8 +89,10 @@ class Claim(BaseModel):
     They differ whenever someone talks about a third party, which is why
     `kind` exists. `valid_from` is None when the source gave no time, in which
     case the layer uses the moment the statement was made; when it is given,
-    its precision must be too. `provenance` lists every span the claim rests
-    on: a question and its answer can sit in different chunks.
+    its precision must be too. `turns` are the positions, from 0, of the turns
+    the statement was drawn from, when the model said: with transcripts kept,
+    that is what turns into chunk references. `provenance` lists every span
+    the claim rests on: a question and its answer can sit in different chunks.
     """
 
     model_config = ConfigDict(str_strip_whitespace=True)
@@ -108,7 +110,17 @@ class Claim(BaseModel):
     )
     valid_from: str | None = None
     valid_from_precision: ValidFromPrecision | None = None
+    turns: list[Annotated[int, Field(ge=0)]] = Field(default_factory=list)
     provenance: list[Provenance] = Field(default_factory=list)
+
+    @field_validator("turns", mode="before")
+    @classmethod
+    def _turns_are_positions(cls, value: Any) -> list[int]:
+        # A citation the model got wrong costs the citation, not the claim.
+        if not isinstance(value, (list, tuple)):
+            return []
+        kept = [n for n in value if isinstance(n, int) and not isinstance(n, bool) and n >= 0]
+        return sorted(set(kept))
 
     @field_validator("valid_from")
     @classmethod
