@@ -19,7 +19,7 @@ from ctxvault import Client
 from ctxvault.consolidation import Turn, consolidate
 from ctxvault.core.vaults.episodic import EpisodicVault
 from ctxvault.core.vaults.semantic import SemanticVault
-from ctxvault.storage import sqlite_store
+from ctxvault.storage import chroma_store, sqlite_store
 
 from benchmarks.longmemeval.data import Question, Session, question_instant, to_iso
 from benchmarks.longmemeval.prompts import format_history, format_session
@@ -143,8 +143,11 @@ def memory_for(
         if config == "semantic-only":
             client.init(SEMANTIC_VAULT, "semantic", embedding_model=embedding_model)
             vault = client.semantic(SEMANTIC_VAULT)
-            ingest_semantic(vault, question.sessions)
-            return retrieve_semantic(vault, question, n_results=n_results)
+            try:
+                ingest_semantic(vault, question.sessions)
+                return retrieve_semantic(vault, question, n_results=n_results)
+            finally:
+                chroma_store.close_client(vault.config)
         if extraction_model is None:
             raise ValueError("The episodic configuration needs an extraction model.")
         client.init(EPISODIC_VAULT, "episodic", embedding_model=embedding_model)

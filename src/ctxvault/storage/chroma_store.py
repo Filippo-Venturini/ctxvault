@@ -29,6 +29,26 @@ def _get_collection(db_path: str):
 def get_collection(config: dict):
     return _get_collection(config["db_path"])
 
+def close_client(config: dict) -> None:
+    """Release this vault's cached collection and client without deleting its data.
+
+    Reopening the vault creates a fresh client. Other vaults remain open.
+    """
+    db_path = config["db_path"]
+    _collections.pop(db_path, None)
+    client = _clients.pop(db_path, None)
+    if client is None:
+        return
+    close = getattr(client, "close", None)
+    if callable(close):
+        close()
+    else:
+        # Chroma 1.3 has no Client.close(); stop and uncache only this system.
+        from chromadb.api.shared_system_client import SharedSystemClient
+
+        client._system.stop()
+        SharedSystemClient._identifier_to_system.pop(client._identifier, None)
+
 def space(config: dict) -> str:
     """How the vault's collection measures distance: "cosine" for collections
     made by this version, "l2" for older ones (Chroma's default)."""

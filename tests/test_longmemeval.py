@@ -527,7 +527,7 @@ class TestReviewRegressions:
         with pytest.raises(SystemExit, match='dataset_sha256 differs'):
             run(parse_args([*base, '--resume']))
 
-    def test_interrupted_answer_costs_are_preserved_for_resume(self, tmp_path, monkeypatch):
+    def test_interrupted_answer_is_accounted_only_when_saved_on_resume(self, tmp_path, monkeypatch):
         scripted = ScriptedClient(['Mestre', 'unknown'])
         complete = scripted.complete
 
@@ -544,14 +544,64 @@ class TestReviewRegressions:
             return scripted
 
         monkeypatch.setattr('benchmarks.longmemeval.run.ChatClient', client)
-        args = parse_args(['--config', 'full-context', '--data', str(write_mini(tmp_path / 'mini.json')),
-                           '--answer-model', 'stub', '--results-dir', str(tmp_path / 'results')])
+        base = ['--config', 'full-context', '--data', str(write_mini(tmp_path / 'mini.json')),
+                '--answer-model', 'stub', '--results-dir', str(tmp_path / 'results')]
         with pytest.raises(RuntimeError, match='interrupted'):
-            run(args)
+            run(parse_args(base))
         manifest = json.loads((tmp_path / 'results' / 'full-context-custom-stub' / 'manifest.json').read_text())
         assert manifest['question_count'] == 1
-        assert manifest['token_counts']['answer']['in'] == 20
+        assert manifest['token_counts']['answer'] == {'in': 10, 'out': 3}
+        run(parse_args([*base, '--resume']))
+        manifest = json.loads((tmp_path / 'results' / 'full-context-custom-stub' / 'manifest.json').read_text())
+        assert manifest['question_count'] == 2
+        assert manifest['token_counts']['answer'] == {'in': 20, 'out': 6}
 
+
+    @pytest.mark.parametrize('failure', ['memory', 'hypothesis'])
+    def test_failed_question_does_not_duplicate_extraction_totals_on_resume(self, tmp_path, monkeypatch, failure):
+        from benchmarks.longmemeval import run as runner
+
+        fail = [True]
+        append = runner.append_hypothesis
+
+        def memory(config, question, *, extraction_model, diagnostics, **kwargs):
+            extraction_model.usage_callback('extract', 10, 3)
+            extraction_model.usage_callback('relate', 5, 2)
+            diagnostics['sessions_consolidated'] += len(question.sessions)
+            diagnostics['claims_written'] += 1
+            if fail[0] and question.question_id == 'q_job_abs' and failure == 'memory':
+                raise RuntimeError('interrupted memory')
+            return 'memory'
+
+        def append_or_fail(path, question_id, hypothesis):
+            if fail[0] and question_id == 'q_job_abs' and failure == 'hypothesis':
+                raise RuntimeError('interrupted hypothesis')
+            append(path, question_id, hypothesis)
+
+        monkeypatch.setattr(runner, 'memory_for', memory)
+        monkeypatch.setattr(runner, 'append_hypothesis', append_or_fail)
+        monkeypatch.setattr(runner, 'ChatClient', lambda **kw: ScriptedClient(['Mestre', 'unknown'], meter=kw['meter']))
+        base = ['--config', 'episodic', '--data', str(write_mini(tmp_path / 'mini.json')),
+                '--answer-model', 'stub', '--results-dir', str(tmp_path / 'results')]
+        with pytest.raises(RuntimeError, match='interrupted'):
+            run(parse_args(base))
+        path = tmp_path / 'results' / 'episodic-custom-stub' / 'manifest.json'
+        partial = json.loads(path.read_text())
+        assert partial['question_count'] == 1
+        assert partial['extraction_diagnostics']['sessions_consolidated'] == 2
+        assert partial['token_counts']['extract'] == {'in': 10, 'out': 3}
+        assert partial['token_counts']['relate'] == {'in': 5, 'out': 2}
+        assert partial['token_counts']['answer'] == {'in': 10, 'out': 3}
+
+        fail[0] = False
+        run(parse_args([*base, '--resume']))
+        complete = json.loads(path.read_text())
+        assert complete['question_count'] == 2
+        assert complete['extraction_diagnostics']['sessions_consolidated'] == 3
+        assert complete['extraction_diagnostics']['claims_written'] == 2
+        assert complete['token_counts']['extract'] == {'in': 20, 'out': 6}
+        assert complete['token_counts']['relate'] == {'in': 10, 'out': 4}
+        assert complete['token_counts']['answer'] == {'in': 20, 'out': 6}
 
     def test_remote_judge_requires_explicit_remote_permission(self, tmp_path, monkeypatch):
         def unexpected_request(*args, **kwargs):

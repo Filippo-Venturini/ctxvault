@@ -75,14 +75,20 @@ forward, including a resume with nothing left to answer. It can extend a run
 with a larger `--limit`; it refuses a different dataset checksum, model,
 prompt version or retrieval configuration, or a selection that excludes
 already answered questions. The previous manifest is required when hypotheses
-exist, since missing historical usage cannot be reconstructed. Usage already
-recorded during an interrupted question is retained; replaying it adds the new
-attempt's usage. Missing provider usage is reported as zero, not estimated.
+exist, since missing historical usage cannot be reconstructed. Extraction and
+answer usage and extraction diagnostics are counted only after the question's
+hypothesis is saved. An interrupted question is retried without counting its
+failed attempt toward tokens per question; these totals therefore exclude
+failed-attempt costs. Wall time still includes interrupted work. Missing
+provider usage is reported as zero, not estimated.
 
 Per-question vaults live in fresh temporary children of `--workdir` (or the
 system temporary directory) and are removed immediately after their hypothesis
-is saved, before judging or ingesting another question. The caller's workdir
-and any pre-existing files in it are left alone.
+is saved, before judging or ingesting another question. Each semantic vault's
+Chroma client is released before removing its directory, including after an
+ingestion or retrieval error. Temporary-directory cleanup errors (such as
+Windows file locks) do not mask the original result or error. The caller's
+workdir and any pre-existing files in it are left alone.
 
 Merge every complete folder under results/:
 
@@ -101,7 +107,8 @@ Each run writes benchmarks/longmemeval/results/<run-name>/:
 
 The report includes the split column so oracle, `s`, `m` and custom runs remain distinguishable. A run with a missing or incomplete manifest is not merged by report. Anyone
 with API keys can open a PR that adds one complete results/<run-name>/
-folder.
+folder. Small smoke runs belong in PR discussion rather than in `results/`,
+so the default report contains full, comparable runs only.
 
 ## Token estimates
 

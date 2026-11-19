@@ -133,7 +133,7 @@ def grade_rows(questions, hypotheses: dict[str, str], labels: dict[str, dict], c
 def _work_root(path: Path | None):
     if path is not None:
         path.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="ctxvault-lme-", dir=path) as root:
+    with tempfile.TemporaryDirectory(prefix="ctxvault-lme-", dir=path, ignore_cleanup_errors=True) as root:
         yield Path(root)
 
 
@@ -218,17 +218,27 @@ def run(args: argparse.Namespace) -> Path:
             pending = [q for q in questions if q.question_id not in already]
             for index, question in enumerate(pending, start=1):
                 print(f"[{index}/{len(pending)}] {question.question_id}", flush=True)
-                with tempfile.TemporaryDirectory(prefix="question-", dir=work_root) as workdir:
-                    memory = memory_for(
-                        args.config, question, workdir=Path(workdir),
-                        extraction_model=extraction, n_results=args.n_results,
-                        embedding_model=args.embedding_model, diagnostics=diagnostics,
-                    )
-                    system, user = answer_prompt(question, memory)
-                    hypothesis = client.complete(
-                        args.answer_model, stage="answer", system=system, user=user,
-                    ).text.strip()
-                    append_hypothesis(out / HYPOTHESES, question.question_id, hypothesis)
+                with tempfile.TemporaryDirectory(prefix="question-", dir=work_root, ignore_cleanup_errors=True) as workdir:
+                    tokens_before = meter.as_io()
+                    diagnostics_before = diagnostics.copy()
+                    try:
+                        memory = memory_for(
+                            args.config, question, workdir=Path(workdir),
+                            extraction_model=extraction, n_results=args.n_results,
+                            embedding_model=args.embedding_model, diagnostics=diagnostics,
+                        )
+                        system, user = answer_prompt(question, memory)
+                        hypothesis = client.complete(
+                            args.answer_model, stage="answer", system=system, user=user,
+                        ).text.strip()
+                        append_hypothesis(out / HYPOTHESES, question.question_id, hypothesis)
+                    except BaseException:
+                        # Only completed hypotheses contribute to tokens per question.
+                        for stage, counts in tokens_before.items():
+                            meter.stage(stage).prompt = counts["in"]
+                            meter.stage(stage).completion = counts["out"]
+                        diagnostics.update(diagnostics_before)
+                        raise
                     already.add(question.question_id)
                 # The vault is gone before judging or ingesting the next question.
                 _write_manifest_and_scores(
