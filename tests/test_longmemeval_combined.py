@@ -62,6 +62,61 @@ def test_semantic_replay_does_not_retrieve_future_sessions(tmp_path, native_chro
     assert not chroma_store._clients
 
 
+@pytest.mark.parametrize('config', ['episodic', 'episodic+semantic'])
+@pytest.mark.parametrize('model_name', [None, 'test-custom-embedding'])
+def test_episodic_replay_embeds_facts_and_candidates(tmp_path, native_chroma, config, model_name):
+    from ctxvault import Client
+    from ctxvault.core.embedding import DEFAULT_EMBEDDING_MODEL
+    from ctxvault.storage import sqlite_store
+    from benchmarks.longmemeval.replay import isolated_workdir
+
+    record = parse_record({
+        'question_id': 'q_vectors', 'question_type': 'single-session-user',
+        'question': 'Where do I live?', 'answer': 'Mestre', 'question_date': '2026-02-10',
+        'haystack_session_ids': ['city', 'garden'],
+        'haystack_dates': ['2026-01-10', '2026-01-11'],
+        'haystack_sessions': [
+            [{'role': 'user', 'content': 'I live in Mestre.'}],
+            [{'role': 'user', 'content': 'Winter vegetables taste delicious.'}],
+        ],
+    })
+
+    class CandidateModel(LinkedModel):
+        candidates = None
+
+        def extract(self, turns):
+            if 'Winter' in turns[0].text:
+                return [{'subject': 'garden', 'statement': 'Winter vegetables taste delicious',
+                         'kind': 'first_party', 'turns': [0]}]
+            return super().extract(turns)
+
+        def relate(self, claim, candidates):
+            if claim.subject == 'garden':
+                self.candidates = list(candidates)
+            return {'relation': 'new'}
+
+    model = CandidateModel()
+    workdir = tmp_path / 'work'
+    kwargs = {} if model_name is None else {'embedding_model': model_name}
+    memory_for(config, record, workdir=workdir, extraction_model=model, **kwargs)
+    with isolated_workdir(workdir):
+        vault = Client().episodic('lme-facts' if config == 'episodic+semantic' else 'lme-episodic')
+        assert vault.embedding_model == (model_name or DEFAULT_EMBEDDING_MODEL)
+        rows = sqlite_store.select_episodes(vault.config)
+        assert len(rows) == 2
+        assert all(len(row['embedding']) == 384 for row in rows)
+        # The fixture's identical vectors have cosine 1.0. These words have
+        # no lexical overlap, so a keyword score cannot satisfy this check.
+        matches = vault.query_episodes('Xylophone').results
+        assert len(matches) == 2
+        assert all(match.similarity == pytest.approx(1.0) for match in matches)
+    # The garden claim has a different subject and disjoint wording. Only
+    # vector similarity can bring the city fact into consolidation candidates.
+    assert model.candidates
+    assert model.candidates[0].content == 'The user lives in Mestre'
+    assert model.candidates[0].similarity == pytest.approx(1.0)
+
+
 def test_combined_replay_puts_facts_before_cited_text_and_excludes_future(tmp_path, native_chroma):
     diagnostics = dict(sessions_consolidated=0, sessions_with_unparseable_reply=0,
                        claims_written=0, claims_rejected=0)
@@ -209,6 +264,7 @@ def test_combined_run_writes_diagnostics_and_resumes_without_calls(tmp_path, nat
     assert 'My door code is 814.' in calls[1]['messages'][-1]['content']
     manifest = json.loads((out / 'manifest.json').read_text())
     assert manifest['config'] == 'episodic+semantic'
+    assert manifest['embedding_model'] == 'sentence-transformers/all-MiniLM-L6-v2'
     assert manifest['question_count'] == 1
     assert manifest['extraction_diagnostics']['sessions_consolidated'] == 1
     assert manifest['extraction_diagnostics']['claims_written'] == 1

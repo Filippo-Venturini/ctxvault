@@ -10,6 +10,10 @@ All notable changes to CtxVault are documented here. The format follows
 
 - **Combined LongMemEval replay** (#47, #84): a fourth configuration reads facts, verified cited spans, then date-filtered transcript search for details extraction missed. Semantic-only replay now also uses date-aware `write_session` ingestion.
 
+### Fixed
+
+- LongMemEval episodic replay uses the default embedding model when `--embedding-model` is omitted, including consolidation candidate lookup and combined facts, matching the model recorded in the manifest (#84).
+
 ## [0.10.0] - 2026-11-19
 
 ### Added

@@ -31,6 +31,13 @@ day as the last session — a known LongMemEval annotation quirk — the harness
 follows the official clarification and treats the question as immediately
 after that session.
 
+Every memory vault, including episodic facts, uses
+`sentence-transformers/all-MiniLM-L6-v2` unless `--embedding-model` overrides it.
+The same model recorded in the manifest embeds facts for both retrieval and
+consolidation candidate lookup. Episodic runs made before this fix without an
+explicit embedding flag used keyword scoring despite the manifest's default
+model name; regenerate those results in a new run rather than resuming them.
+
 Combined replay creates both vaults explicitly in the fresh local registry and
 uses a `ConsolidationConfig` with `consolidate_session` to keep
 facts and source text linked by public chunk references. The fresh local
@@ -47,7 +54,17 @@ There is no score threshold across vaults.
 
 `--n-results` bounds episodes and, separately, fallback chunks in combined mode.
 An equal result count is not an equal token budget: use the reported token
-counts when comparing configurations. Both stores are closed before removing
+counts when comparing configurations. **Report `--n-results` with every result**,
+alongside the embedding model and token counts. The default of 8 is a small
+retrieval budget: with the default model's roughly 256-token chunk window,
+semantic-only can read only a fraction of even the oracle evidence. It does
+not receive the whole oracle history as full-context does. For broader evidence
+coverage, try a higher value such as `--n-results 32` and report that setting;
+keep budgets explicit when comparing runs. The default stays at 8 for cheap
+smoke runs and consistency with existing budgets, not as a claim of equal
+evidence coverage.
+
+Both stores are closed before removing
 the question's temporary directory. Answer prompt version `lme-answer-3`
 records this facts-first policy for all four configurations and prevents
 resuming an older prompt run. Runs made with `lme-answer-2` are not comparable

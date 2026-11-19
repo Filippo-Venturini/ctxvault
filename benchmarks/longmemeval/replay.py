@@ -18,6 +18,7 @@ from typing import Iterator, Literal
 
 from ctxvault import Client
 from ctxvault.consolidation import ConsolidationConfig, Turn, consolidate, consolidate_session, sources
+from ctxvault.core.embedding import DEFAULT_EMBEDDING_MODEL
 from ctxvault.core.transcripts import write_session
 from ctxvault.core.vaults.episodic import EpisodicVault
 from ctxvault.core.vaults.semantic import SemanticVault
@@ -181,6 +182,7 @@ def memory_for(
     if config not in CONFIGS:
         raise ValueError(f"Unknown configuration {config!r}.")
 
+    embedding_model = embedding_model or DEFAULT_EMBEDDING_MODEL
     with isolated_workdir(workdir):
         client = Client()
         if config == "semantic-only":
