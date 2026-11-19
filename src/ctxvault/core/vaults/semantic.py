@@ -239,8 +239,10 @@ class SemanticVault(BaseVault):
                 return None
             fingerprint = self._files_fingerprint()
             if state.get("fingerprint") == fingerprint:
-                # restart the interval: the files were checked, nothing was done
-                self._write_sync_state(fingerprint)
+                # restart the interval only when there is one to restart:
+                # with the default 0, an unchanged query must not write
+                if interval > 0:
+                    self._write_sync_state(fingerprint)
                 return None
             started = time.monotonic()
             reindexed, indexed, dropped = self.sync_index()

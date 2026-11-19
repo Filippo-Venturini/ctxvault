@@ -772,3 +772,79 @@ def test_a_whole_reindex_forgets_the_sync_fingerprint(mock_vault_config, temp_do
     vault.reindex_files()        # the full path rebuilds it
 
     assert not state.exists()
+
+def test_an_unchanged_query_does_not_rewrite_the_sync_state(mock_vault_config, monkeypatch):
+    from ctxvault.core.vaults.semantic import SemanticVault
+    from ctxvault.utils.config import set_sync_on_query
+    set_sync_on_query("test_vault", True)
+    monkeypatch.setattr(SemanticVault, "sync_index", lambda self: ([], [], []))
+    vault_router.query(text="anything", vault_name="test_vault")     # records the fingerprint
+
+    writes = []
+    monkeypatch.setattr(SemanticVault, "_write_sync_state", lambda self, fp: writes.append(fp))
+    vault_router.query(text="anything", vault_name="test_vault")
+
+    assert writes == []        # interval 0 has nothing to restart, so nothing is written
+
+def test_an_edited_file_is_indexed_before_the_query_answers(mock_vault_config, monkeypatch):
+    """End to end: edit a file, query, and the answer comes from the new text."""
+    import os
+    from ctxvault.utils.config import set_sync_on_query
+    from ctxvault.storage import chroma_store
+
+    class Collection:
+        metadata = {"hnsw:space": "cosine"}
+
+        def __init__(self):
+            self.rows = {}
+
+        def upsert(self, ids, embeddings, metadatas, documents):
+            for i, text, meta in zip(ids, documents, metadatas):
+                self.rows[i] = (text, meta)
+
+        def delete(self, where=None, ids=None):
+            if where:
+                for key, value in list(self.rows.items()):
+                    if where.get("doc_id") == value[1].get("doc_id"):
+                        self.rows.pop(key, None)
+                return
+            for i in ids or []:
+                self.rows.pop(i, None)
+
+        def get(self, where=None, include=None):
+            rows = [value for value in self.rows.values()
+                    if not where or all(value[1].get(k) == v for k, v in where.items())]
+            return {"documents": [r[0] for r in rows], "metadatas": [dict(r[1]) for r in rows]}
+
+        def query(self, query_embeddings, n_results, where=None):
+            rows = list(self.rows.values())[:n_results]
+            return {
+                "documents": [[r[0] for r in rows]],
+                "metadatas": [[dict(r[1]) for r in rows]],
+                "distances": [[0.0 for _ in rows]],
+            }
+
+    collection = Collection()
+    client = type("Client", (), {
+        "get_collection": lambda self, name: collection,
+        "create_collection": lambda self, name, metadata=None: collection,
+    })()
+    monkeypatch.setattr(chroma_store, "PersistentClient", lambda path, settings=None: client)
+    monkeypatch.setattr(chroma_store, "_clients", {})
+    monkeypatch.setattr(chroma_store, "_collections", {})
+
+    note = mock_vault_config / "note.txt"
+    note.write_text("the first version")
+    set_sync_on_query("test_vault", True)
+
+    first = vault_router.query(text="version", vault_name="test_vault")
+    assert first.sync is not None and first.sync.indexed == [str(note)]
+    assert "the first version" in first.results[0].text
+
+    note.write_text("the second version")
+    os.utime(note, (1_800_000_000, 1_800_000_000))
+
+    second = vault_router.query(text="version", vault_name="test_vault")
+    assert second.sync is not None and second.sync.reindexed == [str(note)]
+    assert "the second version" in second.results[0].text
+

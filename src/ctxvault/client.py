@@ -87,6 +87,21 @@ class Client:
     def make_public(self, name: str) -> None:
         vault_router.make_public(vault_name=name)
 
+    def set_sync_on_query(self, name: str, enabled: bool) -> None:
+        """Turn query-time sync on or off for a semantic vault.
+
+        The same setting as `ctxvault config <name> --sync-on-query/--no-sync-on-query`;
+        it is written to the vault's config, so it survives this process."""
+        from ctxvault.utils.config import set_sync_on_query
+        set_sync_on_query(name, enabled)
+
+    def set_sync_on_query_interval(self, name: str, seconds: float) -> None:
+        """Set the least time between two query-time checks; 0 checks every query.
+
+        0 removes the key, leaving a vault that never set it unchanged."""
+        from ctxvault.utils.config import set_sync_on_query_interval
+        set_sync_on_query_interval(name, seconds)
+
     # --- opening --------------------------------------------------------------
 
     def vault(self, name: str) -> SemanticVault | SkillVault | EpisodicVault:

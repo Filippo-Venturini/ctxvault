@@ -280,8 +280,7 @@ The full reference lives on the [documentation site](https://filippo-venturini.g
 - [x] Typed memory (semantic + procedural vaults)
 - [x] Episodic memory (bi-temporal statements, supersession, time travel)
 - [ ] Graph-backed semantic memory
-- [x] Index sync before query (opt-in, no watcher)
-- [ ] File watcher / auto-sync
+- [x] Index sync before query (opt-in, no file watcher)
 - [ ] Context pruning
 
 ---

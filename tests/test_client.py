@@ -104,3 +104,17 @@ def test_semantic_query_without_a_server(mock_vault_config):
     documents = Client().semantic("test_vault")
 
     assert len(documents.query("test query").results) == 1
+
+def test_client_sets_sync_on_query_without_the_cli(mock_vault_config):
+    from ctxvault.utils.config import get_vault_config
+    memory = Client()
+
+    memory.set_sync_on_query("test_vault", True)
+    memory.set_sync_on_query_interval("test_vault", 30)
+    assert get_vault_config("test_vault")["sync_on_query"] is True
+    assert get_vault_config("test_vault")["sync_on_query_interval"] == 30
+
+    memory.set_sync_on_query("test_vault", False)
+    memory.set_sync_on_query_interval("test_vault", 0)
+    assert "sync_on_query" not in get_vault_config("test_vault")
+    assert "sync_on_query_interval" not in get_vault_config("test_vault")
