@@ -51,6 +51,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Database",
     "Topic :: Text Processing :: Indexing",
@@ -109,7 +110,7 @@ where = ["src"]
 include = ["ctxvault*"]
 
 [tool.setuptools.package-data]
-ctxvault = ["ui/static/*", "ui/static/vendor/*", "ui/static/fonts/*"]
+ctxvault = ["ui/static/*", "ui/static/vendor/*", "ui/static/fonts/*", "consolidation/prompts/*/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

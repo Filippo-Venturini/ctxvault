@@ -253,7 +253,7 @@ Query an **episodic** vault. By default only statements that still hold are
 returned, ranked by recency, or by relevance when a query text is given.
 
 ```bash
-ctxvault episodes <vault> [text] [--entity <name>]... [--valid-at <iso>] [--known-at <iso>] [--all] [--disputed] [--order-by <mode>] [--limit <n>] [--stats] [--entities]
+ctxvault episodes <vault> [text] [--entity <name>]... [--valid-at <iso>] [--known-at <iso>] [--all] [--disputed] [--event-metadata <json>] [--order-by <mode>] [--limit <n>] [--stats] [--entities]
 ```
 
 **Arguments:**
@@ -271,6 +271,7 @@ ctxvault episodes <vault> [text] [--entity <name>]... [--valid-at <iso>] [--know
 - `--entities` - List the vault's entities and how often each is mentioned, instead of episodes. Honours `--all` and `--valid-at`
 - `--min-episodes <n>` - With `--entities`, hide entities mentioned fewer than `n` times
 - `--values <key>` - List the distinct values of this metadata key and how many episodes carry each, instead of episodes. Honours `--all` and `--valid-at`
+- `--event-metadata <json>` - Only episodes whose confirm, dispute, close or reopen carries these keys (JSON object). All keys must hold on the same event. A confirmation copied onto a revision still matches, so the current wording is returned too. With `--known-at`, only events recorded at or before that instant match
 
 **Example:**
 ```bash
@@ -293,7 +294,7 @@ ctxvault episode <vault> <episode_id> [--history]
 **Arguments:**
 - `<vault>` - Vault name (required)
 - `<episode_id>` - Episode id (required)
-- `--history` - Print every version of the statement, oldest first
+- `--history` - Print every version of the statement, oldest first, then any confirmations, disputes and closes on that chain (with their metadata). A confirmation copied onto a revision is listed once
 
 **Example:**
 ```bash
@@ -307,7 +308,7 @@ Close an episode: the statement stops holding, but is never deleted and stays
 reachable with `--all`, `--valid-at` or `--history`.
 
 ```bash
-ctxvault invalidate <vault> <episode_id> [--valid-to <iso>] [--reason <text>]
+ctxvault invalidate <vault> <episode_id> [--valid-to <iso>] [--reason <text>] [--metadata <json>]
 ```
 
 **Arguments:**
@@ -315,10 +316,42 @@ ctxvault invalidate <vault> <episode_id> [--valid-to <iso>] [--reason <text>]
 - `<episode_id>` - Episode id (required)
 - `--valid-to <iso>` - When it stopped holding (optional, default: now). Learning late that something ended in the past is the normal case
 - `--reason <text>` - Why it was closed; stored in the episode metadata
+- `--metadata <json>` - Optional JSON object stored with this close (run id, model, prompt version, ...); not mixed into the episode metadata
 
 **Example:**
 ```bash
 ctxvault invalidate memories 6f1c... --valid-to 2026-07-12T00:00:00+00:00 --reason "the dog died"
+```
+
+---
+
+## `reopen`
+Make a closed episode current again, without erasing the close. The close is
+recorded as an interval, so a query with `--known-at` between the close and the
+reopen still sees the episode as closed, and `episode --history` shows the
+reopen time and reason on the statement. A revised original cannot be
+reopened: attestations and disputes already moved to the revision, so
+reopen or close that instead. If the episode was superseded, the successor
+(or a later still-current one in the same chain) must already be closed;
+`reopen` will not close it for you.
+
+A dispute that ended because this side was closed becomes open again if the
+other side is still current.
+
+```bash
+ctxvault reopen <vault> <episode_id> [--at <iso>] [--reason <text>] [--metadata <json>]
+```
+
+**Arguments:**
+- `<vault>` - Vault name (required)
+- `<episode_id>` - Episode id (required); must already be closed
+- `--at <iso>` - When the reopen was recorded (optional, default: now); cannot precede the close
+- `--reason <text>` - Why it was reopened (optional)
+- `--metadata <json>` - Optional JSON object stored with this reopen (run id, model, prompt version, ...); kept on the closure as `reopen_metadata`, separate from the close's metadata
+
+**Example:**
+```bash
+ctxvault reopen memories 6f1c... --reason "the report was a false alarm"
 ```
 
 ---
@@ -328,7 +361,7 @@ Replace an episode with a corrected version. The old statement closes exactly
 where the new one opens, in one transaction, and the two stay linked.
 
 ```bash
-ctxvault supersede <vault> <episode_id> <content> [--entity <name>]... [--source <who>] [--salience <0-1>] [--valid-from <iso>]
+ctxvault supersede <vault> <episode_id> <content> [--entity <name>]... [--source <who>] [--salience <0-1>] [--valid-from <iso>] [--event-metadata <json>]
 ```
 
 **Arguments:**
@@ -339,6 +372,7 @@ ctxvault supersede <vault> <episode_id> <content> [--entity <name>]... [--source
 - `--source <who>` - Who reported the correction
 - `--salience <0-1>` - Defaults to the superseded episode's salience
 - `--valid-from <iso>` - The boundary between the two versions (optional, default: now)
+- `--event-metadata <json>` - Optional JSON object stored with this close (run id, model, prompt version, ...); not mixed into the new statement's metadata
 
 **Example:**
 ```bash
@@ -353,13 +387,14 @@ the wording can be said better: "lives in Padova" becomes "lives in Padova,
 in the Arcella". Unlike `supersede`, nothing changes in valid time: the
 revision opens where the original did and inherits its attestations, its
 entities, its salience and its metadata, and any dispute still open against
-it. The original is closed in transaction time only, with
+it. Copied attestations still match `--event-metadata`, so a query can find
+the current wording; `episode --history` lists each confirmation once. The original is closed in transaction time only, with
 `invalidation_reason: revised`: it is no longer what the vault states, it
 stays in the history, and a query with `--known-at` before the revision
 still finds it.
 
 ```bash
-ctxvault revise <vault> <episode_id> <content> [--entity <name>]... [--source <who>] [--salience <0-1>]
+ctxvault revise <vault> <episode_id> <content> [--entity <name>]... [--source <who>] [--salience <0-1>] [--event-metadata <json>]
 ```
 
 **Arguments:**
@@ -369,6 +404,7 @@ ctxvault revise <vault> <episode_id> <content> [--entity <name>]... [--source <w
 - `--entity <name>`, `-e <name>` - Entities of the revision; repeatable. Defaults to the original's
 - `--source <who>` - Who restated it. Defaults to the original's source
 - `--salience <0-1>` - Defaults to the original's salience
+- `--event-metadata <json>` - Optional JSON object stored with the close of the original (run id, model, prompt version, ...); not mixed into the new statement's metadata
 
 **Example:**
 ```bash
@@ -385,7 +421,7 @@ it when you hear something the vault already holds, instead of writing it a
 second time.
 
 ```bash
-ctxvault confirm <vault> <episode_id> [--at <iso>] [--source <who>]
+ctxvault confirm <vault> <episode_id> [--at <iso>] [--source <who>] [--metadata <json>]
 ```
 
 **Arguments:**
@@ -393,6 +429,7 @@ ctxvault confirm <vault> <episode_id> [--at <iso>] [--source <who>]
 - `<episode_id>` - Episode id (required); must still be open
 - `--at <iso>` - When it was reasserted (optional, default: now); cannot precede the episode's `valid_from`
 - `--source <who>` - Who reasserted it (optional)
+- `--metadata <json>` - Optional JSON object stored with this confirmation (run id, model, prompt version, ...)
 
 **Example:**
 ```bash
@@ -411,13 +448,14 @@ side carries the dispute over to the revision. `episodes --disputed`
 lists what is still unsettled.
 
 ```bash
-ctxvault dispute <vault> <episode_id> <other_id> [--note <text>]
+ctxvault dispute <vault> <episode_id> <other_id> [--note <text>] [--metadata <json>]
 ```
 
 **Arguments:**
 - `<vault>` - Vault name (required)
 - `<episode_id>`, `<other_id>` - The two episodes (required); both must still be open
 - `--note <text>` - Why they cannot both hold (optional)
+- `--metadata <json>` - Optional JSON object stored with this dispute (run id, model, prompt version, ...)
 
 **Example:**
 ```bash
@@ -531,6 +569,39 @@ Found 3 vaults (1 local, 2 global)
   path:               ~/.ctxvault/vaults/account-memory
 ```
 
+## `prune`
+Report what a **semantic** vault would prune, and why. Changes nothing.
+```bash
+ctxvault prune <vault> [--reason <reason>] [--doc <path>] [--threshold <0-1>] [--older-than <days>] [--json]
+```
+
+**Arguments:**
+- `<vault>` - Vault name (required)
+- `--reason <reason>` - Only this reason, repeatable: `duplicate`, `duplicate_partial`, `stale` (optional, default: all)
+- `--doc <path>` - Only this document, by its path in the vault, repeatable (optional)
+- `--threshold <0-1>` - Cosine similarity at which two chunks of different documents count as the same passage, for this report (optional, default: 0.95 for the default model)
+- `--older-than <days>` - A document is stale after this many days without its file changing, e.g. `90` or `90d` (optional, default: 180)
+- `--json` - Print the report as JSON
+
+The report is grouped by reason, and each finding carries the signal behind it, not a score:
+
+- **duplicate** - the same document under two paths: the normalized extracted text is identical. The newest file is kept; the others are what pruning would archive.
+- **duplicate_partial** - two documents that share passages, by cosine similarity over the stored embeddings. Chunks of one document overlap by design and are never compared with each other. Both sides are shown and nothing is suggested: review both.
+- **stale** - the file has not been modified in `--older-than` days. This reads the file's modification time, not when it was last indexed.
+
+The threshold depends on the embedding model. A vault pinned to a model with no known default gets no `duplicate_partial` check until a threshold is given, and the report says so.
+
+**Agent-written documents.** Only a document an agent wrote, and nobody has edited since, can ever be pruned unattended. That means its metadata carries both `generated_by` and `timestamp` (the MCP `write_doc` tool sets both), and its file has not changed after `timestamp`. A document with `generated_by` but no `timestamp` (the Python client takes free-form `agent_metadata`) counts as human-written. Copying or cloning a vault resets file modification times, which makes every document human-written: nothing is auto-pruned, which is the safe way to be wrong. Human-written documents are reported as *needs a human*.
+
+**Example:**
+```bash
+ctxvault prune my-vault
+ctxvault prune my-vault --reason stale --older-than 90d
+ctxvault prune my-vault --doc notes/setup.md --json
+```
+
+---
+
 ## Which command works on which vault
 
 | Command         | Semantic vault | Skill vault | Episodic vault |
@@ -545,9 +616,14 @@ Found 3 vaults (1 local, 2 global)
 | `episodes`      | ✗              | ✗           | ✓              |
 | `episode`       | ✗              | ✗           | ✓              |
 | `invalidate`    | ✗              | ✗           | ✓              |
+| `reopen`        | ✗              | ✗           | ✓              |
 | `supersede`     | ✗              | ✗           | ✓              |
+| `revise`        | ✗              | ✗           | ✓              |
+| `confirm`       | ✗              | ✗           | ✓              |
+| `dispute`       | ✗              | ✗           | ✓              |
 | `reindex`       | ✓              | ✗           | ✗              |
 | `delete`        | ✓              | ✗           | ✗              |
+| `prune`         | ✓              | ✗           | ✗              |
 | `vaults`        | ✓              | ✓           | ✓              |
 | `attach`        | ✓              | ✓           | ✓              |
 | `detach`        | ✓              | ✓           | ✓              |

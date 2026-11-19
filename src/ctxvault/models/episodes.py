@@ -44,6 +44,12 @@ class Episode(BaseModel):
     # change, the wording did. The revision opens where this one did and
     # carries its attestations.
     revised_by: str | None = None
+    # Derived from episode_closures: when this statement last became
+    # current again, as of `known_at` when a query asks for a past instant.
+    reopened_at: str | None = None
+    # Why it was last reopened, as of the same instant. None if it has
+    # not been reopened, or if that reopen carried no reason.
+    reopen_reason: str | None = None
 
     recall_count: int = 0
     last_recalled_at: str | None = None
@@ -78,10 +84,18 @@ class EpisodeQueryResult(BaseModel):
     results: list[EpisodeMatch]
 
 class EpisodeHistory(BaseModel):
-    """The full supersession chain an episode belongs to, oldest first."""
+    """The full supersession chain an episode belongs to, oldest first.
+
+    Event lists belong to the chain, not to a single row: confirmations,
+    disputes and closes on any version, each with the metadata the caller
+    stored on that verb.
+    """
 
     episode_id: str
     chain: list[Episode]
+    attestations: list[dict[str, Any]] = Field(default_factory=list)
+    disputes: list[dict[str, Any]] = Field(default_factory=list)
+    closures: list[dict[str, Any]] = Field(default_factory=list)
 
 class VaultEntity(BaseModel):
     """One entity the vault knows about, and how much it is talked about.

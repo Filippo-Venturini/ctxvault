@@ -23,6 +23,7 @@ Contributions are welcome, and if you find CtxVault useful, leaving a star is th
 - Docs updated when behavior or an interface changes (`docs/`, and the README where relevant).
 - A feature exposed on one interface (CLI, HTTP, MCP, Python client) is exposed on the others too, unless the issue says otherwise.
 - A vault created by an earlier release must keep working: storage changes need a migration and a test for it.
+- User-visible changes add an entry under Unreleased in [CHANGELOG.md](CHANGELOG.md), in the [Keep a Changelog](https://keepachangelog.com) sections: Added, Changed, Fixed. Internal refactors, tests and tooling do not need one.
 
 ### UI changes
 
@@ -34,6 +35,18 @@ The memory viewer has an existing visual language. A change should look like it 
 - **Reuse what exists.** Use the components, spacing, colors and typography already there. No new colors, icons, emoji, gradients, shadows or card styles.
 - **Raw values over decoration.** Show the timestamp, the reason, the id. No status pills or icons where plain text does the job.
 - **Screenshots in the PR:** before and after, same data, light and dark. UI PRs without them won't be reviewed.
+
+### Running the viewer's tests
+
+The viewer's behaviour has DOM tests under `tests/ui`. They open the real `index.html` in jsdom, run the real `data.js` / `app.js`, and drive the page the way a reader does. Node's own test runner and one dev dependency: there is still no build step.
+
+```bash
+cd tests/ui
+npm ci
+npm test
+```
+
+`pytest` stays independent of Node, and `npm test` needs no Python and no vault: it reads a fixed snapshot in `tests/ui/fixture.mjs`.
 
 ### Development setup
 

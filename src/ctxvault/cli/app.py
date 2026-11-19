@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 from ctxvault.models.documents import SemanticDocumentInfo, SkillDocumentInfo
 from ctxvault.models.vaults import VaultType
 import typer
@@ -6,6 +7,17 @@ from ctxvault.core import vault_router
 from ctxvault.core.exceptions import PathOutsideVaultError, VaultAlreadyExistsError, VaultNotFoundError, VaultTypeNotValidError
 
 app = typer.Typer()
+
+def _parse_metadata(raw: str | None) -> dict | None:
+    if raw is None:
+        return None
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(f"metadata must be a JSON object: {exc}") from exc
+    if not isinstance(value, dict):
+        raise typer.BadParameter("metadata must be a JSON object.")
+    return value
 
 def _print_vault(v: dict):
     name = v['name']
@@ -140,6 +152,107 @@ def _doc_status_command(name: str) -> None:
     if stale or found.unindexed:
         typer.secho(f"\nRun `ctxvault reindex {name} --stale` to bring the index back.", fg=typer.colors.BRIGHT_BLACK)
     typer.echo("")
+
+def _parse_days(value: str | None) -> int | None:
+    if value is None:
+        return None
+    text = value.strip().lower()
+    text = text[:-1] if text.endswith("d") else text
+    if not text.isdigit() or int(text) < 1:
+        raise typer.BadParameter(f"expected a number of days such as 90 or 90d, got {value!r}")
+    return int(text)
+
+def _rule_line(title: str, summary: str) -> None:
+    head = f"── {title} "
+    typer.secho(f"{head:─<45} {summary}", bold=True)
+
+def _print_prune_report(name: str, report, vault_path: Path) -> None:
+    def rel(source: str) -> str:
+        try:
+            return Path(source).resolve().relative_to(vault_path.resolve()).as_posix()
+        except ValueError:
+            return source
+
+    def mark(c) -> str:
+        if c.signals.get("keep"):
+            return "keep"
+        if c.auto_allowed:
+            return "auto"
+        if c in report.held:
+            return "needs a human"
+        return ""
+
+    counts = report.counts
+    typer.echo(f"\nVault: {name}  ({counts.get('documents', 0)} documents, {counts.get('chunks', 0)} chunks, "
+               f"model {report.signals.get('model', '?')})")
+    if not report.policy_enabled:
+        typer.secho("Policy: disabled. Nothing runs unattended; this shows what the default rules find.",
+                    fg=typer.colors.BRIGHT_BLACK)
+
+    groups: dict[str, list] = {}
+    for c in report.candidates:
+        if c.group:
+            groups.setdefault(c.group, []).append(c)
+    stale = [c for c in report.candidates if c.reason == "stale"]
+
+    if groups:
+        typer.echo("")
+        _rule_line("DUPLICATE", f"{len(groups)} group{'s' if len(groups) != 1 else ''}")
+        for n, members in enumerate(groups.values(), 1):
+            first = members[0]
+            if first.reason == "duplicate":
+                chunks = first.signals.get('chunks')
+                typer.echo(f"  Group {n}  identical document ({chunks} chunk{'s' if chunks != 1 else ''})")
+                width = max(len(rel(c.target)) for c in members)
+                for c in members:
+                    typer.echo(f"    {rel(c.target):<{width}}  modified {c.signals.get('modified', '?')}   {mark(c)}".rstrip())
+            else:
+                typer.echo(f"  Group {n}  cosine_sim: {first.signals.get('cosine_sim')}  "
+                           f"(threshold {first.signals.get('threshold')})")
+                width = max(len(rel(c.target)) for c in members)
+                for c in members:
+                    typer.echo(f"    {rel(c.target):<{width}}  \"{c.signals.get('preview', '')}\"  "
+                               f"{c.signals.get('matched_chunks')} of {c.signals.get('total_chunks')} chunks  "
+                               f"modified {c.signals.get('modified', '?')}")
+                typer.secho("    partial overlap: no keep hint, review both", fg=typer.colors.BRIGHT_BLACK)
+
+    if stale:
+        days = stale[0].signals.get("older_than_days")
+        typer.echo("")
+        _rule_line("STALE", f"{len(stale)} document{'s' if len(stale) != 1 else ''}  (older than {days} days)")
+        width = max(len(rel(c.target)) for c in stale)
+        for c in stale:
+            typer.echo(f"  {rel(c.target):<{width}}  modified {c.signals.get('modified', '?')}  "
+                       f"({c.signals.get('age_days')} days)   {mark(c)}".rstrip())
+
+    for note in report.notes:
+        typer.secho(f"\nNote: {note}", fg=typer.colors.YELLOW)
+
+    flagged = {c.target for c in report.candidates if not c.signals.get("keep")}
+    typer.echo(f"\n{len(flagged)} candidate document{'s' if len(flagged) != 1 else ''}. Nothing was changed.\n")
+
+@app.command()
+def prune(
+    name: str = typer.Argument("my-vault"),
+    reason: list[str] = typer.Option(None, "--reason", help="Only this reason (repeatable): duplicate, duplicate_partial, stale."),
+    doc: list[str] = typer.Option(None, "--doc", help="Only this document, by its path in the vault (repeatable)."),
+    threshold: float = typer.Option(None, "--threshold", min=0.0, max=1.0, help="Cosine similarity for a partial overlap, for this report. The default is tuned for the default model."),
+    older_than: str = typer.Option(None, "--older-than", help="Stale after this many days, e.g. 90 or 90d (default 180)."),
+    json_output: bool = typer.Option(False, "--json", help="Print the report as JSON."),
+):
+    """What the vault would prune, and why. Changes nothing."""
+    days = _parse_days(older_than)
+    try:
+        report = vault_router.prune(vault_name=name, reasons=reason or None, targets=doc or None,
+                                    threshold=threshold, older_than_days=days)
+    except Exception as e:
+        typer.secho(f"Error during prune: {e}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+    if json_output:
+        typer.echo(report.model_dump_json(indent=2))
+        return
+    vault_path = vault_router.open_vault(vault_name=name).vault_path
+    _print_prune_report(name, report, vault_path)
 
 @app.command()
 def reindex(name: str = typer.Argument("my-vault"), path: str = typer.Option(None, "--path"),
@@ -386,6 +499,10 @@ def _print_episode(e, index: int | None = None, show_score: bool = False):
         typer.secho(f"     superseded by: {e.superseded_by}", fg=typer.colors.YELLOW)
     if e.revised_by:
         typer.secho(f"     revised by: {e.revised_by}", fg=typer.colors.YELLOW)
+    if getattr(e, "reopened_at", None):
+        reason = getattr(e, "reopen_reason", None)
+        suffix = f" ({reason})" if reason else ""
+        typer.secho(f"     reopened at: {e.reopened_at}{suffix}", fg=typer.colors.GREEN)
     if e.disputed_with:
         typer.secho(f"     disputed with: {', '.join(e.disputed_with)}", fg=typer.colors.YELLOW)
 
@@ -438,6 +555,7 @@ def episodes(
     entities: bool = typer.Option(False, "--entities", help="List the vault's entities instead of episodes"),
     min_episodes: int = typer.Option(1, "--min-episodes", help="With --entities, hide entities mentioned fewer times"),
     values: str = typer.Option(None, "--values", help="List the distinct values of this metadata key instead of episodes"),
+    event_metadata: str = typer.Option(None, "--event-metadata", help="JSON object; keep episodes whose confirm, dispute, close or reopen carries these keys"),
 ):
     try:
         if values:
@@ -492,6 +610,7 @@ def episodes(
             disputed=True if disputed else None,
             order_by=order_by,
             limit=limit,
+            event_metadata_filters=_parse_metadata(event_metadata),
         )
 
         if not result.results:
@@ -517,6 +636,38 @@ def episode(
             typer.secho(f"\n{len(chain.chain)} versions of this statement\n", fg=typer.colors.GREEN, bold=True)
             for i, item in enumerate(chain.chain, 1):
                 _print_episode(item, index=i)
+            if chain.attestations or chain.disputes or chain.closures:
+                typer.echo("")
+                for row in chain.attestations:
+                    typer.secho(f"  confirmed {row['at']}", fg=typer.colors.BRIGHT_BLACK, nl=False)
+                    if row.get("source"):
+                        typer.echo(f"  source={row['source']}", nl=False)
+                    if row.get("metadata"):
+                        typer.echo(f"  metadata={row['metadata']}", nl=False)
+                    typer.echo("")
+                for row in chain.disputes:
+                    typer.secho(
+                        f"  dispute {row['episode_a']} / {row['episode_b']} at {row['noticed_at']}",
+                        fg=typer.colors.BRIGHT_BLACK,
+                        nl=False,
+                    )
+                    if row.get("metadata"):
+                        typer.echo(f"  metadata={row['metadata']}", nl=False)
+                    typer.echo("")
+                for row in chain.closures:
+                    typer.secho(f"  closed {row['closed_at']}", fg=typer.colors.BRIGHT_BLACK, nl=False)
+                    if row.get("reason"):
+                        typer.echo(f"  reason={row['reason']}", nl=False)
+                    if row.get("metadata"):
+                        typer.echo(f"  metadata={row['metadata']}", nl=False)
+                    typer.echo("")
+                    if row.get("reopened_at"):
+                        typer.secho(f"  reopened {row['reopened_at']}", fg=typer.colors.BRIGHT_BLACK, nl=False)
+                        if row.get("reopen_reason"):
+                            typer.echo(f"  reason={row['reopen_reason']}", nl=False)
+                        if row.get("reopen_metadata"):
+                            typer.echo(f"  metadata={row['reopen_metadata']}", nl=False)
+                        typer.echo("")
             return
 
         _print_episode(vault_router.get_episode(vault_name=name, episode_id=episode_id))
@@ -530,13 +681,31 @@ def invalidate(
     episode_id: str = typer.Argument(...),
     valid_to: str = typer.Option(None, "--valid-to", help="ISO timestamp the statement stopped holding"),
     reason: str = typer.Option(None, "--reason"),
+    metadata: str = typer.Option(None, "--metadata", help="JSON object stored with this close (run_id, model, ...)"),
 ):
     try:
-        episode = vault_router.invalidate_episode(vault_name=name, episode_id=episode_id, valid_to=valid_to, reason=reason)
+        episode = vault_router.invalidate_episode(vault_name=name, episode_id=episode_id, valid_to=valid_to, reason=reason, metadata=_parse_metadata(metadata))
         typer.secho("Episode closed.", fg=typer.colors.YELLOW, bold=True)
         _print_episode(episode)
     except Exception as e:
         typer.secho(f"Error invalidating episode: {e}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+
+@app.command()
+def reopen(
+    name: str = typer.Argument("my-vault"),
+    episode_id: str = typer.Argument(...),
+    at: str = typer.Option(None, "--at", help="ISO timestamp the reopen was recorded (default: now)"),
+    reason: str = typer.Option(None, "--reason"),
+    metadata: str = typer.Option(None, "--metadata", help="JSON object stored with this reopen (run_id, model, ...)"),
+):
+    """Make a closed episode current again, without erasing the close."""
+    try:
+        episode = vault_router.reopen_episode(vault_name=name, episode_id=episode_id, at=at, reason=reason, metadata=_parse_metadata(metadata))
+        typer.secho("Episode reopened.", fg=typer.colors.GREEN, bold=True)
+        _print_episode(episode)
+    except Exception as e:
+        typer.secho(f"Error reopening episode: {e}", fg=typer.colors.RED, bold=True)
         raise typer.Exit(1)
 
 @app.command()
@@ -548,6 +717,7 @@ def supersede(
     source: str = typer.Option(None, "--source"),
     salience: float = typer.Option(None, "--salience"),
     valid_from: str = typer.Option(None, "--valid-from"),
+    event_metadata: str = typer.Option(None, "--event-metadata", help="JSON object stored with this close (run_id, model, ...); not mixed into the new statement"),
 ):
     try:
         episode = vault_router.supersede_episode(
@@ -558,6 +728,7 @@ def supersede(
             source=source,
             salience=salience,
             valid_from=valid_from,
+            event_metadata=_parse_metadata(event_metadata),
         )
         typer.secho("Episode superseded.", fg=typer.colors.GREEN, bold=True)
         _print_episode(episode)
@@ -573,6 +744,7 @@ def revise(
     entity: list[str] = typer.Option([], "--entity", "-e"),
     source: str = typer.Option(None, "--source"),
     salience: float = typer.Option(None, "--salience"),
+    event_metadata: str = typer.Option(None, "--event-metadata", help="JSON object stored with this close (run_id, model, ...); not mixed into the new statement"),
 ):
     """Restate an episode more precisely; it keeps its attestations."""
     try:
@@ -583,6 +755,7 @@ def revise(
             entities=list(entity) or None,
             source=source,
             salience=salience,
+            event_metadata=_parse_metadata(event_metadata),
         )
         typer.secho("Episode revised.", fg=typer.colors.GREEN, bold=True)
         _print_episode(episode)
@@ -596,9 +769,10 @@ def confirm(
     episode_id: str = typer.Argument(...),
     at: str = typer.Option(None, "--at", help="ISO timestamp of the reassertion (default: now)"),
     source: str = typer.Option(None, "--source", help="Who reasserted it"),
+    metadata: str = typer.Option(None, "--metadata", help="JSON object stored with this confirmation (run_id, model, ...)"),
 ):
     try:
-        episode = vault_router.confirm_episode(vault_name=name, episode_id=episode_id, at=at, source=source)
+        episode = vault_router.confirm_episode(vault_name=name, episode_id=episode_id, at=at, source=source, metadata=_parse_metadata(metadata))
         typer.secho(f"Episode confirmed ({episode.confirmed_count}x).", fg=typer.colors.GREEN, bold=True)
         _print_episode(episode)
     except Exception as e:
@@ -611,9 +785,10 @@ def dispute(
     episode_id: str = typer.Argument(...),
     other_id: str = typer.Argument(...),
     note: str = typer.Option(None, "--note", help="Why the two cannot both hold"),
+    metadata: str = typer.Option(None, "--metadata", help="JSON object stored with this dispute (run_id, model, ...)"),
 ):
     try:
-        episode = vault_router.dispute_episodes(vault_name=name, episode_id=episode_id, other_id=other_id, note=note)
+        episode = vault_router.dispute_episodes(vault_name=name, episode_id=episode_id, other_id=other_id, note=note, metadata=_parse_metadata(metadata))
         typer.secho("Episodes in dispute.", fg=typer.colors.YELLOW, bold=True)
         _print_episode(episode)
     except Exception as e:

@@ -28,12 +28,13 @@ Start the server with `uvicorn ctxvault.api.app:app`, then call it from any lang
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/episodes/write` | POST | Record an episode |
-| `/episodes/query` | POST | Retrieve episodes by entity, validity, source and ranking |
+| `/episodes/query` | POST | Retrieve episodes by entity, validity, source, ranking, or event metadata |
 | `/episodes` | GET | Episode counts for a vault |
 | `/episodes/entities` | GET | List the entities a vault knows, with their episode counts |
 | `/episodes/{episode_id}` | GET | Read a single episode |
-| `/episodes/{episode_id}/history` | GET | Read the supersession chain |
+| `/episodes/{episode_id}/history` | GET | Read the supersession chain, with confirmations, disputes and closes (event metadata included; inherited attestations listed once) |
 | `/episodes/{episode_id}/invalidate` | POST | Close an episode |
+| `/episodes/{episode_id}/reopen` | POST | Reopen a closed episode without erasing the close |
 | `/episodes/{episode_id}/supersede` | POST | Replace an episode with a corrected one |
 | `/episodes/{episode_id}/revise` | POST | Restate an episode more precisely |
 | `/episodes/{episode_id}/confirm` | POST | Record that a statement was asserted again |

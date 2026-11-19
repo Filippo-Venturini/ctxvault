@@ -203,6 +203,167 @@ def test_markdown_is_extracted_as_written_so_the_chunker_sees_its_headings(tmp_p
     assert text.startswith("# Guide")
     assert chunks[1].text == "Guide > Audit log\nEvery write is logged."
 
+def test_html_extraction_drops_scripts_styles_and_markup(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    html = tmp_path / "page.html"
+    html.write_text(
+        "<!DOCTYPE html><html><head><title>Menu</title>"
+        "<style>body { color: red; }</style>"
+        "<script>window.track = true;</script></head>"
+        "<body><h1>Bakery</h1><p>Fresh <b>sourdough</b> daily.</p>"
+        "<script>alert('x')</script></body></html>"
+    )
+
+    text, filetype = extract_text(str(html))
+
+    assert filetype == ".html"
+    assert text == "Menu Bakery Fresh sourdough daily."
+    assert "script" not in text.lower()
+    assert "color:" not in text
+    assert "alert" not in text
+    assert "<" not in text
+
+def test_csv_extraction_keeps_headers_beside_each_row(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    csv_path = tmp_path / "menu.csv"
+    csv_path.write_text("name,price\nSourdough,6.50\nBaguette,3.00\n")
+
+    text, filetype = extract_text(str(csv_path))
+
+    assert filetype == ".csv"
+    assert text == "name: Sourdough, price: 6.50\nname: Baguette, price: 3.00"
+
+def test_malformed_html_and_csv_raise_extraction_error(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    from ctxvault.core.exceptions import ExtractionError
+
+    bad_html = tmp_path / "broken.html"
+    bad_csv = tmp_path / "broken.csv"
+    bad_html.write_bytes(b"\xff\xfe not utf-8 <html>")
+    bad_csv.write_bytes(b"\xff\xfe name,price\n")
+
+    with pytest.raises(ExtractionError):
+        extract_text(str(bad_html))
+    with pytest.raises(ExtractionError):
+        extract_text(str(bad_csv))
+
+def test_broken_html_markup_still_yields_readable_text(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    # Unclosed tags and a stray script: the parser should not crash, and
+    # script bodies still stay out of the indexed text.
+    html = tmp_path / "messy.html"
+    html.write_text("<div><p>Hello <b>world<script>secret()</script> there")
+
+    text, filetype = extract_text(str(html))
+
+    assert filetype == ".html"
+    assert "Hello" in text and "world" in text and "there" in text
+    assert "secret" not in text
+
+def test_html_and_csv_index_query_and_reindex_like_other_formats(mock_vault_config):
+    vault_router.write_doc(
+        vault_name="test_vault",
+        file_path="pages/menu.html",
+        content="<html><body><h1>Sourdough special</h1></body></html>",
+    )
+    vault_router.write_doc(
+        vault_name="test_vault",
+        file_path="data/prices.csv",
+        content="name,price\nSourdough,6.50\n",
+    )
+    assert (mock_vault_config / "pages" / "menu.html").exists()
+    assert (mock_vault_config / "data" / "prices.csv").exists()
+
+    result = vault_router.query(text="sourdough", vault_name="test_vault")
+    assert len(result.results) == 1
+
+    reindexed, skipped = vault_router.reindex_files(vault_name="test_vault")
+    assert any(path.endswith("menu.html") for path in reindexed)
+    assert any(path.endswith("prices.csv") for path in reindexed)
+    assert skipped == []
+
+def test_csv_semicolon_delimiter_keeps_decimal_commas(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    # Excel European locale: semicolon fields, comma decimals.
+    csv_path = tmp_path / "menu.csv"
+    csv_path.write_text("nome;prezzo\nPane;6,50\n")
+
+    text, filetype = extract_text(str(csv_path))
+
+    assert filetype == ".csv"
+    assert text == "nome: Pane, prezzo: 6,50"
+
+def test_csv_utf8_bom_is_stripped_from_first_header(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    csv_path = tmp_path / "bom.csv"
+    csv_path.write_bytes("\ufeffname,price\nSourdough,6.50\n".encode("utf-8"))
+
+    text, filetype = extract_text(str(csv_path))
+
+    assert filetype == ".csv"
+    assert text == "name: Sourdough, price: 6.50"
+    assert "\ufeff" not in text
+
+def test_csv_blank_rows_are_skipped(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    csv_path = tmp_path / "gaps.csv"
+    csv_path.write_text("name,price\nSourdough,6.50\n,\n\nBaguette,3.00\n")
+
+    text, filetype = extract_text(str(csv_path))
+
+    assert filetype == ".csv"
+    assert text == "name: Sourdough, price: 6.50\nname: Baguette, price: 3.00"
+    assert "name: , price: " not in text
+
+def test_csv_extra_cells_beyond_header_are_kept(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    csv_path = tmp_path / "wide.csv"
+    csv_path.write_text("name,price\nSourdough,6.50,fresh,daily\n")
+
+    text, filetype = extract_text(str(csv_path))
+
+    assert filetype == ".csv"
+    assert text == "name: Sourdough, price: 6.50, fresh, daily"
+
+def test_html_inline_tags_do_not_insert_spaces_inside_words(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    html = tmp_path / "inline.html"
+    html.write_text("Sour<b>dough</b> is <i>good</i>.")
+
+    text, filetype = extract_text(str(html))
+
+    assert filetype == ".html"
+    assert text == "Sourdough is good."
+    assert "Sour dough" not in text
+    assert "good ." not in text
+
+def test_htm_is_an_alias_of_html(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    htm = tmp_path / "page.htm"
+    htm.write_text("<p>Fresh <b>sourdough</b>.</p>")
+
+    text, filetype = extract_text(str(htm))
+
+    assert filetype == ".htm"
+    assert text == "Fresh sourdough."
+
+def test_html_skips_noscript_and_template(tmp_path):
+    from ctxvault.utils.text_extraction import extract_text
+    html = tmp_path / "hidden.html"
+    html.write_text(
+        "<p>Visible</p>"
+        "<noscript>Enable JavaScript</noscript>"
+        "<template><p>Draft only</p></template>"
+        "<p>Also visible</p>"
+    )
+
+    text, filetype = extract_text(str(html))
+
+    assert filetype == ".html"
+    assert text == "Visible Also visible"
+    assert "Enable JavaScript" not in text
+    assert "Draft only" not in text
+
 def test_a_markdown_continuation_repeats_its_heading_path_and_its_overlap():
     from ctxvault.utils.chuncking import chunk_text
     body = " ".join(f"w{i}" for i in range(10))
@@ -335,8 +496,7 @@ def test_query_threads_vault_embedding_model(mock_global_config, monkeypatch):
     def recording_embed(chunks, model_name=None):
         seen.append(model_name)
         return [[0.1] * 384] * len(chunks)
-    # querying.py binds embed_list at import, so patch it where it is looked up.
-    monkeypatch.setattr("ctxvault.core.querying.embed_list", recording_embed)
+    monkeypatch.setattr("ctxvault.core.embedding.embed_list", recording_embed)
 
     vault_router.query(text="anything", vault_name="qry_vault")
     assert seen == ["all-mpnet-base-v2"]
@@ -400,7 +560,7 @@ def test_attaching_an_agent_keeps_a_project_vault_path_relative(tmp_path, monkey
     project = tmp_path / "project"
     project.mkdir()
     monkeypatch.chdir(project)
-    config.create_vault("notes", VaultType.SKILL, False, None, global_vault=False)
+    path, _ = config.create_vault("notes", VaultType.SKILL, False, None, global_vault=False)
 
     config.attach_agent_to_vault("notes", "writer")
     config.detach_agent_from_vault("notes", "writer")
@@ -408,7 +568,8 @@ def test_attaching_an_agent_keeps_a_project_vault_path_relative(tmp_path, monkey
 
     saved = json.loads((project / ".ctxvault" / "config.json").read_text())["vaults"]["notes"]
     assert saved["vault_path"] == ".ctxvault/vaults/notes"          # as created: the project can move
-    assert Path(config.get_vault_config("notes")["vault_path"]).is_absolute()   # readers still get it resolved
+    assert path == (project / ".ctxvault" / "vaults" / "notes").as_posix()
+    assert config.get_vault_config("notes")["vault_path"] == path
 
 def test_a_skill_whose_file_is_gone_is_skipped_and_said(mock_skill_vault_config, temp_skills):
     import warnings

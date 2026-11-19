@@ -32,7 +32,7 @@ The skills, each with its file, size, length and any extra frontmatter. The inst
 
 ### Episodic
 
-**Now** shows what holds today, the latest changes, the statements in dispute and the ones that become true later. Click a statement for its two timelines (in the world, in the memory), its versions, who confirmed it and what contradicts it.
+**Now** shows what holds today, the latest changes, the statements in dispute and the ones that become true later. Click a statement for its two timelines (in the world, in the memory), its versions, its closes and reopens, who confirmed it, any event metadata, and what contradicts it.
 
 ![An episodic vault now: a statement in dispute, then a superseded fact and its versions](assets/ui-episodic.gif)
 

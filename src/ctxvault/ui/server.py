@@ -226,17 +226,30 @@ def document(vault: SemanticVault, doc_id: str) -> dict:
                          for i, text in enumerate(vault.get_document_chunks(doc_id=doc_id))]
     return content
 
-def _evidence(vault: EpisodicVault) -> tuple[dict, dict]:
-    """Per episode, each time it was asserted again (when, by whom) and each
-    dispute it is in (with which episode, noticed when, with what note)."""
+def _evidence(vault: EpisodicVault) -> tuple[dict, dict, dict]:
+    """Per episode, each time it was asserted again (when, by whom), each
+    dispute it is in, and each close (and later reopen) on file."""
     attestations: dict[str, list] = {}
     for row in vault.attestations():
-        attestations.setdefault(row["episode_id"], []).append({"at": row["at"], "source": row["source"]})
+        attestations.setdefault(row["episode_id"], []).append({"at": row["at"], "source": row["source"], "metadata": row.get("metadata") or {}})
     disputes: dict[str, list] = {}
     for row in vault.disputes():
         for one, other in ((row["episode_a"], row["episode_b"]), (row["episode_b"], row["episode_a"])):
-            disputes.setdefault(one, []).append({"with": other, "noticed_at": row["noticed_at"], "note": row["note"]})
-    return attestations, disputes
+            disputes.setdefault(one, []).append({"with": other, "noticed_at": row["noticed_at"], "note": row["note"], "metadata": row.get("metadata") or {}})
+    closures: dict[str, list] = {}
+    for row in vault.closures():
+        closures.setdefault(row["episode_id"], []).append({
+            "closed_at": row["closed_at"],
+            "valid_to": row["valid_to"],
+            "superseded_by": row["superseded_by"],
+            "revised_by": row["revised_by"],
+            "reason": row["reason"],
+            "reopened_at": row["reopened_at"],
+            "reopen_reason": row["reopen_reason"],
+            "metadata": row.get("metadata") or {},
+            "reopen_metadata": row.get("reopen_metadata") or {},
+        })
+    return attestations, disputes, closures
 
 def vault_payload(name: str) -> dict:
     """Everything the vault page needs for one vault, by type."""
@@ -245,8 +258,8 @@ def vault_payload(name: str) -> dict:
     if isinstance(vault, EpisodicVault):
         # every episode goes to the page at once; filtering by time, entity
         # and metadata happens there, so the time cursor moves without a round trip
-        attestations, disputes = _evidence(vault)
-        payload["episodes"] = [{**e.model_dump(), "attestations": attestations.get(e.id, []), "disputes": disputes.get(e.id, [])}
+        attestations, disputes, closures = _evidence(vault)
+        payload["episodes"] = [{**e.model_dump(), "attestations": attestations.get(e.id, []), "disputes": disputes.get(e.id, []), "closures": closures.get(e.id, [])}
                                for e in vault.all_episodes()]
         payload["entities"] = [e.model_dump() for e in vault.list_entities(include_closed=True)]
         payload["stats"] = vault.stats()
@@ -295,7 +308,7 @@ def _reveal(path: str) -> None:
     if sys.platform == "darwin":
         subprocess.Popen(["open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     elif sys.platform == "win32":
-        os.startfile(path)  # noqa: S606 - a folder, opened in Explorer
+        os.startfile(os.path.normpath(path))  # noqa: S606 - a folder, opened in Explorer
     else:
         subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -392,7 +405,8 @@ def _contents(name: str, documents: list[dict]) -> dict:
     return out
 
 def _data_uri(path: Path) -> str:
-    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    mime = "font/woff2" if path.suffix == ".woff2" else mimetypes.guess_type(path.name)[0]
+    mime = mime or "application/octet-stream"
     return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
 
 def _inline_fonts(css: str) -> str:

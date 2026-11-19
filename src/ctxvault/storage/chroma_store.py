@@ -29,6 +29,26 @@ def _get_collection(db_path: str):
 def get_collection(config: dict):
     return _get_collection(config["db_path"])
 
+def close_client(config: dict) -> None:
+    """Release this vault's cached collection and client without deleting its data.
+
+    Reopening the vault creates a fresh client. Other vaults remain open.
+    """
+    db_path = config["db_path"]
+    _collections.pop(db_path, None)
+    client = _clients.pop(db_path, None)
+    if client is None:
+        return
+    close = getattr(client, "close", None)
+    if callable(close):
+        close()
+    else:
+        # Chroma 1.3 has no Client.close(); stop and uncache only this system.
+        from chromadb.api.shared_system_client import SharedSystemClient
+
+        client._system.stop()
+        SharedSystemClient._identifier_to_system.pop(client._identifier, None)
+
 def space(config: dict) -> str:
     """How the vault's collection measures distance: "cosine" for collections
     made by this version, "l2" for older ones (Chroma's default)."""
@@ -81,4 +101,21 @@ def get_document_records(doc_id: str, config: dict) -> dict:
     return collection.get(
         where={"doc_id": doc_id},
         include=["documents", "metadatas"],
+    )
+
+def get_all_records(config: dict, include: list[str]) -> dict:
+    """Every chunk in the vault, with what `include` asks for."""
+    collection = get_collection(config=config)
+    return collection.get(include=include)
+
+def nearest_other_chunks(embeddings: list[list[float]], exclude_doc_id: str, config: dict, n_results: int = 3) -> dict:
+    """For each embedding, the closest chunks of every document but one, with
+    their own embeddings so the caller can measure similarity itself: the
+    distances of an older (l2) collection are not cosine."""
+    collection = get_collection(config=config)
+    return collection.query(
+        query_embeddings=embeddings,
+        n_results=n_results,
+        where={"doc_id": {"$ne": exclude_doc_id}},
+        include=["metadatas", "embeddings", "documents"],
     )

@@ -115,6 +115,62 @@ def test_episodic_payload_says_who_confirmed_and_when_a_dispute_was_noticed(mock
         (dispute,) = episodes[one.id]["disputes"]
         assert dispute["with"] == other.id and dispute["noticed_at"].startswith("2026-11-01") and dispute["note"] == "different times"
 
+def test_episodic_payload_lists_closes_reopens_and_event_metadata(mock_episodic_vault_config):
+    bread = vault_router.write_episode(
+        EPISODIC, "Unsold bread goes to the food bank crate",
+        recorded_at="2026-04-19T09:00:00+00:00", valid_from="2026-04-19T09:00:00+00:00",
+    )
+    vault_router.confirm_episode(
+        EPISODIC, bread.id, at="2026-10-20T09:00:00+00:00", source="counter staff",
+        metadata={"run_id": "run-2026-10-20", "model": "gpt-4.1"},
+    )
+    thrown = vault_router.write_episode(
+        EPISODIC, "Unsold bread is thrown away",
+        recorded_at="2026-10-21T08:00:00+00:00", valid_from="2026-10-21T08:00:00+00:00",
+    )
+    vault_router.dispute_episodes(
+        EPISODIC, bread.id, thrown.id, at="2026-10-21T09:00:00+00:00", note="different policy",
+        metadata={"run_id": "run-2026-10-21"},
+    )
+    vault_router.invalidate_episode(
+        EPISODIC, bread.id, at="2026-11-12T09:00:00+00:00", reason="crate withdrawn for repairs",
+        metadata={"run_id": "run-2026-11-12", "model": "gpt-4.1"},
+    )
+    vault_router.reopen_episode(
+        EPISODIC, bread.id, at="2026-11-16T09:00:00+00:00", reason="crate back in the alley",
+        metadata={"run_id": "run-2026-11-16", "model": "gpt-4.1"},
+    )
+    minimum = vault_router.write_episode(
+        EPISODIC, "Card payments are accepted from 5 euro",
+        recorded_at="2025-12-10T09:00:00+00:00", valid_from="2025-12-10T09:00:00+00:00",
+    )
+    successor = vault_router.supersede_episode(
+        EPISODIC, minimum.id, "Card payments are accepted with no minimum",
+        at="2026-06-08T09:00:00+00:00", event_metadata={"run_id": "run-2026-06-08"},
+    )
+
+    episodes = {e["id"]: e for e in client.get(f"/ui/api/vaults/{EPISODIC}").json()["episodes"]}
+    row = episodes[bread.id]
+
+    assert row["attestations"][0]["metadata"] == {"run_id": "run-2026-10-20", "model": "gpt-4.1"}
+    (dispute,) = row["disputes"]
+    assert dispute["with"] == thrown.id and dispute["metadata"] == {"run_id": "run-2026-10-21"}
+    (closure,) = row["closures"]
+    assert closure["closed_at"].startswith("2026-11-12")
+    assert closure["reason"] == "crate withdrawn for repairs"
+    assert closure["metadata"] == {"run_id": "run-2026-11-12", "model": "gpt-4.1"}
+    assert closure["reopened_at"].startswith("2026-11-16")
+    assert closure["reopen_reason"] == "crate back in the alley"
+    assert closure["reopen_metadata"] == {"run_id": "run-2026-11-16", "model": "gpt-4.1"}
+    assert closure["superseded_by"] is None and closure["revised_by"] is None
+
+    (close,) = episodes[minimum.id]["closures"]
+    assert close["superseded_by"] == successor.id
+    assert close["reason"] is None
+    assert close["reopened_at"] is None
+    assert close["metadata"] == {"run_id": "run-2026-06-08"}
+    assert episodes[successor.id]["closures"] == []
+
 def test_reading_the_payload_leaves_no_trace(mock_episodic_vault_config):
     episode = vault_router.write_episode(EPISODIC, "Giuseppe lives in Mestre")
 
@@ -177,8 +233,8 @@ def test_reveal_opens_the_registered_folder_and_only_for_local_requests(mock_ski
     assert opened == []
 
     monkeypatch.setattr(server, "_is_local", lambda request: True)
-    assert client.post("/ui/api/vaults/test_skill_vault/reveal").json()["opened"] == str(mock_skill_vault_config)
-    assert opened == [str(mock_skill_vault_config)]
+    assert client.post("/ui/api/vaults/test_skill_vault/reveal").json()["opened"] == mock_skill_vault_config.as_posix()
+    assert opened == [mock_skill_vault_config.as_posix()]
     assert client.post("/ui/api/vaults/nowhere/reveal").status_code == 404
 
 def test_unknown_vault_is_404(mock_global_config):
@@ -192,8 +248,10 @@ def test_the_page_and_its_assets_are_served(mock_global_config):
 
 # ── Export ──────────────────────────────────────────────────────────────────
 
-def test_export_is_one_self_contained_file(mock_episodic_vault_config, tmp_path):
+def test_export_is_one_self_contained_file(mock_episodic_vault_config, tmp_path, monkeypatch):
     vault_router.write_episode(EPISODIC, "Content with </script> inside", entities=["Giuseppe"])
+    guess_type = server.mimetypes.guess_type
+    monkeypatch.setattr(server.mimetypes, "guess_type", lambda name: (None, None) if name.endswith(".woff2") else guess_type(name))
 
     html = server.export(tmp_path / "memory.html").read_text(encoding="utf-8")
 
@@ -268,3 +326,12 @@ def test_static_files_are_revalidated_so_an_upgrade_is_never_served_stale():
     response = client.get("/ui/static/app.js")
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-cache"
+
+
+def test_published_demo_inlines_the_current_viewer_scripts():
+    # The public demo is an export, not a second UI implementation. In
+    # particular it must keep the same confirmation controls and state keys.
+    demo = (server.STATIC.parents[3] / "docs" / "demo.html").read_text(encoding="utf-8")
+    scripts = re.findall(r"<script>\s*(.*?)</script>", demo, re.DOTALL)
+    for name in ("app.js", "data.js"):
+        assert (server.STATIC / name).read_text(encoding="utf-8").strip() in [s.strip() for s in scripts]

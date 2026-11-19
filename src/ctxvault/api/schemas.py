@@ -128,6 +128,7 @@ class QueryEpisodesRequest(BaseModel):
     known_at: str | None = None
     include_closed: bool = False
     metadata_filters: dict[str, Any] = Field(default_factory=dict)
+    event_metadata_filters: dict[str, Any] = Field(default_factory=dict)
     disputed: bool | None = None
     order_by: EpisodeOrder | None = None
     limit: int = Field(default=10, ge=1, le=200)
@@ -145,6 +146,13 @@ class InvalidateEpisodeRequest(BaseModel):
     vault_name: str
     valid_to: str | None = None
     reason: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+class ReopenEpisodeRequest(BaseModel):
+    vault_name: str
+    at: str | None = None
+    reason: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 class SupersedeEpisodeRequest(BaseModel):
     vault_name: str
@@ -156,6 +164,7 @@ class SupersedeEpisodeRequest(BaseModel):
     occurred_at: str | None = None
     valid_from: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    event_metadata: dict[str, Any] = Field(default_factory=dict)
 
 class ReviseEpisodeRequest(BaseModel):
     vault_name: str
@@ -165,22 +174,28 @@ class ReviseEpisodeRequest(BaseModel):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     salience: float | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    event_metadata: dict[str, Any] = Field(default_factory=dict)
 
 class ConfirmEpisodeRequest(BaseModel):
     vault_name: str
     at: str | None = None
     source: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 class DisputeEpisodeRequest(BaseModel):
     vault_name: str
     other_id: str
     at: str | None = None
     note: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 class EpisodeHistoryResponse(BaseModel):
     vault_name: str
     episode_id: str
     chain: list[Episode]
+    attestations: list[dict[str, Any]] = Field(default_factory=list)
+    disputes: list[dict[str, Any]] = Field(default_factory=list)
+    closures: list[dict[str, Any]] = Field(default_factory=list)
 
 class EpisodeStatsResponse(BaseModel):
     vault_name: str

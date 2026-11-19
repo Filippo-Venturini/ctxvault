@@ -72,8 +72,14 @@ const CV = (() => {
         dispute: (e.disputed_with || [])[0] || null,
         att: 1 + (e.confirmed_count || 0), lastAtt: ts(e.last_confirmed_at) || tf,
         recalls: e.recall_count || 0, lastRecall: ts(e.last_recalled_at), occ: ts(e.occurred_at), meta,
-        attestations: (e.attestations || []).map((a) => ({ t: ts(a.at), source: a.source || null })),
-        disputeLog: (e.disputes || []).map((d) => ({ with: d.with, t: ts(d.noticed_at), note: d.note || null })),
+        attestations: (e.attestations || []).map((a) => ({ t: ts(a.at), source: a.source || null, meta: a.metadata || {} })),
+        disputeLog: (e.disputes || []).map((d) => ({ with: d.with, t: ts(d.noticed_at), note: d.note || null, meta: d.metadata || {} })),
+        closures: (e.closures || []).map((c) => ({
+          t: ts(c.closed_at), reason: c.reason || null, vt: ts(c.valid_to),
+          superseded_by: c.superseded_by || null, revised_by: c.revised_by || null,
+          reopened_at: ts(c.reopened_at), reopen_reason: c.reopen_reason || null,
+          meta: c.metadata || {}, reopen_meta: c.reopen_metadata || {},
+        })),
       };
     });
   }
@@ -139,7 +145,9 @@ const CV = (() => {
   }
   // What happened to the vault, as changes the memory recorded, in the
   // library's own words: a statement recorded, one superseded by a successor,
-  // one revised (restated, same fact), one closed with nothing in its place.
+  // one revised (restated, same fact), one closed with nothing in its place,
+  // one reopened. Closures are the source for closes and reopens; a
+  // never-reopened supersede or revise is already the successor's event.
   function successors(all) {
     const next = new Map();
     for (const x of all) if (x.prev) next.set(x.prev.id, { s: x, kind: x.prev.kind });
@@ -151,7 +159,14 @@ const CV = (() => {
       const was = x.prev ? byId.get(x.prev.id) || null : null;
       const kind = !x.prev ? "recorded" : x.prev.kind === "revised" ? "revised" : "superseded";
       if (x.tf != null) out.push({ t: x.tf, kind, s: x, was });
-      if (!next.has(x.id)) {
+      const closures = x.closures || [];
+      if (closures.length) {
+        for (const c of closures) {
+          const succeeded = c.superseded_by || c.revised_by;
+          if (c.t != null && (c.reopened_at != null || !succeeded)) out.push({ t: c.t, kind: "closed", s: x, was: null });
+          if (c.reopened_at != null) out.push({ t: c.reopened_at, kind: "reopened", s: x, was: null });
+        }
+      } else if (!next.has(x.id)) {
         const end = x.tt ?? (x.vt != null && x.vt <= R.now ? x.vt : null);
         if (end != null) out.push({ t: end, kind: "closed", s: x, was: null });
       }

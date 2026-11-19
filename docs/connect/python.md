@@ -17,6 +17,7 @@ memory = Client(agent="briefing-bot")
 facts = memory.episodic("account-memory")
 contact = facts.write_episode("Sarah Klein is the main contact", entities=["Sarah Klein"], salience=0.9)
 facts.supersede_episode(contact.id, "Marco Rossi is the main contact", entities=["Marco Rossi"])
+facts.reopen_episode(contact.id)                                  # after the successor is itself closed
 facts.query_episodes(entities=["Marco Rossi"]).results        # what holds now
 facts.query_episodes(valid_at="2026-04-10T00:00:00+00:00")    # what held then
 facts.history(contact.id).chain                               # how the belief changed
@@ -29,6 +30,8 @@ memory.skills("procedures").read_skill("Deploy Service").instructions
 memory.init("notes", "episodic")
 memory.vaults()
 ```
+
+`init()` and `vaults()` return vault directory paths with `/` separators on all platforms.
 
 `vault(name)` returns whatever type the name resolves to; `semantic`, `skills` and `episodic` insist on one type and fail before a wrong method call would. The `agent` plays the part of the `X-CtxVault-Agent` header: a restricted vault opens only for an agent attached to it.
 

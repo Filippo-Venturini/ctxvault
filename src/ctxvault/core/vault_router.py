@@ -7,6 +7,7 @@ from ctxvault.core.vaults.skill import SkillVault
 from ctxvault.models.documents import SemanticDocumentInfo, SkillDocumentInfo, DocumentContent, VaultStatus
 from ctxvault.models.episodes import Episode, EpisodeHistory, EpisodeQueryResult, VaultEntity
 from ctxvault.models.query_result import QueryResult
+from ctxvault.models.pruning import PruneReport
 from ctxvault.models.vaults import SkillOutput, SkillInput, VaultOperation, VaultType
 from ctxvault.utils.config import create_vault, delete_vault, get_vault_config, get_vaults, set_embedding_model as _set_embedding_model
 
@@ -120,6 +121,19 @@ def index_status(vault_name: str) -> VaultStatus:
     vault._require_operation(VaultOperation.REINDEX)
     return vault.status()
 
+def prune(vault_name: str, reasons: list[str] | None = None, targets: list[str] | None = None,
+          threshold: float | None = None, older_than_days: int | None = None) -> PruneReport:
+    """What the vault would prune, and why. Changes nothing. `threshold` and
+    `older_than_days` override the vault's rules for this report only."""
+    vault = open_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.PRUNE)
+    policy = vault.prune_policy()
+    if threshold is not None and "duplicate_partial" in policy.rules:
+        policy.rules["duplicate_partial"].threshold = threshold
+    if older_than_days is not None and "stale" in policy.rules:
+        policy.rules["stale"].older_than_days = older_than_days
+    return vault.prune(reasons=set(reasons) if reasons else None, targets=targets, policy=policy)
+
 def sync_index(vault_name: str) -> tuple[list[str], list[str], list[str]]:
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.REINDEX)
@@ -179,10 +193,11 @@ def query_episodes(vault_name: str, text: str | None = None, **kwargs)-> Episode
     return vault.query_episodes(text=text, **kwargs)
 
 def invalidate_episode(vault_name: str, episode_id: str, valid_to: str | None = None, reason: str | None = None,
-                       at: str | None = None)-> Episode:
+                       at: str | None = None, metadata: dict | None = None)-> Episode:
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.INVALIDATE_EPISODE)
-    return vault.invalidate_episode(episode_id=episode_id, valid_to=valid_to, reason=reason, at=at)
+    return vault.invalidate_episode(episode_id=episode_id, valid_to=valid_to, reason=reason, at=at,
+                                   metadata=metadata)
 
 def supersede_episode(vault_name: str, episode_id: str, content: str, **kwargs)-> Episode:
     vault = open_vault(vault_name=vault_name)
@@ -194,22 +209,30 @@ def revise_episode(vault_name: str, episode_id: str, content: str, **kwargs)-> E
     vault._require_operation(VaultOperation.REVISE_EPISODE)
     return vault.revise_episode(episode_id=episode_id, content=content, **kwargs)
 
+def reopen_episode(vault_name: str, episode_id: str, at: str | None = None,
+                   reason: str | None = None, metadata: dict | None = None)-> Episode:
+    vault = open_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.REOPEN_EPISODE)
+    return vault.reopen_episode(episode_id=episode_id, at=at, reason=reason, metadata=metadata)
+
 def episode_history(vault_name: str, episode_id: str)-> EpisodeHistory:
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.READ_EPISODE)
     return vault.history(episode_id=episode_id)
 
 def confirm_episode(vault_name: str, episode_id: str, at: str | None = None,
-                    source: str | None = None)-> Episode:
+                    source: str | None = None, metadata: dict | None = None)-> Episode:
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.WRITE_EPISODE)
-    return vault.confirm_episode(episode_id=episode_id, at=at, source=source)
+    return vault.confirm_episode(episode_id=episode_id, at=at, source=source, metadata=metadata)
 
 def dispute_episodes(vault_name: str, episode_id: str, other_id: str,
-                     at: str | None = None, note: str | None = None)-> Episode:
+                     at: str | None = None, note: str | None = None,
+                     metadata: dict | None = None)-> Episode:
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.WRITE_EPISODE)
-    return vault.dispute_episodes(episode_id=episode_id, other_id=other_id, at=at, note=note)
+    return vault.dispute_episodes(episode_id=episode_id, other_id=other_id, at=at, note=note,
+                                 metadata=metadata)
 
 def mark_recalled(vault_name: str, episode_ids: list[str])-> None:
     vault = open_vault(vault_name=vault_name)

@@ -34,8 +34,8 @@ def _resolve_local_paths(local_config: dict, local_root: Path) -> dict:
     project_root = local_root.parent
     for vault_data in local_config["vaults"].values():
         if not Path(vault_data["vault_path"]).is_absolute():
-            vault_data["vault_path"] = str((project_root / vault_data["vault_path"]).resolve())
-            vault_data["db_path"] = str((project_root / vault_data["db_path"]).resolve()) if vault_data["db_path"] else None
+            vault_data["vault_path"] = (project_root / vault_data["vault_path"]).resolve().as_posix()
+            vault_data["db_path"] = (project_root / vault_data["db_path"]).resolve().as_posix() if vault_data["db_path"] else None
     return local_config
 
 def _load_config() -> tuple[dict, dict, Path | None]:
@@ -132,7 +132,7 @@ def create_vault(vault_name: str, vault_type: VaultType, restricted: bool, vault
     config["vaults"][vault_name] = entry
 
     _save_config(data=config, root=save_root)
-    return str(vault_path_abs), str(_config_file(save_root))
+    return vault_path_abs.as_posix(), str(_config_file(save_root))
 
 def get_vaults() -> list[dict]:
     global_config, local_config, _ = _load_config()

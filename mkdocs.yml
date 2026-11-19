@@ -46,6 +46,7 @@ nav:
       - Local and global vaults: how-it-works/local-and-global.md
       - Access control: how-it-works/access-control.md
   - Memory viewer: memory-viewer.md
+  - Consolidation: consolidation.md
   - Examples: examples.md
   - Reference:
       - CLI: reference/cli.md
