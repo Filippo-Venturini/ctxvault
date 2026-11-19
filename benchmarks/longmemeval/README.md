@@ -1,0 +1,107 @@
+# LongMemEval harness
+
+One command replays [LongMemEval](https://github.com/xiaowu0162/LongMemEval)
+into CtxVault and writes results in a fixed format, so runs made with
+different models and keys can be compared and merged. This is the harness
+described in [#47](https://github.com/Filippo-Venturini/ctxvault/issues/47);
+running it against a paid endpoint and contributing the folder is a separate
+piece of work.
+
+The official dataset is downloaded into a cache and checked against a pinned
+SHA-256. Nothing from the dataset is stored in this repository. The source
+is [xiaowu0162/longmemeval-cleaned](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)
+(the earlier longmemeval dump is deprecated).
+
+## Configurations
+
+| --config              | What the answer model sees |
+|-----------------------|----------------------------|
+| full-context          | The whole dated history in the prompt (the ceiling). |
+| semantic-only         | Sessions indexed as documents; the top retrieved chunks. |
+| episodic              | Sessions consolidated with ctxvault.consolidation; episodes that held as of the question date. |
+| episodic+semantic     | Facts first, text as fallback. Not implemented here: it needs date-aware transcript ingestion from #45. |
+
+Each question gets a fresh vault. Sessions are ingested in date order, with
+at= set to the session date (replay in transaction time). The question is
+then asked as of question_date. When that clock falls earlier on the same
+day as the last session — a known LongMemEval annotation quirk — the harness
+follows the official clarification and treats the question as immediately
+after that session.
+
+## Commands
+
+The model flags accept any OpenAI-compatible endpoint. Temperature is 0.
+A remote URL is refused unless you pass --allow-remote, because the
+conversations leave the machine. Cheap runs use --split oracle,
+--limit N and --resume.
+
+From the repository root, with a local server (the default is Ollama):
+
+```bash
+python -m benchmarks.longmemeval \
+  --config full-context --split oracle --limit 5 --resume \
+  --answer-model qwen2.5:7b --judge-model qwen2.5:7b
+
+python -m benchmarks.longmemeval \
+  --config semantic-only --split oracle --limit 5 --resume \
+  --answer-model qwen2.5:7b --judge-model qwen2.5:7b
+
+python -m benchmarks.longmemeval \
+  --config episodic --split oracle --limit 5 --resume \
+  --answer-model qwen2.5:7b --extract-model qwen2.5:7b --judge-model qwen2.5:7b
+```
+
+A hosted endpoint (OpenAI or similar):
+
+```bash
+python -m benchmarks.longmemeval \
+  --config full-context --split oracle --limit 5 --resume \
+  --answer-model gpt-4o --judge-model gpt-4o \
+  --base-url https://api.openai.com/v1 --allow-remote
+```
+
+OPENAI_API_KEY is read if --api-key is omitted. Use --data path.json
+for a local file instead of downloading a split.
+
+Merge every complete folder under results/:
+
+```bash
+python -m benchmarks.longmemeval.report
+```
+
+## Output
+
+Each run writes benchmarks/longmemeval/results/<run-name>/:
+
+- hypotheses.jsonl: one line per question, {"question_id": ..., "hypothesis": ...}, accepted as is by the official LongMemEval evaluation script.
+- manifest.json: ctxvault commit, config, split, question count, extraction / answer / judge models, prompt version, token counts (in and out, per stage), wall time.
+- scores.json: overall accuracy and accuracy per question type, from the judge model (the official yes/no prompt) and from a deterministic grader (every content word of the gold answer appears in the hypothesis). The questions where the two disagree are listed.
+
+A run with a missing or incomplete manifest is not merged by report. Anyone
+with API keys can open a PR that adds one complete results/<run-name>/
+folder.
+
+## Token estimates
+
+These are order-of-magnitude figures from the LongMemEval description, not
+measurements from this harness. They are here so a run can be planned
+before it is started.
+
+- History size, as reported for Llama 3: LongMemEval_S concatenates to
+  about 115k tokens per question (~40 sessions). The oracle split keeps only
+  the evidence sessions, so the prompt is much smaller. LongMemEval_M has
+  about 500 sessions per question and is not meant to fit in a 128k window;
+  use it with semantic-only or episodic, not full-context.
+- full-context: one answer call over the whole history, plus one short
+  judge call. On S, the history dominates; 500 questions at 115k tokens is
+  on the order of 6e7 input tokens, before answers and judges.
+- semantic-only: indexing embeddings for every session, then one answer
+  call over a handful of chunks (default 8) and one judge call. Input tokens
+  to the answer model stay small; the cost is retrieval, not the prompt.
+- episodic: one extraction call per session and a relate call per durable
+  claim, then one answer call over the retrieved episodes and one judge call.
+  Extraction cost scales with sessions times tokens, not with the concatenated
+  history in a single prompt.
+
+Use --limit and the oracle split to measure tokens per question on your
+model, then read them off manifest.json.
