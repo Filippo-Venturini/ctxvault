@@ -19,7 +19,7 @@ is [xiaowu0162/longmemeval-cleaned](https://huggingface.co/datasets/xiaowu0162/l
 | full-context          | The whole dated history in the prompt (the ceiling). |
 | semantic-only         | Sessions indexed as documents; the top retrieved chunks. |
 | episodic              | Sessions consolidated with ctxvault.consolidation; episodes that held as of the question date. |
-| episodic+semantic     | Facts first, followed by their verified transcript spans as fallback (using a fresh facts+transcripts configuration). |
+| episodic+semantic     | Facts first, then their verified transcript spans, then date-filtered transcript search for details extraction missed. |
 
 Each question gets fresh vaults. Semantic sessions use date-aware `write_session`
 ingestion, so chunks carry the conversation dates rather than file mtimes.
@@ -32,22 +32,26 @@ follows the official clarification and treats the question as immediately
 after that session.
 
 Combined replay creates both vaults explicitly in the fresh local registry and
-then uses the `facts_and_transcripts` preset with `consolidate_session` to keep
-facts and source text linked by public chunk references. Creating the local
-vaults first prevents the reusable preset from accepting a same-named global
-vault. It reads episodes as
-of the question instant, then resolves only those episodes' references. Facts
+uses a `ConsolidationConfig` with `consolidate_session` to keep
+facts and source text linked by public chunk references. The fresh local
+vaults never reuse a same-named global vault. It reads episodes as
+of the question instant, then resolves those episodes' references. Facts
 come first in the answer prompt; the verified transcript spans are fallback
 for details the facts omitted. Repeated references to a chunk are included
 once. Changed, missing, refused or unreachable sources contribute no text.
-A claim that cites no turn has no transcript fallback. There is no second
-semantic similarity search or score threshold across vaults.
+A claim that cites no turn gets no invented reference. After cited spans,
+the harness searches the transcripts with the question, using the same session
+date filter as `semantic-only`, and fills the remaining chunk slots with unique
+hits. This can reach details from a session extraction dropped entirely.
+There is no score threshold across vaults.
 
 `--n-results` bounds episodes and, separately, fallback chunks in combined mode.
 An equal result count is not an equal token budget: use the reported token
 counts when comparing configurations. Both stores are closed before removing
 the question's temporary directory. Answer prompt version `lme-answer-3`
-records this facts-first policy and prevents resuming an older prompt run.
+records this facts-first policy for all four configurations and prevents
+resuming an older prompt run. Runs made with `lme-answer-2` are not comparable
+to runs made with `lme-answer-3`; rerun every configuration for a comparison.
 
 ## Commands
 

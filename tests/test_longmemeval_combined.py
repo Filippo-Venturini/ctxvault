@@ -77,7 +77,7 @@ def test_combined_replay_puts_facts_before_cited_text_and_excludes_future(tmp_pa
     assert not chroma_store._clients
 
 
-def test_combined_does_not_invent_sources_for_uncited_claims(tmp_path, native_chroma):
+def test_combined_searches_transcripts_even_when_claims_are_uncited(tmp_path, native_chroma):
     class Uncited(LinkedModel):
         def extract(self, turns):
             claims = super().extract(turns)
@@ -87,8 +87,36 @@ def test_combined_does_not_invent_sources_for_uncited_claims(tmp_path, native_ch
     memory = memory_for('episodic+semantic', question(), workdir=tmp_path / 'work',
                         extraction_model=Uncited())
     assert 'The user lives in Mestre' in memory
-    assert 'door code' not in memory
-    assert '(no usable cited transcript chunks)' in memory
+    assert 'My door code is 814.' in memory
+
+
+@pytest.mark.parametrize('budget', [1, 2])
+def test_combined_finds_a_detail_dropped_from_a_separate_session(tmp_path, native_chroma, budget):
+    record = parse_record({
+        'question_id': 'q_door', 'question_type': 'single-session-user',
+        'question': 'What is the door code?', 'answer': '814',
+        'question_date': '2026-02-10',
+        'haystack_session_ids': ['city', 'door', 'future'],
+        'haystack_dates': ['2026-01-10', '2026-01-11', '2026-03-10'],
+        'haystack_sessions': [
+            [{'role': 'user', 'content': 'I live in Mestre.'}],
+            [{'role': 'user', 'content': 'My door code is 814.'}],
+            [{'role': 'user', 'content': 'My new door code is 999.'}],
+        ],
+    })
+
+    class CityOnly(LinkedModel):
+        def extract(self, turns):
+            return super().extract(turns) if 'Mestre' in turns[0].text else []
+
+    memory = memory_for('episodic+semantic', record, workdir=tmp_path / 'work',
+                        extraction_model=CityOnly(), n_results=budget)
+    assert 'The user lives in Mestre' in memory
+    assert ('My door code is 814.' in memory) == (budget == 2)
+    if budget == 2:
+        assert memory.index('I live in Mestre.') < memory.index('My door code is 814.')
+    assert memory.count('I live in Mestre.') == 1
+    assert '999' not in memory
 
 
 def test_combined_deduplicates_a_chunk_shared_by_two_facts(tmp_path, native_chroma):
@@ -126,7 +154,7 @@ def test_combined_refuses_unverifiable_transcript_text(tmp_path, native_chroma, 
     assert 'The user lives in Mestre' in memory
     assert 'door code' not in memory
     assert 'Unverified replacement' not in memory
-    assert '(no usable cited transcript chunks)' in memory
+    assert '(no retrieved transcript chunks)' in memory
 
 
 def test_combined_releases_both_stores_when_extraction_fails(tmp_path, native_chroma):

@@ -4,8 +4,9 @@ Sessions are applied in date order. For an episodic vault, `consolidate(..., at=
 is the session date, so the write's transaction time is a replay of the past.
 The question is then asked as of `question_instant` (see data.py).
 
-Combined replay resolves the selected facts' transcript references. It does not
-compare episodic and semantic similarity scores or run a second semantic search.
+Combined replay resolves the selected facts' transcript references, then searches
+the dated transcripts for details extraction missed. It does not compare scores
+across the episodic and semantic vaults.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import Iterator, Literal
 
 from ctxvault import Client
-from ctxvault.consolidation import Turn, consolidate, consolidate_session, facts_and_transcripts, sources
+from ctxvault.consolidation import ConsolidationConfig, Turn, consolidate, consolidate_session, sources
 from ctxvault.core.transcripts import write_session
 from ctxvault.core.vaults.episodic import EpisodicVault
 from ctxvault.core.vaults.semantic import SemanticVault
@@ -89,15 +90,19 @@ def ingest_episodic(
             diagnostics["claims_rejected"] += result.dropped + sum(not op.applied for op in primary)
 
 
-def retrieve_semantic(vault: SemanticVault, question: Question, *, n_results: int) -> str:
+def _semantic_matches(vault: SemanticVault, question: Question, *, n_results: int):
     moment = question_instant(question.question_date, question.last_session_date)
-    result = vault.query(question.question, n_results=n_results, filters={
+    return vault.query(question.question, n_results=n_results, filters={
         "$and": [{"session_dated": {"$eq": True}}, {"session_ended_ts": {"$lte": moment.timestamp()}}],
-    })
-    if not result.results:
+    }).results
+
+
+def retrieve_semantic(vault: SemanticVault, question: Question, *, n_results: int) -> str:
+    matches = _semantic_matches(vault, question, n_results=n_results)
+    if not matches:
         return "(no retrieved chunks)"
     blocks = []
-    for match in result.results:
+    for match in matches:
         source = match.source or match.doc_id or match.chunk_id
         blocks.append(f"[{source}]\n{match.text}")
     return "\n\n".join(blocks)
@@ -128,7 +133,7 @@ def retrieve_episodic(vault: EpisodicVault, question: Question, *, limit: int) -
     return _format_episodes(_episodes_for(vault, question, limit=limit))
 
 
-def retrieve_combined(vault: EpisodicVault, question: Question, *, limit: int) -> str:
+def retrieve_combined(vault: EpisodicVault, transcripts: SemanticVault, question: Question, *, limit: int) -> str:
     episodes = _episodes_for(vault, question, limit=limit)
     chunks, seen = [], set()
     for episode in episodes:
@@ -143,7 +148,17 @@ def retrieve_combined(vault: EpisodicVault, question: Question, *, limit: int) -
                 break
         if len(chunks) >= limit:
             break
-    fallback = "\n\n".join(chunks) or "(no usable cited transcript chunks)"
+    if len(chunks) < limit:
+        # Request the full budget so hits already included as citations cannot
+        # crowd out the remaining slots. Facts and citations retain priority.
+        for match in _semantic_matches(transcripts, question, n_results=limit):
+            key = (match.doc_id, match.chunk_index)
+            if key not in seen:
+                seen.add(key)
+                chunks.append(match.text)
+            if len(chunks) >= limit:
+                break
+    fallback = "\n\n".join(chunks) or "(no retrieved transcript chunks)"
     return (
         f"Episodic facts:\n{_format_episodes(episodes)}\n\n"
         f"Transcript fallback (consult only when the facts are insufficient):\n{fallback}"
@@ -179,16 +194,15 @@ def memory_for(
         if extraction_model is None:
             raise ValueError("The episodic configuration needs an extraction model.")
         if config == "episodic+semantic":
-            # Create local vaults first: the reusable preset also accepts global ones.
             client.init("lme-facts", "episodic", embedding_model=embedding_model)
             client.init("lme-transcripts", "semantic", embedding_model=embedding_model)
-            topology = facts_and_transcripts("lme", embedding_model=embedding_model)
+            topology = ConsolidationConfig(facts_vault="lme-facts", transcripts_vault="lme-transcripts")
             vault = client.episodic(topology.facts_vault)
             transcripts = client.semantic(topology.transcripts_vault)
             try:
                 ingest_episodic(vault, question.sessions, extraction_model,
                                 diagnostics=diagnostics, transcript_config=topology)
-                return retrieve_combined(vault, question, limit=n_results)
+                return retrieve_combined(vault, transcripts, question, limit=n_results)
             finally:
                 chroma_store.close_client(transcripts.config)
         client.init(EPISODIC_VAULT, "episodic", embedding_model=embedding_model)
