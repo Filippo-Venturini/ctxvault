@@ -1,13 +1,21 @@
-def index_file(file_path: str, config: dict, agent_metadata: dict | None = None)-> dict:
+def index_file(file_path: str, config: dict, agent_metadata: dict | None = None, *, new_write: bool = False)-> dict:
     from ctxvault.utils.text_extraction import extract_text
     from ctxvault.core.identifiers import get_doc_id
     from ctxvault.utils.chuncking import chunk_text
     from ctxvault.core import embedding
-    from ctxvault.storage.chroma_store import add_document, delete_document
+    from ctxvault.storage.chroma_store import add_document, delete_document, get_document_records
     from ctxvault.utils.metadata_builder import build_chunks_metadatas
 
     text, file_type = extract_text(path=file_path)
     doc_id = get_doc_id(path=file_path)
+    if agent_metadata is None and not new_write:
+        # Indexing a file again (index, sync) is not a new write: the agent
+        # metadata its chunks carry is kept, as reindex_file does. The chunks
+        # are dropped before the new ones go in (below), so nothing else would
+        # carry it over. A new write (write_doc) says all there is: metadata
+        # about the old text, a session's dates say, must not describe the new.
+        existing = get_document_records(doc_id=doc_id, config=config)
+        agent_metadata = _extract_agent_metadata(existing.get("metadatas") or [])
 
     # The model pinned to this vault (config["embedding_model"], else the
     # default) decides both the vectors and how long a chunk may be: it is

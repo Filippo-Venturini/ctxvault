@@ -34,7 +34,7 @@ class SemanticVault(BaseVault):
     })
     prune_reasons = SEMANTIC_REASONS
 
-    def index_file(self, file_path:Path, agent_metadata: dict | None = None)-> None:
+    def index_file(self, file_path:Path, agent_metadata: dict | None = None, *, new_write: bool = False)-> None:
         from ctxvault.core import indexer
 
         if file_path.suffix not in SUPPORTED_EXT:
@@ -43,7 +43,8 @@ class SemanticVault(BaseVault):
         if not file_path.resolve().is_relative_to(self.vault_path):
             raise FileOutsideVaultError("The file to index is outside the Context Vault.")
 
-        indexer.index_file(file_path=str(file_path), config=self.config, agent_metadata=agent_metadata)
+        indexer.index_file(file_path=str(file_path), config=self.config, agent_metadata=agent_metadata,
+                           new_write=new_write)
 
     def index_files(self, path: str | None = None)-> tuple[list[str], list[str]]:
         base_path = self._get_base_path(path=path)
@@ -210,4 +211,4 @@ class SemanticVault(BaseVault):
         self.write_file(file_path=file_path, content=content, overwrite=overwrite, agent_metadata=agent_metadata)
 
         abs_path = (self.vault_path / file_path).resolve()
-        self.index_file(file_path=abs_path, agent_metadata=agent_metadata)
+        self.index_file(file_path=abs_path, agent_metadata=agent_metadata, new_write=True)

@@ -13,6 +13,7 @@ All notable changes to CtxVault are documented here. The format follows
 ### Fixed
 
 - LongMemEval episodic replay uses the default embedding model when `--embedding-model` is omitted, including consolidation candidate lookup and combined facts, matching the model recorded in the manifest (#84).
+- Indexing a file again (`index`, `reindex --stale`) keeps the agent metadata its chunks carry. In 0.10.0 it was dropped, so an agent-written document came back as human-written. A `write_doc` is a new write and still carries only the metadata it is given.
 
 ## [0.10.0] - 2026-11-19
 

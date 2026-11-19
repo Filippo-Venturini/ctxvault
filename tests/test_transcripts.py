@@ -112,6 +112,24 @@ def test_rewriting_any_document_shorter_leaves_no_old_chunks(vault):
     vault.write_doc("doc.md", "short now")
     assert querying.get_document_chunks(doc_id, vault.config) == ["short now"]
 
+def test_indexing_a_file_again_keeps_its_agent_metadata(vault):
+    """Dropping a document's chunks before writing the new ones must not drop
+    what the writing agent attached: `index` and sync are not new writes."""
+    vault.write_doc("doc.md", "some words", agent_metadata={"generated_by": "agent-x", "topic": "t"})
+    doc_id = vault.list_documents()[0].doc_id
+    vault.index_files()
+    vault.sync_index()
+    metadata = records(vault, doc_id)["metadatas"][0]
+    assert (metadata["generated_by"], metadata["topic"]) == ("agent-x", "t")
+
+    vault.write_doc("doc.md", "other words", agent_metadata={"generated_by": "agent-y"})
+    metadata = records(vault, doc_id)["metadatas"][0]
+    assert metadata["generated_by"] == "agent-y" and "topic" not in metadata   # a new write says it all
+
+    vault.write_doc("doc.md", "words of a person")
+    metadata = records(vault, doc_id)["metadatas"][0]
+    assert "generated_by" not in metadata   # nor does a new write without metadata inherit the old
+
 @pytest.mark.parametrize("call, error", [
     (lambda v: write_session(v, "s.md", turns(1)), UnsupportedFileTypeError),
     (lambda v: write_session(v, "s.txt", []), ValueError),
