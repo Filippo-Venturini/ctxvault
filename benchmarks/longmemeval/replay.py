@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Iterator, Literal
 
 from ctxvault import Client
-from ctxvault.consolidation import Turn, consolidate, consolidate_session, ConsolidationConfig, sources
+from ctxvault.consolidation import Turn, consolidate, consolidate_session, facts_and_transcripts, sources
 from ctxvault.core.transcripts import write_session
 from ctxvault.core.vaults.episodic import EpisodicVault
 from ctxvault.core.vaults.semantic import SemanticVault
@@ -179,9 +179,10 @@ def memory_for(
         if extraction_model is None:
             raise ValueError("The episodic configuration needs an extraction model.")
         if config == "episodic+semantic":
-            client.init(EPISODIC_VAULT, "episodic", embedding_model=embedding_model)
-            client.init(SEMANTIC_VAULT, "semantic", embedding_model=embedding_model)
-            topology = ConsolidationConfig(facts_vault=EPISODIC_VAULT, transcripts_vault=SEMANTIC_VAULT)
+            # Create local vaults first: the reusable preset also accepts global ones.
+            client.init("lme-facts", "episodic", embedding_model=embedding_model)
+            client.init("lme-transcripts", "semantic", embedding_model=embedding_model)
+            topology = facts_and_transcripts("lme", embedding_model=embedding_model)
             vault = client.episodic(topology.facts_vault)
             transcripts = client.semantic(topology.transcripts_vault)
             try:

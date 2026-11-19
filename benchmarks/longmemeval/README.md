@@ -32,9 +32,10 @@ follows the official clarification and treats the question as immediately
 after that session.
 
 Combined replay creates both vaults explicitly in the fresh local registry and
-uses `ConsolidationConfig` with `consolidate_session` to keep
-facts and source text linked by public chunk references. Unlike a reusable
-preset, it never accepts an existing same-named global vault. It reads episodes as
+then uses the `facts_and_transcripts` preset with `consolidate_session` to keep
+facts and source text linked by public chunk references. Creating the local
+vaults first prevents the reusable preset from accepting a same-named global
+vault. It reads episodes as
 of the question instant, then resolves only those episodes' references. Facts
 come first in the answer prompt; the verified transcript spans are fallback
 for details the facts omitted. Repeated references to a chunk are included

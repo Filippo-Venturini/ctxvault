@@ -10,6 +10,7 @@ All notable changes to CtxVault are documented here. The format follows
 
 ### Added
 
+- **LongMemEval benchmark harness** (#47, #78): checksum-verified datasets, isolated date-ordered replay, full-context, semantic-only, episodic and episodic+semantic configurations, official hypotheses, grading, cumulative usage diagnostics, resume and a report. Combined replay reads facts first and resolves their verified transcript spans as fallback; semantic-only uses date-aware `write_session` ingestion.
 - `OpenAICompatibleModel` accepts a per-call `usage_callback(stage, prompt_tokens, completion_tokens)` and exposes `last_extraction_unparseable` for extraction diagnostics (#78).
 - **Reopen a closed episode.** `reopen_episode(...)` makes a closed episodic statement current again without erasing the close: the closure, its reason and the reopen are all kept, so "what held on day X" still answers correctly; an as-of `known_at` instant between a close and its reopen still sees the episode as closed (#48).
 - **Event metadata.** `confirm_episode`, `dispute_episodes` and `invalidate_episode` accept optional JSON `metadata`, stored with the event rather than on the episode, and returned by `history()`, `attestations()` and `disputes()` (#51). `query_episodes(..., event_metadata_filters=...)` keeps episodes whose confirm, dispute or close carries every given key/value (#51).
