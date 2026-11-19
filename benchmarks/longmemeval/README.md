@@ -19,14 +19,34 @@ is [xiaowu0162/longmemeval-cleaned](https://huggingface.co/datasets/xiaowu0162/l
 | full-context          | The whole dated history in the prompt (the ceiling). |
 | semantic-only         | Sessions indexed as documents; the top retrieved chunks. |
 | episodic              | Sessions consolidated with ctxvault.consolidation; episodes that held as of the question date. |
-| episodic+semantic     | Facts first, text as fallback. Reserved for the follow-up PR after this harness merges (using #76). |
+| episodic+semantic     | Facts first, followed by their verified transcript spans as fallback (using a fresh facts+transcripts configuration). |
 
-Each question gets a fresh vault. Sessions are ingested in date order, with
+Each question gets fresh vaults. Semantic sessions use date-aware `write_session`
+ingestion, so chunks carry the conversation dates rather than file mtimes.
+Semantic retrieval only admits sessions ending at or before the question
+instant. Sessions are ingested in date order, with
 at= set to the session date (replay in transaction time). The question is
 then asked as of question_date. When that clock falls earlier on the same
 day as the last session — a known LongMemEval annotation quirk — the harness
 follows the official clarification and treats the question as immediately
 after that session.
+
+Combined replay creates both vaults explicitly in the fresh local registry and
+uses `ConsolidationConfig` with `consolidate_session` to keep
+facts and source text linked by public chunk references. Unlike a reusable
+preset, it never accepts an existing same-named global vault. It reads episodes as
+of the question instant, then resolves only those episodes' references. Facts
+come first in the answer prompt; the verified transcript spans are fallback
+for details the facts omitted. Repeated references to a chunk are included
+once. Changed, missing, refused or unreachable sources contribute no text.
+A claim that cites no turn has no transcript fallback. There is no second
+semantic similarity search or score threshold across vaults.
+
+`--n-results` bounds episodes and, separately, fallback chunks in combined mode.
+An equal result count is not an equal token budget: use the reported token
+counts when comparing configurations. Both stores are closed before removing
+the question's temporary directory. Answer prompt version `lme-answer-3`
+records this facts-first policy and prevents resuming an older prompt run.
 
 ## Commands
 
@@ -48,6 +68,10 @@ python -m benchmarks.longmemeval \
 
 python -m benchmarks.longmemeval \
   --config episodic --split oracle --limit 5 --resume \
+  --answer-model qwen2.5:7b --extract-model qwen2.5:7b --judge-model qwen2.5:7b
+
+python -m benchmarks.longmemeval \
+  --config episodic+semantic --split oracle --limit 5 --resume \
   --answer-model qwen2.5:7b --extract-model qwen2.5:7b --judge-model qwen2.5:7b
 ```
 
@@ -102,7 +126,7 @@ Each run writes benchmarks/longmemeval/results/<run-name>/:
 
 - hypotheses.jsonl: one line per question, {"question_id": ..., "hypothesis": ...}, accepted as is by the official LongMemEval evaluation script.
 - manifest.json: ctxvault commit, config, split, question count, extraction / answer / judge models, prompt version, cumulative token counts (in and out, per stage), cumulative wall time, `n_results`, embedding model (`null` for full-context), dataset SHA-256.
-  Episodic manifests also contain cumulative `extraction_diagnostics`: `sessions_consolidated`, `sessions_with_unparseable_reply`, `claims_written` and `claims_rejected`. An unparseable reply is one without a usable claims list, distinct from a valid empty list. Written claims count applied writes, confirmations, revisions and supersessions once per claim (not the secondary dispute operation). Rejected claims count schema/kind rejections and refused primary writes; an unparseable reply has no countable claims and is tracked separately.
+  Episodic and combined manifests also contain cumulative `extraction_diagnostics`: `sessions_consolidated`, `sessions_with_unparseable_reply`, `claims_written` and `claims_rejected`. An unparseable reply is one without a usable claims list, distinct from a valid empty list. Written claims count applied writes, confirmations, revisions and supersessions once per claim (not the secondary dispute operation). Rejected claims count schema/kind rejections and refused primary writes; an unparseable reply has no countable claims and is tracked separately.
 - scores.json: overall accuracy and accuracy per question type, from the judge model (the official yes/no prompt) and from a deterministic grader (every content word of the gold answer appears in the hypothesis). The grader is `null` for abstention (`_abs`) and `single-session-preference` questions, whose gold answers are explanations or rubrics; they do not enter grader accuracy or the disagreement list. The questions where both graders apply and disagree are listed.
 
 The report includes the split column so oracle, `s`, `m` and custom runs remain distinguishable. A run with a missing or incomplete manifest is not merged by report. Anyone
