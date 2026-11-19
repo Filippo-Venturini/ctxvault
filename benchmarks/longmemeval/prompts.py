@@ -8,9 +8,9 @@ the manifest.
 
 from __future__ import annotations
 
-from benchmarks.longmemeval.data import Question, Session, to_iso
+from benchmarks.longmemeval.data import Question, Session, question_instant, to_iso
 
-ANSWER_PROMPT_VERSION = "lme-answer-1"
+ANSWER_PROMPT_VERSION = "lme-answer-2"
 JUDGE_PROMPT_VERSION = "longmemeval-evaluate_qa"
 
 ANSWER_SYSTEM = """You answer a question from the memory provided below, and from nothing else.
@@ -31,7 +31,7 @@ def format_history(sessions: tuple[Session, ...] | list[Session]) -> str:
 
 
 def answer_prompt(question: Question, memory: str) -> tuple[str, str]:
-    asked = to_iso(question.question_date)
+    asked = to_iso(question_instant(question.question_date, question.last_session_date))
     user = (
         f"Today is {asked}.\n\n"
         f"Memory:\n{memory}\n\n"

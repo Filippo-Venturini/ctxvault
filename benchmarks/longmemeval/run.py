@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import os
 import re
 import subprocess
@@ -11,8 +12,11 @@ import tempfile
 import time
 from pathlib import Path
 
-from benchmarks.longmemeval.chat import ChatClient, CountingConsolidationModel, TokenMeter
-from benchmarks.longmemeval.data import DATASET_REPO, SPLITS, load_questions
+from ctxvault.consolidation import OpenAICompatibleModel
+from ctxvault.core.embedding import DEFAULT_EMBEDDING_MODEL
+
+from benchmarks.longmemeval.chat import ChatClient, TokenMeter
+from benchmarks.longmemeval.data import DATASET_REPO, SPLITS, download_split, load_from_path, sha256_file
 from benchmarks.longmemeval.grade import grader_correct, judge_correct
 from benchmarks.longmemeval.output import (
     HYPOTHESES,
@@ -79,6 +83,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--judge-model", help="Model that applies the official LongMemEval yes/no prompt.")
     parser.add_argument("--base-url", default="http://localhost:11434/v1")
     parser.add_argument("--api-key", default=os.environ.get("OPENAI_API_KEY"))
+    parser.add_argument("--judge-base-url", help="Judge endpoint (defaults to --base-url).")
+    parser.add_argument("--judge-api-key", help="Judge key (defaults to --api-key).")
     parser.add_argument("--allow-remote", action="store_true")
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--n-results", type=int, default=DEFAULT_N_RESULTS, help="Chunks or episodes retrieved.")
@@ -89,7 +95,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _extraction_model(args: argparse.Namespace, client: ChatClient):
     if args.config in ("episodic", "episodic+semantic"):
         name = args.extract_model or args.answer_model
-        return CountingConsolidationModel(client, name), name
+        return OpenAICompatibleModel(
+            name, base_url=args.base_url, api_key=args.api_key,
+            allow_remote=args.allow_remote, timeout=args.timeout,
+            usage_callback=client.meter.record,
+        ), name
     return None, None
 
 
@@ -101,7 +111,10 @@ def grade_rows(questions, hypotheses: dict[str, str], labels: dict[str, dict], c
             continue
         recorded = labels.get(question.question_id, {})
         grader = recorded.get("grader")
-        if grader is None:
+        if question.abstention or question.question_type == "single-session-preference":
+            # Also discard any inappropriate label cached by an older harness.
+            grader = None
+        elif grader is None:
             grader = grader_correct(hypothesis, question.answer)
         judge = recorded.get("judge")
         if judge is None and judge_model is not None:
@@ -116,19 +129,27 @@ def grade_rows(questions, hypotheses: dict[str, str], labels: dict[str, dict], c
     return rows
 
 
+@contextmanager
+def _work_root(path: Path | None):
+    if path is not None:
+        path.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="ctxvault-lme-", dir=path) as root:
+        yield Path(root)
+
+
 def run(args: argparse.Namespace) -> Path:
     if args.config == "episodic+semantic":
         raise SystemExit(
             "The episodic+semantic configuration needs date-aware transcript "
             "ingestion (#45) and is not implemented in this harness yet."
         )
-    questions = load_questions(
-        args.split, path=args.data, cache=args.cache_dir, limit=args.limit,
-    )
+    source = args.data or download_split(args.split, cache=args.cache_dir)
+    questions = load_from_path(source, limit=args.limit)
     if not questions:
         raise SystemExit("No questions to run.")
 
-    run_name = args.run_name or _slug(f"{args.config}-{args.split}-{args.answer_model}")
+    split = "custom" if args.data else args.split
+    run_name = args.run_name or _slug(f"{args.config}-{split}-{args.answer_model}")
     out = args.results_dir / run_name
     out.mkdir(parents=True, exist_ok=True)
     already = written_ids(out / HYPOTHESES) if args.resume else set()
@@ -137,83 +158,111 @@ def run(args: argparse.Namespace) -> Path:
             f"{out / HYPOTHESES} already exists. Pass --resume to continue, or choose another --run-name."
         )
 
-    meter = TokenMeter()
+    previous = load_labels(out / MANIFEST) if args.resume else {}
+    if already and not previous:
+        raise SystemExit("Cannot recover resume accounting without the previous manifest.")
+    meter = TokenMeter.from_io(previous.get("token_counts") or {})
     client = ChatClient(
         base_url=args.base_url, api_key=args.api_key,
         allow_remote=args.allow_remote, timeout=args.timeout, meter=meter,
     )
+    judge_client = client
+    if args.judge_model and (args.judge_base_url is not None or args.judge_api_key is not None):
+        judge_client = ChatClient(
+            base_url=args.judge_base_url or args.base_url,
+            api_key=args.judge_api_key if args.judge_api_key is not None else args.api_key,
+            allow_remote=args.allow_remote, timeout=args.timeout, meter=meter,
+        )
     extraction, extract_name = _extraction_model(args, client)
-    if extraction is not None:
-        # Record the real prompt version in the manifest later.
-        args._extract_prompt_version = extraction.prompt_version
-    else:
-        args._extract_prompt_version = None
-
-    work_root = Path(args.workdir) if args.workdir else Path(tempfile.mkdtemp(prefix="ctxvault-lme-"))
-    started = time.monotonic()
-    pending = [q for q in questions if q.question_id not in already]
-    try:
-        for index, question in enumerate(pending, start=1):
-            print(f"[{index}/{len(pending)}] {question.question_id}", flush=True)
-            workdir = work_root / question.question_id
-            memory = memory_for(
-                args.config, question, workdir=workdir,
-                extraction_model=extraction, n_results=args.n_results,
-                embedding_model=args.embedding_model,
-            )
-            system, user = answer_prompt(question, memory)
-            hypothesis = client.complete(
-                args.answer_model, stage="answer", system=system, user=user,
-            ).text.strip()
-            append_hypothesis(out / HYPOTHESES, question.question_id, hypothesis)
-            already.add(question.question_id)
-            _write_manifest_and_scores(
-                out, args=args, questions=questions, already=already,
-                client=client, extract_name=extract_name, started=started,
-            )
-    finally:
-        # Best-effort: leave --workdir in place if the caller passed one.
-        if not args.workdir:
-            import shutil
-            shutil.rmtree(work_root, ignore_errors=True)
-
-    _write_manifest_and_scores(
-        out, args=args, questions=questions, already=already,
-        client=client, extract_name=extract_name, started=started,
-    )
-    print(f"Wrote {out}", flush=True)
-    return out
-
-
-def _write_manifest_and_scores(out, *, args, questions, already, client, extract_name, started):
-    hypotheses = {row["question_id"]: row["hypothesis"] for row in read_hypotheses(out / HYPOTHESES)}
-    labels_path = out / "_labels.json"
-    labels = load_labels(labels_path)
-    # Only grade questions we have answered in this folder.
-    answered = [q for q in questions if q.question_id in already]
-    rows = grade_rows(answered, hypotheses, labels, client, args.judge_model)
-    write_labels(labels_path, labels)
-    write_json(out / SCORES, build_scores(rows))
-    write_json(out / MANIFEST, {
+    diagnostics = {
+        key: int((previous.get("extraction_diagnostics") or {}).get(key, 0))
+        for key in (
+            "sessions_consolidated", "sessions_with_unparseable_reply",
+            "claims_written", "claims_rejected",
+        )
+    }
+    manifest = {
         "ctxvault_commit": ctxvault_commit(),
         "config": args.config,
-        "split": "custom" if args.data else args.split,
-        "question_count": len(already),
+        "split": split,
         "models": {
             "extraction": extract_name,
             "answer": args.answer_model,
             "judge": args.judge_model,
         },
         "prompt_version": {
-            "extraction": getattr(args, "_extract_prompt_version", None),
+            "extraction": extraction.prompt_version if extraction is not None else None,
             "answer": ANSWER_PROMPT_VERSION,
             "judge": JUDGE_PROMPT_VERSION if args.judge_model else None,
         },
+        "n_results": args.n_results,
+        "embedding_model": (args.embedding_model or DEFAULT_EMBEDDING_MODEL)
+            if args.config != "full-context" else None,
+        "dataset": DATASET_REPO if not args.data else "custom",
+        "dataset_sha256": sha256_file(source),
+        "run_name": out.name,
+    }
+    if args.config == "episodic":
+        manifest["extraction_diagnostics"] = diagnostics
+    for key in ("config", "split", "models", "prompt_version", "n_results", "embedding_model", "dataset_sha256"):
+        if key in previous and previous[key] != manifest[key]:
+            raise SystemExit(f"Cannot resume: {key} differs from the previous manifest. Choose a new --run-name.")
+    if already - {q.question_id for q in questions}:
+        raise SystemExit("Cannot resume a selection that excludes previously answered questions.")
+
+    # Always create our own temporary child, never delete a caller-owned directory
+    # or use dataset question IDs as paths. Keep --workdir itself in place.
+    with _work_root(args.workdir) as work_root:
+        started = time.monotonic() - float(previous.get("wall_time_seconds") or 0)
+        try:
+            pending = [q for q in questions if q.question_id not in already]
+            for index, question in enumerate(pending, start=1):
+                print(f"[{index}/{len(pending)}] {question.question_id}", flush=True)
+                with tempfile.TemporaryDirectory(prefix="question-", dir=work_root) as workdir:
+                    memory = memory_for(
+                        args.config, question, workdir=Path(workdir),
+                        extraction_model=extraction, n_results=args.n_results,
+                        embedding_model=args.embedding_model, diagnostics=diagnostics,
+                    )
+                    system, user = answer_prompt(question, memory)
+                    hypothesis = client.complete(
+                        args.answer_model, stage="answer", system=system, user=user,
+                    ).text.strip()
+                    append_hypothesis(out / HYPOTHESES, question.question_id, hypothesis)
+                    already.add(question.question_id)
+                # The vault is gone before judging or ingesting the next question.
+                _write_manifest_and_scores(
+                    out, questions=questions, already=already,
+                    client=judge_client, manifest=manifest, started=started,
+                )
+            _write_manifest_and_scores(
+                out, questions=questions, already=already,
+                client=judge_client, manifest=manifest, started=started,
+            )
+        finally:
+            _write_manifest(out, already=already, client=judge_client, manifest=manifest, started=started)
+    print(f"Wrote {out}", flush=True)
+    return out
+
+
+def _write_manifest_and_scores(out, *, questions, already, client, manifest, started):
+    hypotheses = {row["question_id"]: row["hypothesis"] for row in read_hypotheses(out / HYPOTHESES)}
+    labels_path = out / "_labels.json"
+    labels = load_labels(labels_path)
+    answered = [q for q in questions if q.question_id in already]
+    rows = grade_rows(answered, hypotheses, labels, client, manifest["models"]["judge"])
+    write_labels(labels_path, labels)
+    write_json(out / SCORES, build_scores(rows))
+    _write_manifest(out, already=already, client=client, manifest=manifest, started=started)
+
+
+def _write_manifest(out, *, already, client, manifest, started):
+    manifest.update({
+        "question_count": len(already),
         "token_counts": client.meter.as_io(),
         "wall_time_seconds": round(time.monotonic() - started, 3),
-        "dataset": DATASET_REPO,
-        "run_name": out.name,
     })
+    write_json(out / MANIFEST, manifest)
 
 
 def main(argv: list[str] | None = None) -> None:

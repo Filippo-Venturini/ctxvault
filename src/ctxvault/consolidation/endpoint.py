@@ -10,7 +10,7 @@ import json
 import re
 from importlib import resources
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 import requests
@@ -116,6 +116,10 @@ class OpenAICompatibleModel:
     machine unless `allow_remote` is set, because the conversations it reads
     leave the process. Temperature is 0, so two runs with the same model and
     prompts are as close as the server allows.
+    ``usage_callback(stage, prompt_tokens, completion_tokens)`` is called after
+    each successful response; stage is "extract" or "relate". Missing usage is
+    reported as zero. ``last_extraction_unparseable`` distinguishes an unusable
+    extraction reply from a valid empty claims list and resets on each extract.
     """
 
     def __init__(
@@ -129,6 +133,7 @@ class OpenAICompatibleModel:
         language: str = "en",
         json_mode: bool = True,
         timeout: float = DEFAULT_TIMEOUT,
+        usage_callback: Callable[[str, int, int], None] | None = None,
     ):
         if not allow_remote and not _is_loopback(base_url):
             raise ValueError(
@@ -144,8 +149,10 @@ class OpenAICompatibleModel:
         # rejects `response_format`; the answer is parsed either way.
         self.json_mode = json_mode
         self.timeout = timeout
+        self.usage_callback = usage_callback
+        self.last_extraction_unparseable = False
 
-    def _chat(self, instructions: str, content: str) -> str:
+    def _chat(self, instructions: str, content: str, *, stage: str) -> str:
         body: dict[str, Any] = {
             "model": self.name,
             "temperature": 0,
@@ -165,15 +172,25 @@ class OpenAICompatibleModel:
         if response.status_code != 200:
             raise ModelEndpointError(f"The model at {self.base_url} answered {response.status_code}: {response.text[:200]}")
         try:
-            return response.json()["choices"][0]["message"]["content"] or ""
+            payload = response.json()
+            text = payload["choices"][0]["message"]["content"] or ""
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise ModelEndpointError(f"The model at {self.base_url} did not answer as a chat completion.") from exc
 
+        if self.usage_callback is not None:
+            usage = payload.get("usage") or {}
+            self.usage_callback(
+                stage, int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0),
+            )
+        return text
+
     def extract(self, turns: list[Turn]) -> list[Any]:
-        answer = _parse_json(self._chat(self.prompts.extract, _conversation(turns)))
+        self.last_extraction_unparseable = False
+        answer = _parse_json(self._chat(self.prompts.extract, _conversation(turns), stage="extract"))
         if isinstance(answer, dict):
             answer = answer.get("claims")
+        self.last_extraction_unparseable = not isinstance(answer, list)
         return answer if isinstance(answer, list) else []
 
     def relate(self, claim: Claim, candidates: list[Episode]) -> Any:
-        return _parse_json(self._chat(self.prompts.relate, _comparison(claim, candidates)))
+        return _parse_json(self._chat(self.prompts.relate, _comparison(claim, candidates), stage="relate"))

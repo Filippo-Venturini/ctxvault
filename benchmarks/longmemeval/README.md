@@ -19,7 +19,7 @@ is [xiaowu0162/longmemeval-cleaned](https://huggingface.co/datasets/xiaowu0162/l
 | full-context          | The whole dated history in the prompt (the ceiling). |
 | semantic-only         | Sessions indexed as documents; the top retrieved chunks. |
 | episodic              | Sessions consolidated with ctxvault.consolidation; episodes that held as of the question date. |
-| episodic+semantic     | Facts first, text as fallback. Not implemented here: it needs date-aware transcript ingestion from #45. |
+| episodic+semantic     | Facts first, text as fallback. Reserved for the follow-up PR after this harness merges (using #76). |
 
 Each question gets a fresh vault. Sessions are ingested in date order, with
 at= set to the session date (replay in transaction time). The question is
@@ -61,7 +61,28 @@ python -m benchmarks.longmemeval \
 ```
 
 OPENAI_API_KEY is read if --api-key is omitted. Use --data path.json
-for a local file instead of downloading a split.
+for a local file instead of downloading a split; its default run name and split
+are `custom`, and its complete file SHA-256 is recorded too.
+
+The judge can use a different endpoint and key, for example a local answer
+model with `--judge-model gpt-4o --judge-base-url https://api.openai.com/v1
+--judge-api-key ... --allow-remote`. Omitted judge options inherit the answer
+endpoint/key. Keys are never written to the manifest. A remote judge receives
+the question, gold answer and hypothesis; `--allow-remote` is required.
+
+`--resume` carries all stage token totals, wall time and extraction diagnostics
+forward, including a resume with nothing left to answer. It can extend a run
+with a larger `--limit`; it refuses a different dataset checksum, model,
+prompt version or retrieval configuration, or a selection that excludes
+already answered questions. The previous manifest is required when hypotheses
+exist, since missing historical usage cannot be reconstructed. Usage already
+recorded during an interrupted question is retained; replaying it adds the new
+attempt's usage. Missing provider usage is reported as zero, not estimated.
+
+Per-question vaults live in fresh temporary children of `--workdir` (or the
+system temporary directory) and are removed immediately after their hypothesis
+is saved, before judging or ingesting another question. The caller's workdir
+and any pre-existing files in it are left alone.
 
 Merge every complete folder under results/:
 
@@ -74,10 +95,11 @@ python -m benchmarks.longmemeval.report
 Each run writes benchmarks/longmemeval/results/<run-name>/:
 
 - hypotheses.jsonl: one line per question, {"question_id": ..., "hypothesis": ...}, accepted as is by the official LongMemEval evaluation script.
-- manifest.json: ctxvault commit, config, split, question count, extraction / answer / judge models, prompt version, token counts (in and out, per stage), wall time.
-- scores.json: overall accuracy and accuracy per question type, from the judge model (the official yes/no prompt) and from a deterministic grader (every content word of the gold answer appears in the hypothesis). The questions where the two disagree are listed.
+- manifest.json: ctxvault commit, config, split, question count, extraction / answer / judge models, prompt version, cumulative token counts (in and out, per stage), cumulative wall time, `n_results`, embedding model (`null` for full-context), dataset SHA-256.
+  Episodic manifests also contain cumulative `extraction_diagnostics`: `sessions_consolidated`, `sessions_with_unparseable_reply`, `claims_written` and `claims_rejected`. An unparseable reply is one without a usable claims list, distinct from a valid empty list. Written claims count applied writes, confirmations, revisions and supersessions once per claim (not the secondary dispute operation). Rejected claims count schema/kind rejections and refused primary writes; an unparseable reply has no countable claims and is tracked separately.
+- scores.json: overall accuracy and accuracy per question type, from the judge model (the official yes/no prompt) and from a deterministic grader (every content word of the gold answer appears in the hypothesis). The grader is `null` for abstention (`_abs`) and `single-session-preference` questions, whose gold answers are explanations or rubrics; they do not enter grader accuracy or the disagreement list. The questions where both graders apply and disagree are listed.
 
-A run with a missing or incomplete manifest is not merged by report. Anyone
+The report includes the split column so oracle, `s`, `m` and custom runs remain distinguishable. A run with a missing or incomplete manifest is not merged by report. Anyone
 with API keys can open a PR that adds one complete results/<run-name>/
 folder.
 

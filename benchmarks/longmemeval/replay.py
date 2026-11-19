@@ -21,7 +21,6 @@ from ctxvault.core.vaults.episodic import EpisodicVault
 from ctxvault.core.vaults.semantic import SemanticVault
 from ctxvault.storage import sqlite_store
 
-from benchmarks.longmemeval.chat import CountingConsolidationModel
 from benchmarks.longmemeval.data import Question, Session, question_instant, to_iso
 from benchmarks.longmemeval.prompts import format_history, format_session
 
@@ -64,6 +63,8 @@ def ingest_episodic(
     vault: EpisodicVault,
     sessions: tuple[Session, ...] | list[Session],
     model,
+    *,
+    diagnostics: dict[str, int] | None = None,
 ) -> None:
     for session in sessions:
         turns = [
@@ -72,7 +73,16 @@ def ingest_episodic(
         ]
         if not turns:
             continue
-        consolidate(vault, turns, model, at=to_iso(session.date))
+        result = consolidate(vault, turns, model, at=to_iso(session.date))
+        if diagnostics is not None:
+            diagnostics["sessions_consolidated"] += 1
+            diagnostics["sessions_with_unparseable_reply"] += int(
+                getattr(model, "last_extraction_unparseable", False)
+            )
+            # A contradiction has a second, dispute operation: count the claim once.
+            primary = [op for op in result.operations if op.verb != "dispute_episodes"]
+            diagnostics["claims_written"] += sum(op.applied for op in primary)
+            diagnostics["claims_rejected"] += result.dropped + sum(not op.applied for op in primary)
 
 
 def retrieve_semantic(vault: SemanticVault, question: Question, *, n_results: int) -> str:
@@ -115,6 +125,7 @@ def memory_for(
     extraction_model=None,
     n_results: int = DEFAULT_N_RESULTS,
     embedding_model: str | None = None,
+    diagnostics: dict[str, int] | None = None,
 ) -> str:
     """Build the memory block the answer model will see for this question."""
     if config == "full-context":
@@ -138,5 +149,5 @@ def memory_for(
             raise ValueError("The episodic configuration needs an extraction model.")
         client.init(EPISODIC_VAULT, "episodic", embedding_model=embedding_model)
         vault = client.episodic(EPISODIC_VAULT)
-        ingest_episodic(vault, question.sessions, extraction_model)
+        ingest_episodic(vault, question.sessions, extraction_model, diagnostics=diagnostics)
         return retrieve_episodic(vault, question, limit=n_results)

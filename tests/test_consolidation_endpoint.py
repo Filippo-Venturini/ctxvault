@@ -183,3 +183,35 @@ class TestEndToEnd:
                     OpenAICompatibleModel("m"), at=MARCH)
 
         assert server.calls[0]["body"]["messages"][1]["content"] == f"[{MARCH}] Giuseppe: I moved last March."
+
+
+class TestUsageAndDiagnostics:
+    def test_callback_reports_extract_and_relate_usage(self, server):
+        seen = []
+        for content in ('{"claims": []}', '{"relation": "new"}'):
+            server.replies.append(Reply(body={
+                "choices": [{"message": {"content": content}}],
+                "usage": {"prompt_tokens": 17, "completion_tokens": 4},
+            }))
+        model = OpenAICompatibleModel("m", usage_callback=lambda *usage: seen.append(usage))
+        model.extract([])
+        model.relate(Claim.model_validate(CLAIM), [])
+        assert seen == [("extract", 17, 4), ("relate", 17, 4)]
+
+    def test_missing_usage_is_zero_and_valid_empty_extraction_is_not_a_failure(self, server):
+        seen = []
+        model = OpenAICompatibleModel("m", usage_callback=lambda *usage: seen.append(usage))
+        server.replies.extend([Reply("not JSON"), Reply('{"claims": []}')])
+        assert model.extract([]) == []
+        assert model.last_extraction_unparseable is True
+        assert model.extract([]) == []
+        assert model.last_extraction_unparseable is False
+        assert seen == [("extract", 0, 0), ("extract", 0, 0)]
+
+    def test_failed_http_response_does_not_report_successful_usage(self, server):
+        seen = []
+        server.replies.append(Reply(status_code=500, body={"error": "unavailable"}))
+        model = OpenAICompatibleModel("m", usage_callback=lambda *usage: seen.append(usage))
+        with pytest.raises(ModelEndpointError):
+            model.extract([])
+        assert seen == []

@@ -1,9 +1,8 @@
 """An OpenAI-compatible chat client that records token use per stage.
 
-The consolidation layer already talks to the same kind of endpoint; this
-client is for answering and judging, and for a consolidation adapter that
-counts tokens the layer's own client does not expose. Temperature is always
-0. A remote endpoint is refused unless `allow_remote` is set, because the
+The consolidation layer reports extraction and relation usage through its
+public callback; this client is for answering and judging. Temperature is
+always 0. A remote endpoint is refused unless `allow_remote` is set, because the
 conversations leave the machine.
 """
 
@@ -16,10 +15,6 @@ from urllib.parse import urlparse
 
 import requests
 
-from ctxvault.consolidation.claims import Claim
-from ctxvault.consolidation.endpoint import Prompts, _comparison, _conversation, _parse_json
-from ctxvault.consolidation.model import Turn
-from ctxvault.models.episodes import Episode
 
 DEFAULT_BASE_URL = "http://localhost:11434/v1"
 DEFAULT_TIMEOUT = 120.0
@@ -62,6 +57,17 @@ class TokenMeter:
             return getattr(self, name)
         except AttributeError as exc:
             raise ValueError(f"Unknown token stage {name!r}.") from exc
+
+    @classmethod
+    def from_io(cls, counts: dict) -> "TokenMeter":
+        meter = cls()
+        for stage in STAGES:
+            values = counts.get(stage) or {}
+            meter.stage(stage).add(int(values.get("in") or 0), int(values.get("out") or 0))
+        return meter
+
+    def record(self, stage: str, prompt: int, completion: int) -> None:
+        self.stage(stage).add(prompt, completion)
 
     def as_io(self) -> dict[str, dict[str, int]]:
         return {name: getattr(self, name).as_io() for name in STAGES}
@@ -142,32 +148,3 @@ class ChatClient:
         completion_tokens = int(usage.get("completion_tokens") or 0)
         self.meter.stage(stage).add(prompt_tokens, completion_tokens)
         return Completion(text=text, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
-
-
-class CountingConsolidationModel:
-    """A ConsolidationModel that uses `ChatClient`, so extraction tokens are counted."""
-
-    def __init__(self, client: ChatClient, model: str, *, prompts: Prompts | None = None):
-        self.client = client
-        self.name = model
-        self.prompts = prompts or Prompts.load("en")
-        self.prompt_version = self.prompts.version
-
-    def extract(self, turns: list[Turn]) -> list[Any]:
-        answer = _parse_json(
-            self.client.complete(
-                self.name, stage="extract",
-                system=self.prompts.extract, user=_conversation(turns), json_mode=True,
-            ).text
-        )
-        if isinstance(answer, dict):
-            answer = answer.get("claims")
-        return answer if isinstance(answer, list) else []
-
-    def relate(self, claim: Claim, candidates: list[Episode]) -> Any:
-        return _parse_json(
-            self.client.complete(
-                self.name, stage="relate",
-                system=self.prompts.relate, user=_comparison(claim, candidates), json_mode=True,
-            ).text
-        )

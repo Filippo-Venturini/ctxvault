@@ -357,3 +357,238 @@ class TestRun:
                 '--data', 'unused.json',
             ]))
 
+
+
+class TestReviewRegressions:
+    def test_resume_carries_all_stages_and_wall_time_through_a_noop(self, tmp_path, monkeypatch):
+        data = tmp_path / 'three.json'
+        preference = dict(MINI[0], question_id='q_preference', question_type='single-session-preference')
+        data.write_text(json.dumps([*MINI, preference]))
+        scripted = ScriptedClient(['Mestre', 'yes', 'unknown', 'yes', 'Mestre', 'yes'])
+        clock = [0.0]
+        complete = scripted.complete
+
+        def timed_complete(*args, **kwargs):
+            clock[0] += 2
+            return complete(*args, **kwargs)
+
+        scripted.complete = timed_complete
+
+        def client(**kwargs):
+            scripted.meter = kwargs['meter']
+            return scripted
+
+        monkeypatch.setattr('benchmarks.longmemeval.run.ChatClient', client)
+        monkeypatch.setattr('benchmarks.longmemeval.run.time.monotonic', lambda: clock[0])
+        base = ['--config', 'full-context', '--data', str(data), '--answer-model', 'stub',
+                '--judge-model', 'judge', '--results-dir', str(tmp_path / 'results')]
+        out = run(parse_args([*base, '--limit', '1']))
+        assert out.name == 'full-context-custom-stub'
+        first = json.loads((out / 'manifest.json').read_text())
+        assert first['wall_time_seconds'] == 4
+        assert first['token_counts']['answer'] == {'in': 10, 'out': 3}
+        run(parse_args([*base, '--limit', '3', '--resume']))
+        manifest = json.loads((out / 'manifest.json').read_text())
+        assert manifest['question_count'] == 3
+        assert manifest['token_counts']['answer'] == {'in': 30, 'out': 9}
+        assert manifest['token_counts']['judge'] == {'in': 30, 'out': 9}
+        assert manifest['wall_time_seconds'] == 12
+        assert manifest['n_results'] == 8
+        assert manifest['embedding_model'] is None
+        assert manifest['dataset_sha256'] == sha256_file(data)
+        calls = len(scripted.asked)
+        run(parse_args([*base, '--limit', '3', '--resume']))
+        assert len(scripted.asked) == calls
+        assert json.loads((out / 'manifest.json').read_text()) == manifest
+        scores = json.loads((out / 'scores.json').read_text())
+        assert scores['overall']['grader'] == 1.0
+        assert scores['disagreements'] == []
+        labels = json.loads((out / '_labels.json').read_text())
+        assert labels['q_job_abs']['grader'] is None
+        assert labels['q_preference']['grader'] is None
+
+    def test_each_vault_is_removed_before_the_next_question_and_workdir_is_preserved(self, tmp_path, monkeypatch):
+        data = write_mini(tmp_path / 'mini.json')
+        root = tmp_path / 'work'
+        root.mkdir()
+        sentinel = root / 'caller-owned.txt'
+        sentinel.write_text('keep')
+        vaults = []
+
+        def memory(config, question, *, workdir, **kwargs):
+            assert all(not path.exists() for path in vaults)
+            vaults.append(workdir)
+            (workdir / 'vault.sqlite').write_text('temporary')
+            return 'memory'
+
+        monkeypatch.setattr('benchmarks.longmemeval.run.memory_for', memory)
+        monkeypatch.setattr('benchmarks.longmemeval.run.ChatClient',
+                            lambda **kw: ScriptedClient(['Mestre', 'unknown'], meter=kw['meter']))
+        run(parse_args(['--config', 'full-context', '--data', str(data), '--answer-model', 'stub',
+                        '--results-dir', str(tmp_path / 'results'), '--workdir', str(root)]))
+        assert all(not path.exists() for path in vaults)
+        assert list(root.iterdir()) == [sentinel]
+
+    def test_null_grader_overrides_legacy_cached_labels(self, tmp_path):
+        from benchmarks.longmemeval.run import grade_rows
+        questions = load_from_path(write_mini(tmp_path / 'mini.json'))
+        preference = parse_record(dict(MINI[0], question_id='preference', question_type='single-session-preference'))
+        questions.append(preference)
+        labels = {q.question_id: {'grader': False, 'judge': True} for q in questions}
+        labels['q_city']['grader'] = True
+        rows = grade_rows(questions, {q.question_id: 'Mestre' for q in questions}, labels,
+                          ScriptedClient([]), 'judge')
+        assert [row['grader'] for row in rows] == [True, None, None]
+        assert build_scores(rows)['overall']['grader'] == 1.0
+        assert build_scores(rows)['disagreements'] == []
+
+    def test_prompt_now_matches_the_retrieval_instant(self):
+        question = parse_record(dict(MINI[0], question_date='2026/03/10 (Tue) 00:00'))
+        _, prompt = answer_prompt(question, 'memory')
+        expected = to_iso(question_instant(question.question_date, question.last_session_date))
+        assert f'Today is {expected}.' in prompt
+        assert expected == '2026-03-10T11:00:01+00:00'
+
+    def test_judge_can_use_an_independent_endpoint_and_key_with_shared_accounting(self, tmp_path, monkeypatch):
+        seen = []
+
+        def client(**kwargs):
+            seen.append(kwargs)
+            replies = ['yes', 'yes'] if ':19002/' in kwargs['base_url'] else ['Mestre', 'unknown']
+            return ScriptedClient(replies, meter=kwargs['meter'])
+
+        monkeypatch.setattr('benchmarks.longmemeval.run.ChatClient', client)
+        out = run(parse_args([
+            '--config', 'full-context', '--data', str(write_mini(tmp_path / 'mini.json')),
+            '--answer-model', 'answer', '--judge-model', 'judge',
+            '--base-url', 'http://127.0.0.1:19001/v1', '--api-key', 'synthetic-answer-key',
+            '--judge-base-url', 'http://127.0.0.1:19002/v1', '--judge-api-key', 'synthetic-judge-key',
+            '--results-dir', str(tmp_path / 'results'),
+        ]))
+        assert len(seen) == 2
+        assert seen[0]['api_key'] == 'synthetic-answer-key'
+        assert seen[1]['api_key'] == 'synthetic-judge-key'
+        assert seen[0]['meter'] is seen[1]['meter']
+        manifest = json.loads((out / 'manifest.json').read_text())
+        assert manifest['token_counts']['answer']['in'] == 20
+        assert manifest['token_counts']['judge']['in'] == 20
+        assert 'synthetic-' not in (out / 'manifest.json').read_text()
+
+    def test_episodic_uses_public_endpoint_and_records_real_pipeline_results(self, tmp_path, monkeypatch):
+        replies = iter([
+            json.dumps({'claims': [
+                {'subject': 'user', 'statement': 'The user lived in Venezia',
+                 'speaker': 'user', 'kind': 'first_party'},
+                {'not_a_claim': True},
+            ]}),
+            'not JSON', 'Mestre', '{"claims": []}', 'unknown',
+        ])
+
+        class Reply:
+            status_code = 200
+
+            def json(self):
+                return {'choices': [{'message': {'content': next(replies)}}],
+                        'usage': {'prompt_tokens': 10, 'completion_tokens': 3}}
+
+        monkeypatch.setattr('requests.post', lambda *args, **kw: Reply())
+        home = tmp_path / 'global'
+        home.mkdir()
+        (home / 'config.json').write_text('{"vaults": {}}')
+        monkeypatch.setattr('ctxvault.utils.config.GLOBAL_DIR', home)
+        base = ['--config', 'episodic', '--data', str(write_mini(tmp_path / 'mini.json')),
+                '--answer-model', 'answer', '--extract-model', 'extract',
+                '--results-dir', str(tmp_path / 'results')]
+        out = run(parse_args([*base, '--limit', '1']))
+        partial = json.loads((out / 'manifest.json').read_text())
+        assert partial['extraction_diagnostics']['sessions_consolidated'] == 2
+        run(parse_args([*base, '--resume']))
+        manifest = json.loads((out / 'manifest.json').read_text())
+        assert manifest['extraction_diagnostics'] == {
+            'sessions_consolidated': 3, 'sessions_with_unparseable_reply': 1,
+            'claims_written': 1, 'claims_rejected': 1,
+        }
+        assert manifest['embedding_model'] == 'sentence-transformers/all-MiniLM-L6-v2'
+        assert manifest['token_counts']['extract'] == {'in': 30, 'out': 9}
+        assert manifest['token_counts']['answer'] == {'in': 20, 'out': 6}
+        run(parse_args([*base, '--resume']))
+        resumed = json.loads((out / 'manifest.json').read_text())
+        assert resumed['extraction_diagnostics'] == manifest['extraction_diagnostics']
+        assert resumed['token_counts'] == manifest['token_counts']
+
+    def test_resume_refuses_a_different_dataset_instead_of_mixing_results(self, tmp_path, monkeypatch):
+        data = write_mini(tmp_path / 'mini.json')
+        monkeypatch.setattr('benchmarks.longmemeval.run.ChatClient',
+                            lambda **kw: ScriptedClient(['Mestre'], meter=kw['meter']))
+        base = ['--config', 'full-context', '--data', str(data), '--answer-model', 'stub',
+                '--results-dir', str(tmp_path / 'results'), '--limit', '1']
+        run(parse_args(base))
+        data.write_text(json.dumps(MINI) + ' ')
+        with pytest.raises(SystemExit, match='dataset_sha256 differs'):
+            run(parse_args([*base, '--resume']))
+
+    def test_interrupted_answer_costs_are_preserved_for_resume(self, tmp_path, monkeypatch):
+        scripted = ScriptedClient(['Mestre', 'unknown'])
+        complete = scripted.complete
+
+        def fail_after_usage(*args, **kwargs):
+            result = complete(*args, **kwargs)
+            if len(scripted.asked) == 2:
+                raise RuntimeError('interrupted after response')
+            return result
+
+        scripted.complete = fail_after_usage
+
+        def client(**kwargs):
+            scripted.meter = kwargs['meter']
+            return scripted
+
+        monkeypatch.setattr('benchmarks.longmemeval.run.ChatClient', client)
+        args = parse_args(['--config', 'full-context', '--data', str(write_mini(tmp_path / 'mini.json')),
+                           '--answer-model', 'stub', '--results-dir', str(tmp_path / 'results')])
+        with pytest.raises(RuntimeError, match='interrupted'):
+            run(args)
+        manifest = json.loads((tmp_path / 'results' / 'full-context-custom-stub' / 'manifest.json').read_text())
+        assert manifest['question_count'] == 1
+        assert manifest['token_counts']['answer']['in'] == 20
+
+
+    def test_remote_judge_requires_explicit_remote_permission(self, tmp_path, monkeypatch):
+        def unexpected_request(*args, **kwargs):
+            raise AssertionError('No model call is allowed before endpoint validation')
+
+        monkeypatch.setattr('requests.post', unexpected_request)
+        with pytest.raises(ValueError, match='allow-remote'):
+            run(parse_args([
+                '--config', 'full-context', '--data', str(write_mini(tmp_path / 'mini.json')),
+                '--answer-model', 'local', '--judge-model', 'hosted',
+                '--judge-base-url', 'https://example.com/v1',
+                '--results-dir', str(tmp_path / 'results'),
+            ]))
+
+    def test_diagnostics_count_a_contradiction_once_per_claim(self, mock_episodic_vault_config):
+        class Contradiction(StubExtract):
+            def relate(self, claim, candidates):
+                return {'relation': 'contradicts', 'episode_id': candidates[0].id}
+
+        vault = vault_router.open_vault('test_episodic_vault')
+        stats = {'sessions_consolidated': 0, 'sessions_with_unparseable_reply': 0,
+                 'claims_written': 0, 'claims_rejected': 0}
+        ingest_episodic(vault, parse_record(MINI[0]).sessions, Contradiction(), diagnostics=stats)
+        assert stats == {'sessions_consolidated': 2, 'sessions_with_unparseable_reply': 0,
+                         'claims_written': 2, 'claims_rejected': 0}
+        assert len(vault.all_episodes()) == 2
+
+    def test_diagnostics_count_a_refused_write(self, mock_episodic_vault_config, monkeypatch):
+        vault = vault_router.open_vault('test_episodic_vault')
+
+        def refused(*args, **kwargs):
+            raise ValueError('refused by vault')
+
+        monkeypatch.setattr(vault, 'write_episode', refused)
+        stats = {'sessions_consolidated': 0, 'sessions_with_unparseable_reply': 0,
+                 'claims_written': 0, 'claims_rejected': 0}
+        ingest_episodic(vault, parse_record(MINI[1]).sessions, StubExtract(), diagnostics=stats)
+        assert stats['sessions_consolidated'] == 1
+        assert stats['claims_written'] == 0
+        assert stats['claims_rejected'] == 1

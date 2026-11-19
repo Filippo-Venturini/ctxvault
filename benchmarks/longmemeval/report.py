@@ -44,7 +44,7 @@ def format_pct(value: float | None) -> str:
 
 def render(runs: list[dict]) -> str:
     header = (
-        f"{'config':<20} {'answer model':<24} {'n':>5} "
+        f"{'config':<20} {'split':<8} {'answer model':<24} {'n':>5} "
         f"{'grader':>8} {'judge':>8} {'tokens/q':>10} {'folder'}"
     )
     lines = [header, "-" * len(header)]
@@ -55,6 +55,7 @@ def render(runs: list[dict]) -> str:
         tokens = tokens_per_question(manifest)
         lines.append(
             f"{str(manifest.get('config', '-')):<20} "
+            f"{str(manifest.get('split', '-')):<8} "
             f"{str(model):<24} "
             f"{int(manifest.get('question_count') or 0):>5} "
             f"{format_pct(overall.get('grader')):>8} "
@@ -77,6 +78,7 @@ def collect(results_dir: Path) -> list[dict]:
             runs.append(loaded)
     runs.sort(key=lambda run: (
         str(run["manifest"].get("config") or ""),
+        str(run["manifest"].get("split") or ""),
         str((run["manifest"].get("models") or {}).get("answer") or ""),
         run["folder"],
     ))
