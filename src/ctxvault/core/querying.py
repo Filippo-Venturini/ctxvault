@@ -1,7 +1,7 @@
 import hashlib
 import re
 
-from ctxvault.core.embedding import embed_list
+from ctxvault.core import embedding
 from ctxvault.core.exceptions import DocumentNotFoundError
 from ctxvault.models.documents import DocumentContent, SemanticDocumentInfo
 from ctxvault.storage import chroma_store
@@ -55,7 +55,8 @@ def build_documents_from_metadatas(metadatas)-> list[SemanticDocumentInfo]:
 def query(query_txt: str, config: dict, n_results: int = 5, filters: dict | None = None)-> dict:
     # Query must embed with the same model used to index this vault, or the
     # vectors are not comparable; both read it from the vault config.
-    query_embedding = embed_list(chunks=[query_txt], model_name=config.get("embedding_model"))
+    # looked up on the module at call time, so a patched embed_list always applies
+    query_embedding = embedding.embed_list(chunks=[query_txt], model_name=config.get("embedding_model"))
     return chroma_store.query(query_embedding=query_embedding, config=config, n_results=n_results, filters=filters)
 
 def list_documents(config: dict)-> list[SemanticDocumentInfo]:

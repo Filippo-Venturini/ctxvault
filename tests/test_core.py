@@ -496,8 +496,7 @@ def test_query_threads_vault_embedding_model(mock_global_config, monkeypatch):
     def recording_embed(chunks, model_name=None):
         seen.append(model_name)
         return [[0.1] * 384] * len(chunks)
-    # querying.py binds embed_list at import, so patch it where it is looked up.
-    monkeypatch.setattr("ctxvault.core.querying.embed_list", recording_embed)
+    monkeypatch.setattr("ctxvault.core.embedding.embed_list", recording_embed)
 
     vault_router.query(text="anything", vault_name="qry_vault")
     assert seen == ["all-mpnet-base-v2"]

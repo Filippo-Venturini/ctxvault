@@ -3,7 +3,7 @@ def index_file(file_path: str, config: dict, agent_metadata: dict | None = None)
     from ctxvault.core.identifiers import get_doc_id
     from ctxvault.utils.chuncking import chunk_text
     from ctxvault.core import embedding
-    from ctxvault.storage.chroma_store import add_document
+    from ctxvault.storage.chroma_store import add_document, delete_document
     from ctxvault.utils.metadata_builder import build_chunks_metadatas
 
     text, file_type = extract_text(path=file_path)
@@ -21,6 +21,11 @@ def index_file(file_path: str, config: dict, agent_metadata: dict | None = None)
     chunk_ids, metadatas = build_chunks_metadatas(doc_id=doc_id, chunks_size=len(chunks), source=file_path, filetype=file_type,
                                                   agent_metadata=agent_metadata, repeated_words=[c.repeated_words for c in chunks])
 
+    # Chunk ids are the doc_id plus the chunk's position, so an upsert only
+    # replaces the chunks the new text still has: a document rewritten
+    # shorter would keep the old tail. Its chunks are dropped first, once the
+    # new ones are ready, so a failure above leaves the old index in place.
+    delete_document(doc_id=doc_id, config=config)
     add_document(ids=chunk_ids, embeddings=embeddings, metadatas=metadatas, chunks=[c.text for c in chunks], config=config)
 
 def delete_file(file_path: str, config: dict)-> None:
