@@ -853,14 +853,15 @@ class TestRevise:
         assert original.metadata["invalidation_reason"] == "revised"
 
     def test_only_the_revision_is_what_the_vault_states(self, mock_episodic_vault_config):
-        first = write("Anna lives in Padova", entities=["Anna"])
+        t1, t2 = "2026-01-01T00:00:00+00:00", "2026-02-01T00:00:00+00:00"
+        first = write("Anna lives in Padova", entities=["Anna"], recorded_at=t1)
         revised = vault_router.revise_episode(vault_name=VAULT, episode_id=first.id,
-                                              content="Anna lives in Padova, in the Arcella")
+                                              content="Anna lives in Padova, in the Arcella", at=t2)
 
         assert [e.id for e in query(entities=["Anna"])] == [revised.id]
         assert {e.id for e in query(entities=["Anna"], include_closed=True)} == {first.id, revised.id}
         # Before the revision was recorded, the original was the belief.
-        before = query(entities=["Anna"], known_at=first.recorded_at)
+        before = query(entities=["Anna"], known_at=t1)
         assert [e.id for e in before] == [first.id]
         assert vault_router.episode_stats(vault_name=VAULT) == {"total": 2, "open": 1, "closed": 1, "holding": 1, "disputes": 0}
 
