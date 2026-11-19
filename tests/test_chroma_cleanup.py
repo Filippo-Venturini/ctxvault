@@ -16,8 +16,9 @@ if str(ROOT) not in sys.path:
 
 
 @pytest.fixture
-def real_chroma(monkeypatch):
+def real_chroma(tmp_path, monkeypatch):
     monkeypatch.setattr(chroma_store, "PersistentClient", chromadb.PersistentClient)
+    monkeypatch.setattr("ctxvault.utils.config.GLOBAL_DIR", tmp_path / "global")
     yield
     for path, client in list(chroma_store._clients.items()):
         chroma_store._collections.pop(path, None)
