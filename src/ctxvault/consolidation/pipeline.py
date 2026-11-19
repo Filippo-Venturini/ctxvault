@@ -16,7 +16,7 @@ episodic vault is destroyed: a wrong supersede closes an episode that
 """
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import date, datetime, time, timezone
 from typing import Any, Literal
 
@@ -110,6 +110,14 @@ def _candidates(vault: EpisodicVault, claim: Claim, moment: str, limit: int, min
                 break
     return found
 
+def _distinct(items: Iterable[Any]) -> list[Any]:
+    """Each provenance once, in order: two turns often sit in the same chunk."""
+    kept: list[Any] = []
+    for item in items:
+        if item not in kept:
+            kept.append(item)
+    return kept
+
 def _decide(model: ConsolidationModel, claim: Claim, candidates: list[Episode]) -> tuple[RelationDecision, str | None]:
     """The model's label, or "new" with the reason when its answer cannot be
     used. Nothing is lost that way: the statement is still written, and a
@@ -142,6 +150,8 @@ class _Run:
         metadata = {**self.attribution, "claim_kind": claim.kind, "durability": claim.durability}
         if claim.valid_from_precision:
             metadata["valid_from_precision"] = claim.valid_from_precision
+        if claim.turns:
+            metadata["turns"] = claim.turns
         return {**metadata, **self._provenance(claim)}
 
     def _event_metadata(self, claim: Claim) -> dict:
@@ -219,6 +229,7 @@ def consolidate(
     run_id: str | None = None,
     kinds: Iterable[ClaimKind] | None = None,
     provenance: Iterable[Provenance | dict] | None = None,
+    turn_provenance: Sequence[Iterable[Provenance | dict]] | None = None,
     max_candidates: int = DEFAULT_MAX_CANDIDATES,
     min_similarity: float = DEFAULT_MIN_SIMILARITY,
     dry_run: bool = False,
@@ -230,7 +241,10 @@ def consolidate(
     claim that gives none. It defaults to the last dated turn, else to now.
     `kinds` restricts the claims kept, e.g. to refuse those about third
     parties. `provenance` is given to every claim the model returned without
-    one, for a caller that knows where the turns came from.
+    one, for a caller that knows where the turns came from. `turn_provenance`
+    is finer: item i is where turn i came from, and a claim that names its
+    turns gets the provenance of those turns instead. A claim that names
+    none, or only turns that do not exist, falls back to `provenance`.
 
     Claims are handled in order, and each one sees what the ones before it
     wrote. A claim "of the day" is written without being related to anything:
@@ -240,6 +254,9 @@ def consolidate(
     """
     conversation = [Turn.model_validate(turn) for turn in turns]
     given = TypeAdapter(list[Provenance]).validate_python(list(provenance or []))
+    by_turn = TypeAdapter(list[list[Provenance]]).validate_python([list(item) for item in turn_provenance or []])
+    if by_turn and len(by_turn) != len(conversation):
+        raise ValueError(f"turn_provenance has {len(by_turn)} items for {len(conversation)} turns.")
     moment = _moment(at, conversation)
     # An undated turn is read as said at the time of the conversation, so the
     # model has a date to work relative ones ("last March") out from.
@@ -259,8 +276,14 @@ def consolidate(
 
     run = _Run(vault=vault, model=model, run_id=result.run_id, moment=moment, dry_run=dry_run)
     for claim in claims:
-        if given and not claim.provenance:
-            claim = claim.model_copy(update={"provenance": given})
+        # A turn the model named but that is not in the conversation is not a source.
+        cited = [n for n in claim.turns if n < len(conversation)]
+        if cited != claim.turns:
+            claim = claim.model_copy(update={"turns": cited})
+        if not claim.provenance:
+            sources = _distinct(p for n in cited for p in by_turn[n]) if by_turn else []
+            if sources or given:
+                claim = claim.model_copy(update={"provenance": sources or given})
 
         decision, note = RelationDecision(relation="new"), None
         if claim.durability == "durable":

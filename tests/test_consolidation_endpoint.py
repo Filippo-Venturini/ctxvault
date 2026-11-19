@@ -60,7 +60,7 @@ class TestPrompts:
     def test_the_shipped_prompts_load_with_their_version(self):
         prompts = Prompts.load("en")
 
-        assert prompts.version == "en-1"
+        assert prompts.version == "en-2"
         assert '"claims"' in prompts.extract and '"relation"' in prompts.relate
 
     def test_an_unknown_language_says_what_to_do(self):
@@ -99,7 +99,7 @@ class TestTheRequest:
         assert call["body"]["response_format"] == {"type": "json_object"}
         system, user = call["body"]["messages"]
         assert system == {"role": "system", "content": model.prompts.extract}
-        assert user["content"] == f"[{MARCH}] Giuseppe: I moved to Mestre in March."
+        assert user["content"] == f"0 [{MARCH}] Giuseppe: I moved to Mestre in March."
         assert call["headers"] == {}
 
     def test_relate_shows_the_claim_and_each_candidate_with_its_id(self, server):
@@ -170,10 +170,10 @@ class TestEndToEnd:
 
         (operation,) = result.operations
         assert (operation.verb, operation.applied) == ("supersede_episode", True)
-        assert (result.model, result.prompt_version) == ("qwen2.5:7b", "en-1")
+        assert (result.model, result.prompt_version) == ("qwen2.5:7b", "en-2")
         mestre = vault.get_episode(operation.episode_id)
         assert mestre.valid_from == "2026-03-01T00:00:00+00:00"
-        assert mestre.metadata["model"] == "qwen2.5:7b" and mestre.metadata["prompt_version"] == "en-1"
+        assert mestre.metadata["model"] == "qwen2.5:7b" and mestre.metadata["prompt_version"] == "en-2"
         assert vault.get_episode(venezia.id).superseded_by == mestre.id
 
     def test_an_undated_turn_reaches_the_model_with_the_conversation_time(self, server, mock_episodic_vault_config):
@@ -182,4 +182,4 @@ class TestEndToEnd:
         consolidate(vault_router.open_vault(VAULT), [{"speaker": "Giuseppe", "text": "I moved last March."}],
                     OpenAICompatibleModel("m"), at=MARCH)
 
-        assert server.calls[0]["body"]["messages"][1]["content"] == f"[{MARCH}] Giuseppe: I moved last March."
+        assert server.calls[0]["body"]["messages"][1]["content"] == f"0 [{MARCH}] Giuseppe: I moved last March."

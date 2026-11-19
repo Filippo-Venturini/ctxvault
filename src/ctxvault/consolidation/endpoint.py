@@ -94,7 +94,8 @@ def _parse_json(text: str) -> Any:
     return None
 
 def _conversation(turns: list[Turn]) -> str:
-    return "\n".join(f"[{turn.at or 'undated'}] {turn.speaker}: {turn.text}" for turn in turns)
+    # Numbered from 0, so a claim can say which turns it was drawn from.
+    return "\n".join(f"{n} [{turn.at or 'undated'}] {turn.speaker}: {turn.text}" for n, turn in enumerate(turns))
 
 def _comparison(claim: Claim, candidates: list[Episode]) -> str:
     said = {"statement": claim.statement, "subject": claim.subject}
