@@ -260,9 +260,9 @@ class TestScoresAndReport:
 
 
 class TestReplay(object):
-    def test_episodic_plus_semantic_is_refused(self, tmp_path):
+    def test_episodic_plus_semantic_requires_an_extraction_model(self, tmp_path):
         question = parse_record(MINI[0])
-        with pytest.raises(ValueError, match='#45'):
+        with pytest.raises(ValueError, match='extraction model'):
             memory_for('episodic+semantic', question, workdir=tmp_path / 'w')
 
     def test_full_context_does_not_open_a_vault(self, tmp_path):
@@ -348,15 +348,6 @@ class TestRun:
         run(args)
         assert scripted.asked == []
         assert len(read_hypotheses(out / 'hypotheses.jsonl')) == 2
-
-    def test_episodic_plus_semantic_exits_before_a_run(self):
-        with pytest.raises(SystemExit, match='#45'):
-            run(parse_args([
-                '--config', 'episodic+semantic',
-                '--answer-model', 'stub',
-                '--data', 'unused.json',
-            ]))
-
 
 
 class TestReviewRegressions:

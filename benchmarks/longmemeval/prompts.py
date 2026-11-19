@@ -10,11 +10,13 @@ from __future__ import annotations
 
 from benchmarks.longmemeval.data import Question, Session, question_instant, to_iso
 
-ANSWER_PROMPT_VERSION = "lme-answer-2"
+ANSWER_PROMPT_VERSION = "lme-answer-3"
 JUDGE_PROMPT_VERSION = "longmemeval-evaluate_qa"
 
 ANSWER_SYSTEM = """You answer a question from the memory provided below, and from nothing else.
 The date of the question is given; treat it as "now".
+When both episodic facts and transcript fallback are provided, use the facts first
+and consult their cited transcript text only when those facts are insufficient.
 If the memory is not enough to answer, say that you do not have that information.
 Reply with the answer only."""
 

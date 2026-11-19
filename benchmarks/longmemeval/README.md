@@ -19,14 +19,56 @@ is [xiaowu0162/longmemeval-cleaned](https://huggingface.co/datasets/xiaowu0162/l
 | full-context          | The whole dated history in the prompt (the ceiling). |
 | semantic-only         | Sessions indexed as documents; the top retrieved chunks. |
 | episodic              | Sessions consolidated with ctxvault.consolidation; episodes that held as of the question date. |
-| episodic+semantic     | Facts first, text as fallback. Reserved for the follow-up PR after this harness merges (using #76). |
+| episodic+semantic     | Facts first, then their verified transcript spans, then date-filtered transcript search for details extraction missed. |
 
-Each question gets a fresh vault. Sessions are ingested in date order, with
+Each question gets fresh vaults. Semantic sessions use date-aware `write_session`
+ingestion, so chunks carry the conversation dates rather than file mtimes.
+Semantic retrieval only admits sessions ending at or before the question
+instant. Sessions are ingested in date order, with
 at= set to the session date (replay in transaction time). The question is
 then asked as of question_date. When that clock falls earlier on the same
 day as the last session — a known LongMemEval annotation quirk — the harness
 follows the official clarification and treats the question as immediately
 after that session.
+
+Every memory vault, including episodic facts, uses
+`sentence-transformers/all-MiniLM-L6-v2` unless `--embedding-model` overrides it.
+The same model recorded in the manifest embeds facts for both retrieval and
+consolidation candidate lookup. Episodic runs made before this fix without an
+explicit embedding flag used keyword scoring despite the manifest's default
+model name; regenerate those results in a new run rather than resuming them.
+
+Combined replay creates both vaults explicitly in the fresh local registry and
+uses a `ConsolidationConfig` with `consolidate_session` to keep
+facts and source text linked by public chunk references. The fresh local
+vaults never reuse a same-named global vault. It reads episodes as
+of the question instant, then resolves those episodes' references. Facts
+come first in the answer prompt; the verified transcript spans are fallback
+for details the facts omitted. Repeated references to a chunk are included
+once. Changed, missing, refused or unreachable sources contribute no text.
+A claim that cites no turn gets no invented reference. After cited spans,
+the harness searches the transcripts with the question, using the same session
+date filter as `semantic-only`, and fills the remaining chunk slots with unique
+hits. This can reach details from a session extraction dropped entirely.
+There is no score threshold across vaults.
+
+`--n-results` bounds episodes and, separately, fallback chunks in combined mode.
+An equal result count is not an equal token budget: use the reported token
+counts when comparing configurations. **Report `--n-results` with every result**,
+alongside the embedding model and token counts. The default of 8 is a small
+retrieval budget: with the default model's roughly 256-token chunk window,
+semantic-only can read only a fraction of even the oracle evidence. It does
+not receive the whole oracle history as full-context does. For broader evidence
+coverage, try a higher value such as `--n-results 32` and report that setting;
+keep budgets explicit when comparing runs. The default stays at 8 for cheap
+smoke runs and consistency with existing budgets, not as a claim of equal
+evidence coverage.
+
+Both stores are closed before removing
+the question's temporary directory. Answer prompt version `lme-answer-3`
+records this facts-first policy for all four configurations and prevents
+resuming an older prompt run. Runs made with `lme-answer-2` are not comparable
+to runs made with `lme-answer-3`; rerun every configuration for a comparison.
 
 ## Commands
 
@@ -48,6 +90,10 @@ python -m benchmarks.longmemeval \
 
 python -m benchmarks.longmemeval \
   --config episodic --split oracle --limit 5 --resume \
+  --answer-model qwen2.5:7b --extract-model qwen2.5:7b --judge-model qwen2.5:7b
+
+python -m benchmarks.longmemeval \
+  --config episodic+semantic --split oracle --limit 5 --resume \
   --answer-model qwen2.5:7b --extract-model qwen2.5:7b --judge-model qwen2.5:7b
 ```
 
@@ -102,7 +148,7 @@ Each run writes benchmarks/longmemeval/results/<run-name>/:
 
 - hypotheses.jsonl: one line per question, {"question_id": ..., "hypothesis": ...}, accepted as is by the official LongMemEval evaluation script.
 - manifest.json: ctxvault commit, config, split, question count, extraction / answer / judge models, prompt version, cumulative token counts (in and out, per stage), cumulative wall time, `n_results`, embedding model (`null` for full-context), dataset SHA-256.
-  Episodic manifests also contain cumulative `extraction_diagnostics`: `sessions_consolidated`, `sessions_with_unparseable_reply`, `claims_written` and `claims_rejected`. An unparseable reply is one without a usable claims list, distinct from a valid empty list. Written claims count applied writes, confirmations, revisions and supersessions once per claim (not the secondary dispute operation). Rejected claims count schema/kind rejections and refused primary writes; an unparseable reply has no countable claims and is tracked separately.
+  Episodic and combined manifests also contain cumulative `extraction_diagnostics`: `sessions_consolidated`, `sessions_with_unparseable_reply`, `claims_written` and `claims_rejected`. An unparseable reply is one without a usable claims list, distinct from a valid empty list. Written claims count applied writes, confirmations, revisions and supersessions once per claim (not the secondary dispute operation). Rejected claims count schema/kind rejections and refused primary writes; an unparseable reply has no countable claims and is tracked separately.
 - scores.json: overall accuracy and accuracy per question type, from the judge model (the official yes/no prompt) and from a deterministic grader (every content word of the gold answer appears in the hypothesis). The grader is `null` for abstention (`_abs`) and `single-session-preference` questions, whose gold answers are explanations or rubrics; they do not enter grader accuracy or the disagreement list. The questions where both graders apply and disagree are listed.
 
 The report includes the split column so oracle, `s`, `m` and custom runs remain distinguishable. A run with a missing or incomplete manifest is not merged by report. Anyone

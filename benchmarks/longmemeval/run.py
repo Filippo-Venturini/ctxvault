@@ -138,11 +138,6 @@ def _work_root(path: Path | None):
 
 
 def run(args: argparse.Namespace) -> Path:
-    if args.config == "episodic+semantic":
-        raise SystemExit(
-            "The episodic+semantic configuration needs date-aware transcript "
-            "ingestion (#45) and is not implemented in this harness yet."
-        )
     source = args.data or download_split(args.split, cache=args.cache_dir)
     questions = load_from_path(source, limit=args.limit)
     if not questions:
@@ -202,7 +197,7 @@ def run(args: argparse.Namespace) -> Path:
         "dataset_sha256": sha256_file(source),
         "run_name": out.name,
     }
-    if args.config == "episodic":
+    if args.config in ("episodic", "episodic+semantic"):
         manifest["extraction_diagnostics"] = diagnostics
     for key in ("config", "split", "models", "prompt_version", "n_results", "embedding_model", "dataset_sha256"):
         if key in previous and previous[key] != manifest[key]:
