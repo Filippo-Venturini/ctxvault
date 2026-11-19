@@ -585,7 +585,7 @@ ctxvault prune <vault> --log [--json]
 - `--older-than <days>` - A document is stale after this many days without its file changing, e.g. `90` or `90d` (optional, default: 180)
 - `--apply` - Archive what is found. With `--doc`, the named documents, whoever wrote them: that is a person's decision. Without it, only what the policy allows unattended (see below)
 - `--enable` / `--disable` - Turn the vault's policy on or off. Disabling keeps its rules
-- `--retention-days <days>` - How long archived files are kept before the policy purges them (default: 30)
+- `--retention-days <days>` - How long archived files are kept before the policy purges them, at least 1 (default: 30). This window is the only undo: a purged file is gone
 - `--rule <reason>=<mode>[,threshold=<0-1>][,older_than_days=<days>]` - Store a rule, repeatable. `<mode>` is `off`, `report` or `auto`. `duplicate_partial` is never `auto`
 - `--log` - List what pruning archived, restored and purged
 - `--json` - Print the report, the policy or the log as JSON
@@ -616,7 +616,15 @@ The threshold depends on the embedding model. A vault pinned to a model with no 
 
 While it is enabled, the policy runs on its own after `index`, after `reindex --stale` and after every `write_doc`, and applies the rules in `auto` mode to agent-written documents only. After `write_doc` it only checks whether the new document is an identical copy of one already there, with one lookup by the text hash stored at index time, so a write never scans the vault. A pass that fails is a warning and never fails the operation it follows.
 
-**Archive, log, restore, purge.** Applying moves the file to `.ctxvault-archive/` inside the vault and drops it from the index. Nothing is deleted. Before moving anything, applying checks that the file still has the text it was found with, and for a duplicate, that the copy that stays still has it too. Otherwise the document is left alone and the output says why. Every archive, restore and purge is a row in `.ctxvault-archive/prune-log.jsonl`. Rows are only ever appended, and each carries the hash of the one before it. If the log has been edited or cut short, pruning refuses to act until a person has looked at it. `ctxvault restore <vault> <path>` puts a document back and indexes it again, with the agent metadata it had. Archived files are purged once they are older than `retention_days`, but only while the policy is enabled: with the policy off, they stay until you remove them.
+**Archive, log, restore, purge.** Applying moves the file to `.ctxvault-archive/` inside the vault and drops it from the index. Nothing is deleted. Before moving anything, applying checks that the file still has the text it was found with, and for a duplicate, that the copy that stays still has it too. Otherwise the document is left alone and the output says why. Every archive, restore and purge is a row in `.ctxvault-archive/prune-log.jsonl`. Rows are only ever appended, and each carries the hash of the one before it. `ctxvault restore <vault> <path>` puts a document back and indexes it again, with the agent metadata it had. A restore is a person's decision: the policy never archives that document again on its own. It still shows in the report, as *restored: needs a human*, and naming it with `--doc` prunes it. Archived files are purged once they are older than `retention_days`, but only while the policy is enabled: with the policy off, they stay until you remove them. The retention window is the only undo: once a file is purged, it is gone.
+
+Documents indexed before this release have no stored text hash, so the check after `write_doc` does not see them as copies until they are indexed again (`ctxvault reindex <vault>`). The full report and the passes after `index` and sync read their files and find them either way.
+
+**When the prune log does not chain.** A last line without its newline is a write that never finished, for example after a crash. It is ignored with a warning, and the next write to the log drops it. Any other break, a row edited, removed or moved, stops archive, restore and purge, with the reason. Nothing is lost:
+
+- Every archived file is still in `.ctxvault-archive/<time>-<id>/<its path in the vault>`. The log's `archive` rows name each one (`archived`) and the agent metadata it had.
+- To put a file back by hand, move it to its path in the vault and run `ctxvault index <vault> --path <path>`. It comes back as human-written, since the agent metadata is in the log, not the file.
+- To start a new log, move `prune-log.jsonl` out of `.ctxvault-archive/`, and keep it: it is the history. The next archive starts a new log. Files archived under the old one are no longer known to `restore` or to purge, so move them back or delete them yourself.
 
 **Example:**
 ```bash

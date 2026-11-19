@@ -37,7 +37,9 @@ class PrunePolicy(BaseModel):
     unattended."""
 
     enabled: bool = False
-    retention_days: int = Field(default=30, ge=0)
+    # At least a day: the retention window is the only undo for a purge, and
+    # with 0 one pass would archive and delete for good, unattended.
+    retention_days: int = Field(default=30, ge=1)
     rules: dict[str, PruneRule] = Field(default_factory=dict)
 
     @classmethod
@@ -83,7 +85,8 @@ class PruneReport(BaseModel):
     counts: dict[str, int] = Field(default_factory=dict)      # e.g. documents, chunks
     candidates: list[Candidate] = Field(default_factory=list)
     # Candidates whose reason could run unattended but whose target needs a
-    # person: a human-written document is only ever pruned by naming it.
+    # person: a human-written document, or one a person restored, is only
+    # ever pruned by naming it.
     held: list[Candidate] = Field(default_factory=list)
     # What the report could not look at, and why: a check left off, files gone.
     notes: list[str] = Field(default_factory=list)

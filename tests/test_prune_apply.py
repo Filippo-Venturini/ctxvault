@@ -165,8 +165,29 @@ def test_restore_puts_it_back_indexed_and_still_agent_written(vault_dir):
     # the archive keeps only its log: the folders the file sat in are gone
     assert [p.name for p in (vault_dir / ARCHIVE_DIR).iterdir()] == [prune_log.LOG_NAME]
     assert [r["kind"] for r in log_rows(vault_dir)] == ["archive", "restore"]
-    # and the policy, finding the two again, archives the same one again
-    assert [e.target for e in vault_router.prune("test_vault", apply=True).applied] == ["deep/er/old.md"]
+
+def test_a_restored_document_is_never_archived_again_unattended(vault_dir):
+    """A restore is a person's decision; the policy does not undo it, on any
+    pass. It stays in the report, held, and naming it still prunes it."""
+    old = put("a/setup.md", "same words", agent=True, age_days=5)
+    put("new.md", "same words", agent=True, age_days=1)
+    enable()
+    vault().index_files()
+    assert not old.exists()
+    vault_router.restore("test_vault", "a/setup.md")
+
+    vault().sync_index()
+    vault().index_files()
+    put("newer.md", "same words", agent=True, age_days=0)          # write_doc's own pass
+    report = vault_router.prune("test_vault", apply=True)
+
+    assert old.exists()
+    assert [e.target for e in vault().prune_log()].count("a/setup.md") == 1   # the first archive only
+    held = next(c for c in report.held if c.target == str(old))
+    assert not held.auto_allowed and held.signals["restored"]
+
+    named = vault_router.prune("test_vault", targets=["a/setup.md"], apply=True)
+    assert [(e.target, e.who) for e in named.applied] == [("a/setup.md", "human")] and not old.exists()
 
 def test_restore_will_not_overwrite_a_file_written_since(vault_dir):
     put("a.md", "same words", age_days=1)
@@ -223,12 +244,43 @@ def test_the_log_chains_and_a_broken_log_stops_everything(vault_dir):
         vault_router.prune("test_vault", targets=["c.md"], apply=True)
     assert copy.exists()
 
-def test_a_torn_tail_is_a_break(tmp_path):
+def test_a_torn_tail_is_ignored_with_a_warning_and_dropped_on_the_next_append(tmp_path):
+    """An unterminated last line is a write that never finished, not a break."""
     path = tmp_path / prune_log.LOG_NAME
     prune_log.append(path, "archive", "human", target="x")
-    path.write_text(path.read_text() + '{"n": 1')
+    whole = path.read_bytes()
+    path.write_bytes(whole + b'{"n": 1, "kind": "arch')
+    with pytest.warns(UserWarning, match="unterminated"):
+        rows, breaks = prune_log.read(path)
+    assert breaks == [] and [r["target"] for r in rows] == ["x"]
+
+    with pytest.warns(UserWarning, match="unterminated"):
+        prune_log.append(path, "archive", "human", target="y")
+    assert path.read_bytes().startswith(whole)
     rows, breaks = prune_log.read(path)
-    assert rows == [] and "torn tail" in breaks[0]
+    assert breaks == [] and [r["target"] for r in rows] == ["x", "y"]
+
+def test_restore_works_after_a_crash_mid_append(vault_dir):
+    put("a.md", "same words", age_days=1)
+    copy = put("b.md", "same words", age_days=5)
+    vault_router.prune("test_vault", targets=["b.md"], apply=True)
+    path = vault_dir / ARCHIVE_DIR / prune_log.LOG_NAME
+    path.write_bytes(path.read_bytes() + b'{"n": 1, "kind": "restore", "who": "hu')
+
+    with pytest.warns(UserWarning, match="unterminated"):
+        vault_router.restore("test_vault", "b.md")
+    assert copy.read_text() == "same words"
+    assert [r["kind"] for r in log_rows(vault_dir)] == ["archive", "restore"]
+
+def test_a_real_break_refuses_and_says_where_the_files_are(vault_dir):
+    put("a.md", "same words", age_days=1)
+    put("b.md", "same words", age_days=5)
+    vault_router.prune("test_vault", targets=["b.md"], apply=True)
+    path = vault_dir / ARCHIVE_DIR / prune_log.LOG_NAME
+    path.write_text(path.read_text().replace('"who":"human"', '"who":"policy"'))
+    with pytest.raises(prune_log.PruneLogBroken, match="does not chain") as raised:
+        vault_router.restore("test_vault", "b.md")
+    assert str(vault_dir / ARCHIVE_DIR) in str(raised.value)
 
 # ── the policy on its own: index, sync, write_doc ───────────────────────────
 
@@ -302,6 +354,13 @@ def test_rules_that_cannot_hold_are_refused(vault_dir, rules):
         vault_router.set_prune_policy("test_vault", rules=rules)
     assert "prune" not in get_vault_config("test_vault")
 
+def test_a_retention_of_less_than_a_day_is_refused(vault_dir):
+    """With 0, one pass would archive and purge: a delete nobody could undo."""
+    with pytest.raises(ValueError):
+        vault_router.set_prune_policy("test_vault", enabled=True, retention_days=0)
+    assert "prune" not in get_vault_config("test_vault")
+    assert CliRunner().invoke(app, ["prune", "test_vault", "--retention-days", "0"]).exit_code != 0
+
 # ── the CLI ─────────────────────────────────────────────────────────────────
 
 def test_the_cli_round_trip(vault_dir):
@@ -352,3 +411,22 @@ def test_append_works_under_a_mandatory_lock(tmp_path, monkeypatch):
         held["locked"] = False   # closing the file releases it
     rows, breaks = prune_log.read(path)
     assert breaks == [] and [r["n"] for r in rows] == [0, 1, 2]
+
+def test_a_busy_windows_lock_raises_instead_of_spinning(tmp_path, monkeypatch):
+    """LK_LOCK already retries for about ten seconds; past that, one error."""
+    calls = []
+
+    class BusyMsvcrt:
+        LK_LOCK = 1
+
+        @staticmethod
+        def locking(fd, mode, nbytes):
+            calls.append(mode)
+            raise OSError(36, "Resource deadlock avoided")
+
+    monkeypatch.setattr(prune_log, "fcntl", None)
+    monkeypatch.setattr(prune_log, "msvcrt", BusyMsvcrt)
+    path = tmp_path / prune_log.LOG_NAME
+    with pytest.raises(prune_log.PruneLogBusy):
+        prune_log.append(path, "archive", "human", target="x")
+    assert calls == [1] and path.read_bytes() == b""

@@ -278,6 +278,7 @@ class SemanticVault(BaseVault):
                 if digest:
                     report = find_semantic_candidates(vault_name=self.vault_name, config=self.config, policy=policy,
                                                       reasons={DUPLICATE}, same_text_as=digest)
+                    self._hold_restored(report)
                     self._apply(report, policy=policy, named=False, trigger="write_doc")
             self.purge_expired(policy)
             return report

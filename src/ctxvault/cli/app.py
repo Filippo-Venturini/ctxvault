@@ -179,6 +179,8 @@ def _print_prune_report(name: str, report, vault_path: Path, applied: bool = Fal
             return "keep"
         if c.auto_allowed:
             return "auto"
+        if c.signals.get("restored"):
+            return "restored: needs a human"
         if c in report.held:
             return "needs a human"
         return ""
@@ -294,7 +296,7 @@ def prune(
     apply: bool = typer.Option(False, "--apply", help="Archive what is found: the documents named with --doc, or else only what the policy allows unattended."),
     enable: bool = typer.Option(False, "--enable", help="Turn the policy on, with the type's default rules where none are set."),
     disable: bool = typer.Option(False, "--disable", help="Turn the policy off. Its rules are kept; nothing runs unattended or is purged."),
-    retention_days: int = typer.Option(None, "--retention-days", min=0, help="How long archived files are kept before the policy purges them."),
+    retention_days: int = typer.Option(None, "--retention-days", min=1, help="How long archived files are kept before the policy purges them."),
     rule: list[str] = typer.Option(None, "--rule", help="Store a rule (repeatable): REASON=MODE[,threshold=X][,older_than_days=N], MODE off, report or auto."),
     show_log: bool = typer.Option(False, "--log", help="List what pruning archived, restored and purged."),
     json_output: bool = typer.Option(False, "--json", help="Print the result as JSON."),

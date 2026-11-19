@@ -164,6 +164,7 @@ class BaseVault(ABC):
             raise ValueError(f"Unknown prune reason(s): {', '.join(sorted(unknown))}. "
                              f"Known: {', '.join(self.prune_reasons)}.")
         report = self._find_candidates(policy=policy, reasons=reasons or set(self.prune_reasons))
+        self._hold_restored(report)
         if targets:
             wanted = {self._prune_target(t) for t in targets}
             report.candidates = [c for c in report.candidates if c.target in wanted]
@@ -183,6 +184,28 @@ class BaseVault(ABC):
 
     def _display(self, target: str) -> str:
         return target
+
+    def _hold_restored(self, report: PruneReport) -> None:
+        """A document a person restored is theirs: the policy never archives it
+        again unattended. It stays in the report, held, with when it was
+        restored; naming it still prunes it. Read from the log's restore rows,
+        by target and text hash. A log that does not chain is left to
+        applying, which refuses on its own: a report never fails on it."""
+        rows, _ = log.read(self.prune_log_path)
+        archives = {r["n"]: r for r in rows if r["kind"] == "archive"}
+        restored = {}
+        for r in rows:
+            if r["kind"] == "restore" and r.get("entry") in archives:
+                archive = archives[r["entry"]]
+                restored[(archive["target"], archive.get("text_hash"))] = r["at"]
+        if not restored:
+            return
+        for candidate in report.candidates:
+            at = restored.get((self._display(candidate.target), candidate.signals.get("text_hash")))
+            if at and candidate.auto_allowed:
+                candidate.auto_allowed = False
+                candidate.signals["restored"] = at
+                report.held.append(candidate)
 
     def _apply(self, report: PruneReport, *, policy: PrunePolicy, named: bool, trigger: PruneTrigger) -> None:
         """Apply what the report allows: every named candidate, or only what
