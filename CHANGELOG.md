@@ -6,6 +6,8 @@ All notable changes to CtxVault are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-19
+
 ### Added
 
 - `OpenAICompatibleModel` accepts a per-call `usage_callback(stage, prompt_tokens, completion_tokens)` and exposes `last_extraction_unparseable` for extraction diagnostics (#78).
@@ -16,8 +18,10 @@ All notable changes to CtxVault are documented here. The format follows
 - **Consolidation layer**, an opt-in `ctxvault.consolidation` module not imported by the core: the claim schema (#49), the extraction pipeline `consolidate(vault, turns, model, ...)` (#59), and `OpenAICompatibleModel` for any chat-completions endpoint with the shipped prompts (#61). The client talks to loopback endpoints only unless `allow_remote=True`, since the text of the conversations is sent to it.
 - **Consolidation topology as configuration** (#46). `consolidate_session(config, turns, model, ...)` writes facts to the episodic vault a `ConsolidationConfig` names; with `transcripts_vault` set, the session is also written to that semantic vault and every claim carries a chunk reference to the turns it was drawn from, which `sources(episode)` resolves back to text. The presets `facts_only(name)` and `facts_and_transcripts(name)` create the vaults and return the config. Claims have a `turns` field, and `consolidate` accepts `turn_provenance`.
 - **`.html`, `.htm` and `.csv` documents in semantic vaults**, alongside `.txt`, `.md`, `.pdf` and `.docx` (#62). HTML is read with the standard library, dropping scripts, styles and markup; each CSV data row is indexed as one line with header names beside values. No new required dependency.
+- **`ctxvault prune <vault>`** reports what a semantic vault would prune and why (duplicates, partial overlaps, stale documents), without changing anything (#50).
 - **Transcripts and chunk references** in the core (#45). `write_session(vault, path, turns)` writes a conversation to a semantic vault as one line per turn, dated from its turns and never from the file, with session dates as filterable metadata, and returns the chunk each turn starts in. `chunk_reference(...)` names a chunk with the hash of its text, and `resolve_chunk(reference, agent=...)` answers exactly one of `holds`, `changed`, `moved`, `missing`, `unreachable` or `refused`; `changed` never carries text.
 - **Memory viewer:** an episode's closes and reopens are listed in order, a reopen appears as its own kind on the changes timeline, and event metadata is a collapsed row that expands to the values (#58).
+- **LongMemEval harness** under `benchmarks/longmemeval/`: one command replays a split into fresh vaults and writes hypotheses, a manifest and scores in a fixed format (#78).
 
 ### Changed
 
@@ -205,7 +209,8 @@ All notable changes to CtxVault are documented here. The format follows
 
 - First public release — CLI MVP: `init`, `index` files/folders, semantic `query`, `delete`, `reindex`, `list`, local embeddings, and a Chroma persistent store. Core and CLI tested with GitHub Actions.
 
-[Unreleased]: https://github.com/Filippo-Venturini/ctxvault/compare/v0.9.1...dev
+[Unreleased]: https://github.com/Filippo-Venturini/ctxvault/compare/v0.10.0...dev
+[0.10.0]: https://github.com/Filippo-Venturini/ctxvault/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/Filippo-Venturini/ctxvault/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/Filippo-Venturini/ctxvault/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/Filippo-Venturini/ctxvault/compare/v0.8.1...v0.8.2
