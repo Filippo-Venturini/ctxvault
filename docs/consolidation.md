@@ -122,6 +122,22 @@ OpenAICompatibleModel("gpt-4.1-mini", base_url="https://api.openai.com/v1", api_
 
 Requests use temperature 0. If your server rejects `response_format`, pass `json_mode=False`; the answer is parsed either way.
 
+For token accounting, pass `usage_callback(stage, prompt_tokens, completion_tokens)`.
+The callback runs once after each successful response; `stage` is `"extract"`
+or `"relate"`, and counts come from the endpoint's `usage` object. A missing
+usage object is reported as zero, not an estimate. No callback runs on an HTTP
+or malformed chat-completion error.
+
+```python
+usage = []
+model = OpenAICompatibleModel("qwen2.5:7b", usage_callback=lambda *call: usage.append(call))
+```
+
+After each `extract`, `model.last_extraction_unparseable` is true if the reply
+could not be read as a claims list. A valid empty claims list leaves it false.
+The flag resets at the next extraction; relation calls do not change it.
+Individual invalid claims are still counted in `consolidate(...).dropped`.
+
 To use something else entirely, pass any object with a `name`, a `prompt_version`, and two methods: `extract(turns)` returning raw claims, and `relate(claim, candidates)` returning `{"relation": ..., "episode_id": ...}`. Both answers are validated by the layer.
 
 ## The prompts

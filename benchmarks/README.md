@@ -14,6 +14,7 @@ benchmarks/
   retrieval/
     beir_vs_alternatives.py         CtxVault vs ChromaDB vs LangChain on BEIR
     coir_vs_alternatives.py         CtxVault vs ChromaDB vs LangChain on CoIR
+  longmemeval/                      LongMemEval harness (#47): replay, grade, report
 ```
 
 `internal/` benchmarks compare CtxVault's own chunking strategies against each other.
@@ -75,10 +76,19 @@ python benchmarks/internal/beir_benchmark.py
 python benchmarks/internal/coir_benchmark.py
 ```
 
+## LongMemEval
+
+The harness in longmemeval/ replays each question's sessions into a fresh
+vault (full context, semantic-only, or episodic consolidation), writes
+hypotheses in the official LongMemEval jsonl format, and grades them. See
+benchmarks/longmemeval/README.md for commands. The episodic+semantic
+configuration waits for #45. Contributing a scored run is a separate PR that
+adds one folder under benchmarks/longmemeval/results/.
+
 ## Roadmap
 
 Additional benchmarks under development:
 
 - Multi-agent isolation evaluation
 - Typed memory discrimination (semantic vs procedural retrieval accuracy)
-- Cross-session persistence with LongMemEval / LoCoMo
+- A LoCoMo harness, alongside the LongMemEval one
