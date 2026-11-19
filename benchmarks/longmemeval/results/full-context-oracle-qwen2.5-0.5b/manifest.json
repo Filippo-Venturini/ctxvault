@@ -1,0 +1,40 @@
+{
+  "ctxvault_commit": "74bdce0aa4dd17e8a555c2a5c5f5e4357d430cb5",
+  "config": "full-context",
+  "split": "oracle",
+  "models": {
+    "extraction": null,
+    "answer": "Qwen/Qwen2.5-0.5B-Instruct",
+    "judge": "Qwen/Qwen2.5-0.5B-Instruct"
+  },
+  "prompt_version": {
+    "extraction": null,
+    "answer": "lme-answer-2",
+    "judge": "longmemeval-evaluate_qa"
+  },
+  "n_results": 8,
+  "embedding_model": null,
+  "dataset": "xiaowu0162/longmemeval-cleaned",
+  "dataset_sha256": "821a2034d219ab45846873dd14c14f12cfe7776e73527a483f9dac095d38620c",
+  "run_name": "full-context-oracle-qwen2.5-0.5b",
+  "question_count": 5,
+  "token_counts": {
+    "extract": {
+      "in": 0,
+      "out": 0
+    },
+    "relate": {
+      "in": 0,
+      "out": 0
+    },
+    "answer": {
+      "in": 35415,
+      "out": 121
+    },
+    "judge": {
+      "in": 1234,
+      "out": 14
+    }
+  },
+  "wall_time_seconds": 89.627
+}
