@@ -225,3 +225,4 @@ benchmarks/longmemeval/.cache/
 
 # Local labels the harness writes next to a run; hypotheses/manifest/scores stay
 benchmarks/longmemeval/results/**/_labels.json
+benchmarks/longmemeval/results/**/_trace.jsonl

@@ -33,6 +33,9 @@ CONFIGS: tuple[ConfigName, ...] = ("full-context", "semantic-only", "episodic", 
 SEMANTIC_VAULT = "lme-semantic"
 EPISODIC_VAULT = "lme-episodic"
 DEFAULT_N_RESULTS = 8
+# An extracted fact is one short sentence, about a tenth of a transcript chunk,
+# so facts have a budget of their own instead of sharing the chunk count.
+DEFAULT_N_FACTS = 30
 
 
 @contextmanager
@@ -104,7 +107,8 @@ def retrieve_semantic(vault: SemanticVault, question: Question, *, n_results: in
         return "(no retrieved chunks)"
     blocks = []
     for match in matches:
-        source = match.source or match.doc_id or match.chunk_id
+        # The file's name, not its path: the vault lives in a temporary folder.
+        source = Path(match.source).name if match.source else (match.doc_id or match.chunk_id)
         blocks.append(f"[{source}]\n{match.text}")
     return "\n\n".join(blocks)
 
@@ -134,8 +138,10 @@ def retrieve_episodic(vault: EpisodicVault, question: Question, *, limit: int) -
     return _format_episodes(_episodes_for(vault, question, limit=limit))
 
 
-def retrieve_combined(vault: EpisodicVault, transcripts: SemanticVault, question: Question, *, limit: int) -> str:
-    episodes = _episodes_for(vault, question, limit=limit)
+def retrieve_combined(vault: EpisodicVault, transcripts: SemanticVault, question: Question, *,
+                      limit: int, facts: int | None = None) -> str:
+    """`facts` episodes first, then up to `limit` transcript chunks."""
+    episodes = _episodes_for(vault, question, limit=facts if facts is not None else limit)
     chunks, seen = [], set()
     for episode in episodes:
         for resolution in sources(episode):
@@ -173,6 +179,7 @@ def memory_for(
     workdir: Path,
     extraction_model=None,
     n_results: int = DEFAULT_N_RESULTS,
+    n_facts: int = DEFAULT_N_FACTS,
     embedding_model: str | None = None,
     diagnostics: dict[str, int] | None = None,
 ) -> str:
@@ -204,10 +211,10 @@ def memory_for(
             try:
                 ingest_episodic(vault, question.sessions, extraction_model,
                                 diagnostics=diagnostics, transcript_config=topology)
-                return retrieve_combined(vault, transcripts, question, limit=n_results)
+                return retrieve_combined(vault, transcripts, question, limit=n_results, facts=n_facts)
             finally:
                 chroma_store.close_client(transcripts.config)
         client.init(EPISODIC_VAULT, "episodic", embedding_model=embedding_model)
         vault = client.episodic(EPISODIC_VAULT)
         ingest_episodic(vault, question.sessions, extraction_model, diagnostics=diagnostics)
-        return retrieve_episodic(vault, question, limit=n_results)
+        return retrieve_episodic(vault, question, limit=n_facts)

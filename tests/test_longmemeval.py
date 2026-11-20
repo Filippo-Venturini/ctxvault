@@ -20,7 +20,7 @@ from benchmarks.longmemeval.grade import content_words, grader_correct, parse_ye
 from benchmarks.longmemeval.output import (
     build_scores, manifest_is_complete, read_hypotheses, append_hypothesis,
 )
-from benchmarks.longmemeval.prompts import answer_prompt, format_history, judge_prompt
+from benchmarks.longmemeval.prompts import ANSWER_PROMPT_VERSION, answer_prompt, format_history, judge_prompt
 from benchmarks.longmemeval.replay import ingest_episodic, isolated_workdir, memory_for
 from benchmarks.longmemeval.report import collect, render
 from benchmarks.longmemeval.run import parse_args, run
@@ -385,6 +385,7 @@ class TestReviewRegressions:
         assert manifest['token_counts']['judge'] == {'in': 30, 'out': 9}
         assert manifest['wall_time_seconds'] == 12
         assert manifest['n_results'] == 8
+        assert manifest['n_facts'] is None  # facts are only retrieved by the episodic configurations
         assert manifest['embedding_model'] is None
         assert manifest['dataset_sha256'] == sha256_file(data)
         calls = len(scripted.asked)
@@ -633,3 +634,41 @@ class TestReviewRegressions:
         assert stats['sessions_consolidated'] == 1
         assert stats['claims_written'] == 0
         assert stats['claims_rejected'] == 1
+
+
+class TestPilotOptions:
+    def _three_types(self, tmp_path):
+        records = []
+        for kind, count in (('temporal-reasoning', 3), ('multi-session', 2), ('knowledge-update', 1)):
+            for i in range(count):
+                records.append({**MINI[0], 'question_id': f'{kind}-{i}', 'question_type': kind})
+        path = tmp_path / 'sorted.json'
+        path.write_text(json.dumps(records))
+        return path
+
+    def test_per_type_takes_the_first_of_each_type_in_file_order(self, tmp_path):
+        path = self._three_types(tmp_path)
+        assert [q.question_id for q in load_from_path(path, per_type=2)] == [
+            'temporal-reasoning-0', 'temporal-reasoning-1', 'multi-session-0', 'multi-session-1', 'knowledge-update-0',
+        ]
+        # the first N overall are all one type: what --per-type is for
+        assert {q.question_type for q in load_from_path(path, limit=3)} == {'temporal-reasoning'}
+
+    def test_a_trace_holds_the_memory_each_answer_was_given(self, tmp_path, monkeypatch):
+        monkeypatch.setattr('benchmarks.longmemeval.run.ChatClient',
+                            lambda **kwargs: ScriptedClient(['Answer: Mestre']))
+        path = self._three_types(tmp_path)
+        base = ['--config', 'full-context', '--data', str(path), '--answer-model', 'stub',
+                '--results-dir', str(tmp_path / 'results'), '--limit', '1']
+        out = run(parse_args([*base, '--run-name', 'plain']))
+        assert not (out / '_trace.jsonl').exists()
+
+        out = run(parse_args([*base, '--run-name', 'traced', '--trace']))
+        [row] = [json.loads(line) for line in (out / '_trace.jsonl').read_text(encoding='utf-8').splitlines()]
+        assert row['question_id'] == 'temporal-reasoning-0' and row['hypothesis'] == 'Answer: Mestre'
+        assert row['answer'] == str(MINI[0]['answer']) and MINI[0]['haystack_sessions'][0][0]['content'] in row['memory']
+
+    def test_the_answer_prompt_asks_for_the_working_and_a_final_line(self):
+        system, _ = answer_prompt(parse_record(MINI[0]), 'memory')
+        assert ANSWER_PROMPT_VERSION == 'lme-answer-4'
+        assert 'one per line' in system and 'Answer:' in system
