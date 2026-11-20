@@ -29,7 +29,7 @@ from benchmarks.longmemeval.output import (
     written_ids,
 )
 from benchmarks.longmemeval.prompts import ANSWER_PROMPT_VERSION, JUDGE_PROMPT_VERSION, answer_prompt
-from benchmarks.longmemeval.replay import CONFIGS, DEFAULT_N_RESULTS, memory_for
+from benchmarks.longmemeval.replay import CONFIGS, DEFAULT_N_FACTS, DEFAULT_N_RESULTS, memory_for
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
@@ -73,6 +73,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--split", default="oracle", choices=list(SPLITS), help="Dataset split (default: oracle).")
     parser.add_argument("--data", type=Path, help="Local JSON instead of downloading a split.")
     parser.add_argument("--limit", type=int, help="Only the first N questions (cheap runs).")
+    parser.add_argument("--per-type", type=int,
+                        help="Only the first N questions of each question type (a pilot that covers every type).")
     parser.add_argument("--resume", action="store_true", help="Skip questions already in hypotheses.jsonl.")
     parser.add_argument("--run-name", help="Results folder name, under --results-dir.")
     parser.add_argument("--results-dir", type=Path, default=default_results_dir())
@@ -87,7 +89,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--judge-api-key", help="Judge key (defaults to --api-key).")
     parser.add_argument("--allow-remote", action="store_true")
     parser.add_argument("--timeout", type=float, default=120.0)
-    parser.add_argument("--n-results", type=int, default=DEFAULT_N_RESULTS, help="Chunks or episodes retrieved.")
+    parser.add_argument("--n-results", type=int, default=DEFAULT_N_RESULTS, help="Transcript chunks retrieved.")
+    parser.add_argument("--n-facts", type=int, default=DEFAULT_N_FACTS, help="Episodes retrieved (episodic configurations).")
+    parser.add_argument("--trace", action="store_true",
+                        help="Also write _trace.jsonl: the memory each answer was given. Local only, never committed.")
     parser.add_argument("--embedding-model", help="Override the vault embedding model.")
     return parser.parse_args(argv)
 
@@ -139,7 +144,7 @@ def _work_root(path: Path | None):
 
 def run(args: argparse.Namespace) -> Path:
     source = args.data or download_split(args.split, cache=args.cache_dir)
-    questions = load_from_path(source, limit=args.limit)
+    questions = load_from_path(source, limit=args.limit, per_type=args.per_type)
     if not questions:
         raise SystemExit("No questions to run.")
 
@@ -191,6 +196,7 @@ def run(args: argparse.Namespace) -> Path:
             "judge": JUDGE_PROMPT_VERSION if args.judge_model else None,
         },
         "n_results": args.n_results,
+        "n_facts": args.n_facts if args.config in ("episodic", "episodic+semantic") else None,
         "embedding_model": (args.embedding_model or DEFAULT_EMBEDDING_MODEL)
             if args.config != "full-context" else None,
         "dataset": DATASET_REPO if not args.data else "custom",
@@ -199,7 +205,7 @@ def run(args: argparse.Namespace) -> Path:
     }
     if args.config in ("episodic", "episodic+semantic"):
         manifest["extraction_diagnostics"] = diagnostics
-    for key in ("config", "split", "models", "prompt_version", "n_results", "embedding_model", "dataset_sha256"):
+    for key in ("config", "split", "models", "prompt_version", "n_results", "n_facts", "embedding_model", "dataset_sha256"):
         if key in previous and previous[key] != manifest[key]:
             raise SystemExit(f"Cannot resume: {key} differs from the previous manifest. Choose a new --run-name.")
     if already - {q.question_id for q in questions}:
@@ -219,7 +225,7 @@ def run(args: argparse.Namespace) -> Path:
                     try:
                         memory = memory_for(
                             args.config, question, workdir=Path(workdir),
-                            extraction_model=extraction, n_results=args.n_results,
+                            extraction_model=extraction, n_results=args.n_results, n_facts=args.n_facts,
                             embedding_model=args.embedding_model, diagnostics=diagnostics,
                         )
                         system, user = answer_prompt(question, memory)
@@ -227,6 +233,8 @@ def run(args: argparse.Namespace) -> Path:
                             args.answer_model, stage="answer", system=system, user=user,
                         ).text.strip()
                         append_hypothesis(out / HYPOTHESES, question.question_id, hypothesis)
+                        if args.trace:
+                            _append_trace(out / TRACE, question, memory, hypothesis)
                     except BaseException:
                         # Only completed hypotheses contribute to tokens per question.
                         for stage, counts in tokens_before.items():
@@ -248,6 +256,23 @@ def run(args: argparse.Namespace) -> Path:
             _write_manifest(out, already=already, client=judge_client, manifest=manifest, started=started)
     print(f"Wrote {out}", flush=True)
     return out
+
+
+TRACE = "_trace.jsonl"
+
+
+def _append_trace(path: Path, question, memory: str, hypothesis: str) -> None:
+    """What the answer model was shown, next to what it said and what was
+    expected: enough to tell a retrieval miss from a reasoning error. It holds
+    dataset text, so it stays out of the repository."""
+    import json
+    row = {
+        "question_id": question.question_id, "question_type": question.question_type,
+        "question": question.question, "answer": str(question.answer),
+        "memory": memory, "hypothesis": hypothesis,
+    }
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 def _write_manifest_and_scores(out, *, questions, already, client, manifest, started):

@@ -52,23 +52,28 @@ date filter as `semantic-only`, and fills the remaining chunk slots with unique
 hits. This can reach details from a session extraction dropped entirely.
 There is no score threshold across vaults.
 
-`--n-results` bounds episodes and, separately, fallback chunks in combined mode.
-An equal result count is not an equal token budget: use the reported token
-counts when comparing configurations. **Report `--n-results` with every result**,
-alongside the embedding model and token counts. The default of 8 is a small
-retrieval budget: with the default model's roughly 256-token chunk window,
-semantic-only can read only a fraction of even the oracle evidence. It does
-not receive the whole oracle history as full-context does. For broader evidence
-coverage, try a higher value such as `--n-results 32` and report that setting;
-keep budgets explicit when comparing runs. The default stays at 8 for cheap
-smoke runs and consistency with existing budgets, not as a claim of equal
-evidence coverage.
+Two budgets, both recorded in the manifest. `--n-results` (default 8) is the
+number of transcript chunks: what `semantic-only` reads, and the fallback in
+combined mode. `--n-facts` (default 30) is the number of episodes the two
+episodic configurations read. They are separate because the units are not
+alike: a fact is one sentence, about a tenth of a chunk, so one count for both
+would give facts a tenth of the context. Neither is a token budget: compare
+configurations on the reported tokens per question. **Report both with every
+result**, alongside the embedding model.
 
-Both stores are closed before removing
-the question's temporary directory. Answer prompt version `lme-answer-3`
-records this facts-first policy for all four configurations and prevents
-resuming an older prompt run. Runs made with `lme-answer-2` are not comparable
-to runs made with `lme-answer-3`; rerun every configuration for a comparison.
+With the default model's roughly 256-token chunk window, 8 chunks are a
+fraction of even the oracle evidence; `semantic-only` does not receive the
+whole history as `full-context` does. For broader coverage raise `--n-results`
+and report it.
+
+Both stores are closed before removing the question's temporary directory.
+
+Answer prompt version `lme-answer-4` is shared by all four configurations. It
+asks the model to list the relevant items with their dates before a question
+about dates, order or counts, and to end with an `Answer:` line; the judge
+reads the whole reply, as the official script does. Runs made with different
+answer prompt versions are not comparable, and a run cannot be resumed across
+them.
 
 ## Commands
 
@@ -141,6 +146,18 @@ Merge every complete folder under results/:
 ```bash
 python -m benchmarks.longmemeval.report
 ```
+
+## Pilots and traces
+
+The splits are sorted by question type, so `--limit 20` on oracle is twenty
+temporal-reasoning questions. For a pilot that covers every type use
+`--per-type N`: the first N questions of each type.
+
+`--trace` also writes `_trace.jsonl` next to the results: for each question,
+the memory the answer model was given, its reply and the expected answer. It
+is what tells a retrieval miss (the answer was not in the memory) from a
+reasoning error (it was). The file holds dataset text, is ignored by git, and
+is not part of a contributed run.
 
 ## Output
 

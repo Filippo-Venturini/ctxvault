@@ -297,3 +297,52 @@ def test_combined_never_reuses_a_same_named_global_vault(tmp_path, native_chroma
     assert 'Outside-benchmark sentinel' not in memory
     for name in ('lme-facts', 'lme-episodic'):
         assert [episode.content for episode in client.episodic(name).all_episodes()] == ['Outside-benchmark sentinel']
+
+
+def test_facts_have_their_own_budget(tmp_path, native_chroma):
+    class ManyFacts(LinkedModel):
+        def extract(self, turns):
+            return [{'subject': 'user', 'statement': f'The user owns item number {i}',
+                     'speaker': 'user', 'kind': 'first_party', 'durability': 'of_the_day'} for i in range(12)]
+
+    def facts(**budget):
+        # a folder name every platform accepts: Windows refuses quotes and colons
+        name = '-'.join(f'{key}-{value}' for key, value in budget.items()) or 'default'
+        memory = memory_for('episodic', question(), workdir=tmp_path / name,
+                            extraction_model=ManyFacts(), **budget)
+        return memory.count('The user owns item number')
+
+    assert facts() == 12                       # the default leaves room for every fact here
+    assert facts(n_results=3) == 12            # the chunk budget does not bound facts
+    assert facts(n_facts=5) == 5
+
+
+def test_the_manifest_records_the_fact_budget(tmp_path, native_chroma, monkeypatch):
+    from benchmarks.longmemeval.run import parse_args, run
+
+    data = tmp_path / 'mini.json'
+    data.write_text(json.dumps([{
+        'question_id': 'q_city', 'question_type': 'single-session-user',
+        'question': 'Where do I live?', 'answer': 'Mestre', 'question_date': '2026-02-10',
+        'haystack_session_ids': ['session'], 'haystack_dates': ['2026-01-10'],
+        'haystack_sessions': [[{'role': 'user', 'content': 'I live in Mestre.'}]],
+    }]))
+
+    class Reply:
+        status_code = 200
+        def __init__(self, text): self.text = text
+        def json(self):
+            return {'choices': [{'message': {'content': self.text}}], 'usage': {'prompt_tokens': 1, 'completion_tokens': 1}}
+
+    def post(url, *, json: dict, **kwargs):
+        if json['model'] == 'extract':
+            return Reply('{"claims":[{"subject":"user","statement":"The user lives in Mestre","kind":"first_party"}]}')
+        return Reply('Answer: Mestre')
+
+    monkeypatch.setattr('requests.post', post)
+    base = ['--config', 'episodic', '--data', str(data), '--answer-model', 'answer', '--extract-model', 'extract',
+            '--results-dir', str(tmp_path / 'results'), '--workdir', str(tmp_path / 'work')]
+    out = run(parse_args([*base, '--n-facts', '12']))
+    assert json.loads((out / 'manifest.json').read_text())['n_facts'] == 12
+    with pytest.raises(SystemExit, match='n_facts differs'):
+        run(parse_args([*base, '--n-facts', '20', '--resume']))

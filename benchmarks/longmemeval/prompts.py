@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from benchmarks.longmemeval.data import Question, Session, question_instant, to_iso
 
-ANSWER_PROMPT_VERSION = "lme-answer-3"
+ANSWER_PROMPT_VERSION = "lme-answer-4"
 JUDGE_PROMPT_VERSION = "longmemeval-evaluate_qa"
 
 ANSWER_SYSTEM = """You answer a question from the memory provided below, and from nothing else.
@@ -18,7 +18,9 @@ The date of the question is given; treat it as "now".
 When both episodic facts and transcript fallback are provided, use the facts first
 and consult their cited transcript text only when those facts are insufficient.
 If the memory is not enough to answer, say that you do not have that information.
-Reply with the answer only."""
+When the question needs dates, an order of events or a count, first list the
+relevant items with their dates, one per line, and work it out from them.
+End with one line starting with "Answer:" that gives the answer and nothing else."""
 
 
 def format_session(session: Session) -> str:

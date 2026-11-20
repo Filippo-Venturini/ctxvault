@@ -8,6 +8,7 @@ All notable changes to CtxVault are documented here. The format follows
 
 ### Added
 
+- **LongMemEval harness:** `--n-facts` gives episodes their own retrieval budget (default 30), `--per-type N` runs a pilot across every question type, and `--trace` records the memory each answer was given. The answer prompt (`lme-answer-4`) asks for the working on date and counting questions.
 - **Combined LongMemEval replay** (#47, #84): a fourth configuration reads facts, verified cited spans, then date-filtered transcript search for details extraction missed. Semantic-only replay now also uses date-aware `write_session` ingestion.
 
 ### Fixed
