@@ -10,6 +10,8 @@ All notable changes to CtxVault are documented here. The format follows
 
 - **LongMemEval harness:** `--n-facts` gives episodes their own retrieval budget (default 30), `--per-type N` runs a pilot across every question type, and `--trace` records the memory each answer was given. The answer prompt (`lme-answer-5`) asks for the working on date and counting questions, answers requests for suggestions from the user's known preferences, and abstains only when the memory has nothing on the question.
 - **Combined LongMemEval replay** (#47, #84): a fourth configuration reads facts, verified cited spans, then date-filtered transcript search for details extraction missed. Semantic-only replay now also uses date-aware `write_session` ingestion.
+- **Pruning, applied** (#17). `prune --apply --doc <path>` archives the documents a person names, whoever wrote them. A vault's policy (`prune --enable`, `--rule`, `--retention-days`) runs on its own after `index`, `reindex --stale` and `write_doc`, and only ever prunes agent-written documents that nobody has edited since. Archived files move to `.ctxvault-archive/`, every step is a row in an append-only, hash-chained `prune-log.jsonl` (`prune --log`), `ctxvault restore <vault> <path>` undoes an archive, and the policy purges archived files after `retention_days` (at least a day), but never while it is disabled. A restored document is never archived again unattended. A crash mid-write to the log costs nothing: the unfinished line is ignored and dropped.
+- Every chunk now carries its document's `text_hash` (built-in metadata), so identical documents are found without reading their files again. Chunks indexed before this have none; they are read from the file instead (#17).
 
 ### Changed
 
@@ -19,6 +21,7 @@ All notable changes to CtxVault are documented here. The format follows
 
 - LongMemEval episodic replay uses the default embedding model when `--embedding-model` is omitted, including consolidation candidate lookup and combined facts, matching the model recorded in the manifest (#84).
 - Indexing a file again (`index`, `reindex --stale`) keeps the agent metadata its chunks carry. In 0.10.0 it was dropped, so an agent-written document came back as human-written. A `write_doc` is a new write and still carries only the metadata it is given.
+- `write_doc` refuses a path inside `.ctxvault-archive/`, which would have been written but never indexed (#17).
 
 ## [0.10.0] - 2026-11-19
 

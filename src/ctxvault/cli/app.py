@@ -4,6 +4,7 @@ from ctxvault.models.documents import SemanticDocumentInfo, SkillDocumentInfo
 from ctxvault.models.vaults import VaultType
 import typer
 from ctxvault.core import vault_router
+from ctxvault.core.vaults.base import ARCHIVE_DIR
 from ctxvault.core.exceptions import PathOutsideVaultError, VaultAlreadyExistsError, VaultNotFoundError, VaultTypeNotValidError
 
 app = typer.Typer()
@@ -166,7 +167,7 @@ def _rule_line(title: str, summary: str) -> None:
     head = f"── {title} "
     typer.secho(f"{head:─<45} {summary}", bold=True)
 
-def _print_prune_report(name: str, report, vault_path: Path) -> None:
+def _print_prune_report(name: str, report, vault_path: Path, applied: bool = False) -> None:
     def rel(source: str) -> str:
         try:
             return Path(source).resolve().relative_to(vault_path.resolve()).as_posix()
@@ -178,6 +179,8 @@ def _print_prune_report(name: str, report, vault_path: Path) -> None:
             return "keep"
         if c.auto_allowed:
             return "auto"
+        if c.signals.get("restored"):
+            return "restored: needs a human"
         if c in report.held:
             return "needs a human"
         return ""
@@ -229,22 +232,100 @@ def _print_prune_report(name: str, report, vault_path: Path) -> None:
         typer.secho(f"\nNote: {note}", fg=typer.colors.YELLOW)
 
     flagged = {c.target for c in report.candidates if not c.signals.get("keep")}
-    typer.echo(f"\n{len(flagged)} candidate document{'s' if len(flagged) != 1 else ''}. Nothing was changed.\n")
+    if not applied:
+        typer.echo(f"\n{len(flagged)} candidate document{'s' if len(flagged) != 1 else ''}. Nothing was changed.\n")
+        return
+    typer.echo("")
+    _rule_line("APPLIED", f"{len(report.applied)} archived")
+    for entry in report.applied:
+        typer.echo(f"  {entry.target}  {entry.reason}  -> {ARCHIVE_DIR}/{entry.archived_path}")
+    for why in report.skipped:
+        typer.secho(f"  left alone: {why}", fg=typer.colors.YELLOW)
+    if report.applied:
+        typer.secho(f"\nUndo with `ctxvault restore {name} <path>`; `ctxvault prune {name} --log` lists what was archived.",
+                    fg=typer.colors.BRIGHT_BLACK)
+    typer.echo("")
+
+def _parse_rule(value: str) -> tuple[str, dict]:
+    """REASON=MODE[,threshold=X][,older_than_days=N]"""
+    name, _, rest = value.partition("=")
+    parts = [p.strip() for p in rest.split(",") if p.strip()]
+    if not name.strip() or not parts:
+        raise typer.BadParameter(f"expected REASON=MODE[,threshold=X][,older_than_days=N], got {value!r}")
+    change: dict = {"mode": parts[0]}
+    for part in parts[1:]:
+        key, _, raw = part.partition("=")
+        key = key.strip()
+        if key == "threshold":
+            change["threshold"] = float(raw)
+        elif key in ("older_than_days", "older_than"):
+            change["older_than_days"] = _parse_days(raw)
+        else:
+            raise typer.BadParameter(f"unknown rule setting {key!r}: threshold or older_than_days")
+    return name.strip(), change
+
+def _print_policy(name: str, policy) -> None:
+    state = "enabled" if policy.enabled else "disabled"
+    typer.echo(f"\nVault: {name}  prune policy {state}, archived files kept {policy.retention_days} days")
+    for reason, rule in policy.rules.items():
+        extra = "".join(f", {k}={v}" for k, v in rule.model_dump(exclude_none=True).items() if k != "mode")
+        typer.echo(f"  {reason:<18} {rule.mode.value}{extra}")
+    if not policy.enabled:
+        typer.secho("Nothing runs unattended and nothing is purged until the policy is enabled.", fg=typer.colors.BRIGHT_BLACK)
+    typer.echo("")
+
+def _print_prune_log(name: str, entries) -> None:
+    typer.echo(f"\nVault: {name}  prune log, {len(entries)} archive{'s' if len(entries) != 1 else ''}")
+    for e in entries:
+        when = e.at[:16].replace("T", " ")
+        by = "by you" if e.who == "human" else f"by policy ({e.trigger})"
+        if e.state == "archived":
+            fate = f"purges {e.purge_due[:10]}" if e.purge_due else "kept until restored (policy off)"
+        else:
+            fate = f"{e.state} {(e.restored_at or e.purged_at)[:10]}"
+        typer.echo(f"  {e.id}  {when}  {e.target}  {e.reason}  {by}  {fate}")
+    typer.echo("")
 
 @app.command()
 def prune(
     name: str = typer.Argument("my-vault"),
     reason: list[str] = typer.Option(None, "--reason", help="Only this reason (repeatable): duplicate, duplicate_partial, stale."),
-    doc: list[str] = typer.Option(None, "--doc", help="Only this document, by its path in the vault (repeatable)."),
-    threshold: float = typer.Option(None, "--threshold", min=0.0, max=1.0, help="Cosine similarity for a partial overlap, for this report. The default is tuned for the default model."),
-    older_than: str = typer.Option(None, "--older-than", help="Stale after this many days, e.g. 90 or 90d (default 180)."),
-    json_output: bool = typer.Option(False, "--json", help="Print the report as JSON."),
+    doc: list[str] = typer.Option(None, "--doc", help="Only this document, by its path in the vault (repeatable). With --apply, prune it whoever wrote it."),
+    threshold: float = typer.Option(None, "--threshold", min=0.0, max=1.0, help="Cosine similarity for a partial overlap, for this run. The default is tuned for the default model."),
+    older_than: str = typer.Option(None, "--older-than", help="Stale after this many days, e.g. 90 or 90d (default 180), for this run."),
+    apply: bool = typer.Option(False, "--apply", help="Archive what is found: the documents named with --doc, or else only what the policy allows unattended."),
+    enable: bool = typer.Option(False, "--enable", help="Turn the policy on, with the type's default rules where none are set."),
+    disable: bool = typer.Option(False, "--disable", help="Turn the policy off. Its rules are kept; nothing runs unattended or is purged."),
+    retention_days: int = typer.Option(None, "--retention-days", min=1, help="How long archived files are kept before the policy purges them."),
+    rule: list[str] = typer.Option(None, "--rule", help="Store a rule (repeatable): REASON=MODE[,threshold=X][,older_than_days=N], MODE off, report or auto."),
+    show_log: bool = typer.Option(False, "--log", help="List what pruning archived, restored and purged."),
+    json_output: bool = typer.Option(False, "--json", help="Print the result as JSON."),
 ):
-    """What the vault would prune, and why. Changes nothing."""
-    days = _parse_days(older_than)
+    """What the vault would prune, and why. Changes nothing unless --apply."""
+    if enable and disable:
+        typer.secho("Error: --enable and --disable together.", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
     try:
+        if enable or disable or retention_days is not None or rule:
+            rules = dict(_parse_rule(r) for r in rule or [])
+            policy = vault_router.set_prune_policy(vault_name=name, enabled=True if enable else False if disable else None,
+                                                   retention_days=retention_days, rules=rules)
+            if json_output:
+                typer.echo(policy.model_dump_json(indent=2))
+            else:
+                _print_policy(name, policy)
+            return
+        if show_log:
+            entries = vault_router.prune_log(vault_name=name)
+            if json_output:
+                typer.echo(json.dumps([e.model_dump(mode="json") for e in entries], indent=2))
+            else:
+                _print_prune_log(name, entries)
+            return
         report = vault_router.prune(vault_name=name, reasons=reason or None, targets=doc or None,
-                                    threshold=threshold, older_than_days=days)
+                                    threshold=threshold, older_than_days=_parse_days(older_than), apply=apply)
+    except typer.BadParameter:
+        raise
     except Exception as e:
         typer.secho(f"Error during prune: {e}", fg=typer.colors.RED, bold=True)
         raise typer.Exit(1)
@@ -252,7 +333,21 @@ def prune(
         typer.echo(report.model_dump_json(indent=2))
         return
     vault_path = vault_router.open_vault(vault_name=name).vault_path
-    _print_prune_report(name, report, vault_path)
+    _print_prune_report(name, report, vault_path, applied=apply)
+
+@app.command()
+def restore(
+    name: str = typer.Argument(...),
+    doc: str = typer.Argument(..., help="The document's path in the vault, as the prune log shows it."),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Replace a file that has since been written at the same path."),
+):
+    """Put a pruned document back where it was, and index it again."""
+    try:
+        entry = vault_router.restore(vault_name=name, target=doc, overwrite=overwrite)
+    except Exception as e:
+        typer.secho(f"Error during restore: {e}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+    typer.secho(f"Restored {entry.target} (archived {entry.at[:10]}, {entry.reason}) and indexed it.", fg=typer.colors.GREEN)
 
 @app.command()
 def reindex(name: str = typer.Argument("my-vault"), path: str = typer.Option(None, "--path"),

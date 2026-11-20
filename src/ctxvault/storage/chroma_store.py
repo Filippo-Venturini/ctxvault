@@ -103,10 +103,12 @@ def get_document_records(doc_id: str, config: dict) -> dict:
         include=["documents", "metadatas"],
     )
 
-def get_all_records(config: dict, include: list[str]) -> dict:
-    """Every chunk in the vault, with what `include` asks for."""
+def get_all_records(config: dict, include: list[str], where: dict | None = None) -> dict:
+    """Every chunk in the vault, or those `where` matches, with what `include` asks for."""
     collection = get_collection(config=config)
-    return collection.get(include=include)
+    if where is None:
+        return collection.get(include=include)
+    return collection.get(where=where, include=include)
 
 def nearest_other_chunks(embeddings: list[list[float]], exclude_doc_id: str, config: dict, n_results: int = 3) -> dict:
     """For each embedding, the closest chunks of every document but one, with
