@@ -530,11 +530,29 @@ def test_the_global_registry_is_not_also_a_local_one(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "GLOBAL_DIR", home / ".ctxvault")
 
     monkeypatch.chdir(home / "project" / "sub")
-    assert config.find_local_root() is None           # walking up hits only the global one
+    # Any registry found before the project's must lie outside tmp_path (e.g. a
+    # real ~/.ctxvault on the developer's machine), never the fake GLOBAL_DIR.
+    found = config.find_local_root()
+    assert found is None or not found.resolve().is_relative_to(tmp_path.resolve())
 
     (home / "project" / ".ctxvault").mkdir()
     (home / "project" / ".ctxvault" / "config.json").write_text('{"vaults": {}}')
     assert config.find_local_root() == home / "project" / ".ctxvault"
+
+def test_walking_past_the_global_registry_finds_an_outer_local_one(tmp_path, monkeypatch):
+    from ctxvault.utils import config
+
+    outer = tmp_path / "outer"
+    (outer / ".ctxvault").mkdir(parents=True)
+    (outer / ".ctxvault" / "config.json").write_text('{"vaults": {}}')
+    home = outer / "home"
+    (home / ".ctxvault").mkdir(parents=True)
+    (home / ".ctxvault" / "config.json").write_text('{"vaults": {}}')
+    (home / "project" / "sub").mkdir(parents=True)
+    monkeypatch.setattr(config, "GLOBAL_DIR", home / ".ctxvault")
+
+    monkeypatch.chdir(home / "project" / "sub")
+    assert config.find_local_root() == outer / ".ctxvault"
 
 def test_a_vault_whose_folder_is_gone_does_not_reopen_empty(mock_episodic_vault_config):
     import shutil
