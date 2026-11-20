@@ -170,7 +170,9 @@ def parse_record(record: dict) -> Question:
 
 def load_from_path(path: Path | str, *, limit: int | None = None, per_type: int | None = None) -> list[Question]:
     """`per_type` keeps the first N questions of each type, in file order: the
-    splits are sorted by type, so the first N overall are all of one kind."""
+    splits are sorted by type, so the first N overall are all of one kind.
+    Abstention questions count as a type of their own, whatever type they
+    carry: they are the only ones where "I do not know" is the right answer."""
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, list):
         raise ValueError(f"{path} must contain a JSON list of LongMemEval questions.")
@@ -179,8 +181,9 @@ def load_from_path(path: Path | str, *, limit: int | None = None, per_type: int 
         taken: dict[str, int] = {}
         kept = []
         for question in questions:
-            if taken.get(question.question_type, 0) < per_type:
-                taken[question.question_type] = taken.get(question.question_type, 0) + 1
+            stratum = "abstention" if question.abstention else question.question_type
+            if taken.get(stratum, 0) < per_type:
+                taken[stratum] = taken.get(stratum, 0) + 1
                 kept.append(question)
         questions = kept
     if limit is not None:

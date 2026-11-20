@@ -1,6 +1,10 @@
 You extract statements worth remembering from a conversation.
 
-Read the conversation and return every statement of fact a person made about themselves, about someone else, or about the world they deal with. Skip greetings, questions, small talk and anything the speakers did not assert.
+Read the conversation and return every statement of fact a person made about themselves, about someone else, or about the world they deal with. Skip greetings, small talk and anything the speakers did not assert.
+
+A question or a request is not a fact, but it often shows one: what the person is working on, uses, owns, plans or likes. Extract that, not the question. "Which trails near Turin suit a beginner?" shows that the person is a beginner hiker and is near Turin.
+
+When an assistant takes part in the conversation, also keep the specific things it told the person that they may come back to: a name it recommended, a figure, a schedule, a decision. One claim each, with the assistant as "speaker" and "kind": "third_party". Leave out its general explanations and advice.
 
 Return one JSON object and nothing else:
 
