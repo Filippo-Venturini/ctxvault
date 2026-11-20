@@ -673,10 +673,11 @@ class TestPilotOptions:
         out = run(parse_args([*base, '--run-name', 'traced', '--trace']))
         [row] = [json.loads(line) for line in (out / '_trace.jsonl').read_text(encoding='utf-8').splitlines()]
         assert row['question_id'] == 'temporal-reasoning-0' and row['hypothesis'] == 'Answer: Mestre'
+        assert row['extraction']['claims_written'] == 0  # nothing is extracted in full-context
         assert row['answer'] == str(MINI[0]['answer']) and MINI[0]['haystack_sessions'][0][0]['content'] in row['memory']
 
     def test_the_answer_prompt_asks_for_the_working_and_a_final_line(self):
         system, _ = answer_prompt(parse_record(MINI[0]), 'memory')
-        assert ANSWER_PROMPT_VERSION == 'lme-answer-5'
+        assert ANSWER_PROMPT_VERSION == 'lme-answer-6'
         assert 'one per line' in system and 'Answer:' in system
-        assert 'suggestion' in system and 'do not have that information' in system
+        assert 'always gets one' in system and 'For a question about a fact' in system

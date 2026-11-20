@@ -234,7 +234,8 @@ def run(args: argparse.Namespace) -> Path:
                         ).text.strip()
                         append_hypothesis(out / HYPOTHESES, question.question_id, hypothesis)
                         if args.trace:
-                            _append_trace(out / TRACE, question, memory, hypothesis)
+                            extracted = {key: diagnostics[key] - diagnostics_before[key] for key in diagnostics}
+                            _append_trace(out / TRACE, question, memory, hypothesis, extracted)
                     except BaseException:
                         # Only completed hypotheses contribute to tokens per question.
                         for stage, counts in tokens_before.items():
@@ -261,7 +262,7 @@ def run(args: argparse.Namespace) -> Path:
 TRACE = "_trace.jsonl"
 
 
-def _append_trace(path: Path, question, memory: str, hypothesis: str) -> None:
+def _append_trace(path: Path, question, memory: str, hypothesis: str, extraction: dict | None = None) -> None:
     """What the answer model was shown, next to what it said and what was
     expected: enough to tell a retrieval miss from a reasoning error. It holds
     dataset text, so it stays out of the repository."""
@@ -270,6 +271,9 @@ def _append_trace(path: Path, question, memory: str, hypothesis: str) -> None:
         "question_id": question.question_id, "question_type": question.question_type,
         "question": question.question, "answer": str(question.answer),
         "memory": memory, "hypothesis": hypothesis,
+        # What extraction produced for this question alone: an empty memory with
+        # claims written is a retrieval miss, with none it is an extraction miss.
+        "extraction": extraction or None,
     }
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")

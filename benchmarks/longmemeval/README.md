@@ -68,12 +68,12 @@ and report it.
 
 Both stores are closed before removing the question's temporary directory.
 
-Answer prompt version `lme-answer-5` is shared by all four configurations. It
+Answer prompt version `lme-answer-6` is shared by all four configurations. It
 tells the model that facts about the user come from the memory, to list the
 relevant items with their dates before a question about dates, order or
-counts, to answer a request for a suggestion from the preferences the memory
-shows, and to say it does not know only when the memory has nothing on what is
-asked. It ends with an `Answer:` line; the judge reads the whole reply, as the
+counts, to always answer a request for a suggestion, shaped by the preferences
+the memory shows, and to say it does not know only for a question of fact the
+memory has nothing on. It ends with an `Answer:` line; the judge reads the whole reply, as the
 official script does. Runs made with different answer prompt versions are not
 comparable, and a run cannot be resumed across them.
 
@@ -161,6 +161,9 @@ the memory the answer model was given, its reply and the expected answer. It
 is what tells a retrieval miss (the answer was not in the memory) from a
 reasoning error (it was). The file holds dataset text, is ignored by git, and
 is not part of a contributed run.
+
+The prompts were developed on a 35-question pilot (`--per-type 5` on oracle),
+which is part of the 500 questions a full run reports.
 
 ## Output
 
