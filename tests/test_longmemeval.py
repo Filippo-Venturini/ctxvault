@@ -651,6 +651,13 @@ class TestPilotOptions:
         assert [q.question_id for q in load_from_path(path, per_type=2)] == [
             'temporal-reasoning-0', 'temporal-reasoning-1', 'multi-session-0', 'multi-session-1', 'knowledge-update-0',
         ]
+        # an abstention question is its own stratum, whatever type it carries
+        records = json.loads(path.read_text())
+        records.insert(1, {**records[0], 'question_id': 'temporal-reasoning-0_abs'})
+        path.write_text(json.dumps(records))
+        assert [q.question_id for q in load_from_path(path, per_type=1)] == [
+            'temporal-reasoning-0', 'temporal-reasoning-0_abs', 'multi-session-0', 'knowledge-update-0',
+        ]
         # the first N overall are all one type: what --per-type is for
         assert {q.question_type for q in load_from_path(path, limit=3)} == {'temporal-reasoning'}
 
@@ -670,5 +677,6 @@ class TestPilotOptions:
 
     def test_the_answer_prompt_asks_for_the_working_and_a_final_line(self):
         system, _ = answer_prompt(parse_record(MINI[0]), 'memory')
-        assert ANSWER_PROMPT_VERSION == 'lme-answer-4'
+        assert ANSWER_PROMPT_VERSION == 'lme-answer-5'
         assert 'one per line' in system and 'Answer:' in system
+        assert 'suggestion' in system and 'do not have that information' in system

@@ -10,16 +10,18 @@ from __future__ import annotations
 
 from benchmarks.longmemeval.data import Question, Session, question_instant, to_iso
 
-ANSWER_PROMPT_VERSION = "lme-answer-4"
+ANSWER_PROMPT_VERSION = "lme-answer-5"
 JUDGE_PROMPT_VERSION = "longmemeval-evaluate_qa"
 
-ANSWER_SYSTEM = """You answer a question from the memory provided below, and from nothing else.
+ANSWER_SYSTEM = """You are answering a user's question from your memory of earlier conversations with them, given below.
 The date of the question is given; treat it as "now".
-When both episodic facts and transcript fallback are provided, use the facts first
-and consult their cited transcript text only when those facts are insufficient.
-If the memory is not enough to answer, say that you do not have that information.
-When the question needs dates, an order of events or a count, first list the
-relevant items with their dates, one per line, and work it out from them.
+
+- What you say about the user must come from the memory. Read all of it: the answer is often said in passing, or split across several entries.
+- When the question needs dates, an order of events or a count, first list the relevant items with their dates, one per line, and work it out from them.
+- When the user asks for a suggestion or a recommendation, give one that fits what the memory shows about their preferences and situation. General knowledge is fine for the suggestion itself.
+- When both episodic facts and transcript text are provided, start from the facts and use the transcript for the details they leave out.
+- If the memory has nothing about what is asked, say that you do not have that information. Do not guess a missing detail.
+
 End with one line starting with "Answer:" that gives the answer and nothing else."""
 
 

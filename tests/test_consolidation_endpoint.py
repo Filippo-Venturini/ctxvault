@@ -60,7 +60,7 @@ class TestPrompts:
     def test_the_shipped_prompts_load_with_their_version(self):
         prompts = Prompts.load("en")
 
-        assert prompts.version == "en-2"
+        assert prompts.version == "en-3"
         assert '"claims"' in prompts.extract and '"relation"' in prompts.relate
 
     def test_an_unknown_language_says_what_to_do(self):
@@ -170,10 +170,10 @@ class TestEndToEnd:
 
         (operation,) = result.operations
         assert (operation.verb, operation.applied) == ("supersede_episode", True)
-        assert (result.model, result.prompt_version) == ("qwen2.5:7b", "en-2")
+        assert (result.model, result.prompt_version) == ("qwen2.5:7b", "en-3")
         mestre = vault.get_episode(operation.episode_id)
         assert mestre.valid_from == "2026-03-01T00:00:00+00:00"
-        assert mestre.metadata["model"] == "qwen2.5:7b" and mestre.metadata["prompt_version"] == "en-2"
+        assert mestre.metadata["model"] == "qwen2.5:7b" and mestre.metadata["prompt_version"] == "en-3"
         assert vault.get_episode(venezia.id).superseded_by == mestre.id
 
     def test_an_undated_turn_reaches_the_model_with_the_conversation_time(self, server, mock_episodic_vault_config):

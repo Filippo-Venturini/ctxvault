@@ -68,12 +68,14 @@ and report it.
 
 Both stores are closed before removing the question's temporary directory.
 
-Answer prompt version `lme-answer-4` is shared by all four configurations. It
-asks the model to list the relevant items with their dates before a question
-about dates, order or counts, and to end with an `Answer:` line; the judge
-reads the whole reply, as the official script does. Runs made with different
-answer prompt versions are not comparable, and a run cannot be resumed across
-them.
+Answer prompt version `lme-answer-5` is shared by all four configurations. It
+tells the model that facts about the user come from the memory, to list the
+relevant items with their dates before a question about dates, order or
+counts, to answer a request for a suggestion from the preferences the memory
+shows, and to say it does not know only when the memory has nothing on what is
+asked. It ends with an `Answer:` line; the judge reads the whole reply, as the
+official script does. Runs made with different answer prompt versions are not
+comparable, and a run cannot be resumed across them.
 
 ## Commands
 
@@ -151,7 +153,8 @@ python -m benchmarks.longmemeval.report
 
 The splits are sorted by question type, so `--limit 20` on oracle is twenty
 temporal-reasoning questions. For a pilot that covers every type use
-`--per-type N`: the first N questions of each type.
+`--per-type N`: the first N questions of each type, with abstention
+questions (`_abs`) counted as a type of their own.
 
 `--trace` also writes `_trace.jsonl` next to the results: for each question,
 the memory the answer model was given, its reply and the expected answer. It
