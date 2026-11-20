@@ -148,7 +148,9 @@ def get_vaults() -> list[dict]:
             "db_path": data.get("db_path"),
             "restricted": data.get("restricted"),
             "allowed_agents": data.get("allowed_agents"),
-            "embedding_model": data.get("embedding_model")
+            "embedding_model": data.get("embedding_model"),
+            "sync_on_query": bool(data.get("sync_on_query")),
+            "sync_on_query_interval": data.get("sync_on_query_interval")
         })
 
     for name, data in global_config["vaults"].items():
@@ -160,7 +162,9 @@ def get_vaults() -> list[dict]:
             "db_path": data.get("db_path"),
             "restricted": data.get("restricted"),
             "allowed_agents": data.get("allowed_agents"),
-            "embedding_model": data.get("embedding_model")
+            "embedding_model": data.get("embedding_model"),
+            "sync_on_query": bool(data.get("sync_on_query")),
+            "sync_on_query_interval": data.get("sync_on_query_interval")
         })
 
     return result
@@ -212,6 +216,56 @@ def set_embedding_model(vault_name: str, model_name: str) -> None:
 
     config, save_root = _editable_config(scope, local_root)
     config["vaults"][vault_name]["embedding_model"] = model_name
+    _save_config(data=config, root=save_root)
+
+
+def _semantic_entry(vault_name: str) -> tuple[dict, Path, dict]:
+    """The vault's entry in the file it is registered in, for a per-vault
+    option. The caller saves it."""
+    global_config, local_config, local_root = _load_config()
+
+    scope = _get_vault_scope(vault_name, global_config, local_config)
+    if scope is None:
+        raise VaultNotFoundError(f"Vault '{vault_name}' does not exist.")
+
+    config, save_root = _editable_config(scope, local_root)
+
+    entry = config["vaults"][vault_name]
+    if entry.get("type", VaultType.SEMANTIC.value) != VaultType.SEMANTIC.value:
+        raise ValueError("sync_on_query is only supported for semantic vaults.")
+    return config, save_root, entry
+
+
+def set_sync_on_query(vault_name: str, enabled: bool) -> None:
+    """Turn the pre-query staleness check on or off for a semantic vault.
+
+    Semantic vaults are the only ones with an index that can drift: a skill
+    vault is its own files and an episodic one is a database. The key is
+    written only when on, so a vault that never used it keeps its config shape
+    and the default (off) stays implicit."""
+    config, save_root, entry = _semantic_entry(vault_name)
+
+    if enabled:
+        entry["sync_on_query"] = True
+    else:
+        entry.pop("sync_on_query", None)
+
+    _save_config(data=config, root=save_root)
+
+
+def set_sync_on_query_interval(vault_name: str, seconds: float) -> None:
+    """The least time between two file checks, so a large vault can trade a
+    little staleness for a smaller bill. 0 means every query checks."""
+    if seconds < 0:
+        raise ValueError("sync_on_query_interval cannot be negative.")
+
+    config, save_root, entry = _semantic_entry(vault_name)
+
+    if seconds:
+        entry["sync_on_query_interval"] = seconds
+    else:
+        entry.pop("sync_on_query_interval", None)
+
     _save_config(data=config, root=save_root)
 
 

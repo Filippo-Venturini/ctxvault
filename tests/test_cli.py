@@ -171,3 +171,32 @@ def test_cli_mcp_accepts_agent(mocker):
     result = runner.invoke(app, ["mcp", "--agent", "counter-agent"])
     assert result.exit_code == 0
     run.assert_called_once_with()
+
+# ── Config ───────────────────────────────────────────────────────────────────
+
+def test_cli_config_turns_sync_on_query_on_and_off(mock_vault_config):
+    on = runner.invoke(app, ["config", "test_vault", "--sync-on-query"])
+    assert on.exit_code == 0
+    assert "sync_on_query: on" in on.stdout
+    assert "sync_on_query: on" in runner.invoke(app, ["config", "test_vault"]).stdout
+
+    off = runner.invoke(app, ["config", "test_vault", "--no-sync-on-query"])
+    assert off.exit_code == 0
+    assert "sync_on_query: off" in runner.invoke(app, ["config", "test_vault"]).stdout
+
+def test_cli_config_refuses_a_vault_without_an_index(mock_episodic_vault_config):
+    result = runner.invoke(app, ["config", "test_episodic_vault", "--sync-on-query"])
+    assert result.exit_code == 1
+    assert "semantic" in result.stdout
+
+def test_cli_config_sets_the_check_interval(mock_vault_config):
+    result = runner.invoke(app, ["config", "test_vault", "--sync-on-query-interval", "30"])
+    assert result.exit_code == 0
+    assert "30s" in result.stdout
+    shown = runner.invoke(app, ["config", "test_vault"])
+    assert "sync_on_query_interval: 30s" in shown.stdout
+
+def test_cli_config_refuses_a_negative_interval(mock_vault_config):
+    result = runner.invoke(app, ["config", "test_vault", "--sync-on-query-interval", "-1"])
+    assert result.exit_code == 1
+    assert "negative" in result.stdout

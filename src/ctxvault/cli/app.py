@@ -49,6 +49,10 @@ def _print_vault(v: dict):
     # semantic vault is pinned to; default vaults omit the key and print nothing.
     if v.get("embedding_model"):
         typer.secho(f"  {'embedding model:':<20}{v['embedding_model']}", fg=typer.colors.BRIGHT_BLACK)
+    if v.get("sync_on_query"):
+        typer.secho(f"  {'sync on query:':<20}on", fg=typer.colors.BRIGHT_BLACK)
+        if v.get("sync_on_query_interval"):
+            typer.secho(f"  {'check interval:':<20}{v['sync_on_query_interval']:g}s", fg=typer.colors.BRIGHT_BLACK)
     typer.echo("")
 
 @app.command()
@@ -61,6 +65,31 @@ def init(name: str = typer.Argument("my-vault"), type: str = typer.Option(VaultT
         typer.echo(f"Config file path: {config_path}")
     except Exception as e:
         typer.secho(f"Error during initialization: {e}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+
+@app.command()
+def config(name: str = typer.Argument("my-vault"),
+           sync_on_query: bool = typer.Option(None, "--sync-on-query/--no-sync-on-query",
+               help="Check the vault's files before every query and index what changed. Off by default; with it on, a query pays one stat per file and only embeds when something moved."),
+           sync_on_query_interval: float = typer.Option(None, "--sync-on-query-interval",
+               help="Least seconds between two file checks, for a large vault. 0 checks every query.")):
+    """Turn per-vault options on or off. Without a flag, prints what is set."""
+    from ctxvault.utils.config import get_vault_config, set_sync_on_query, set_sync_on_query_interval
+
+    try:
+        if sync_on_query is None and sync_on_query_interval is None:
+            options = get_vault_config(name)
+            typer.echo(f"sync_on_query: {'on' if options.get('sync_on_query') else 'off'}")
+            typer.echo(f"sync_on_query_interval: {options.get('sync_on_query_interval') or 0:g}s")
+            return
+        if sync_on_query is not None:
+            set_sync_on_query(name, sync_on_query)
+            typer.secho(f"sync_on_query: {'on' if sync_on_query else 'off'}", fg=typer.colors.GREEN)
+        if sync_on_query_interval is not None:
+            set_sync_on_query_interval(name, sync_on_query_interval)
+            typer.secho(f"sync_on_query_interval: {sync_on_query_interval:g}s", fg=typer.colors.GREEN)
+    except Exception as e:
+        typer.secho(f"Error: {e}", fg=typer.colors.RED, bold=True)
         raise typer.Exit(1)
 
 @app.command()
@@ -84,6 +113,13 @@ def index(name: str = typer.Argument("my-vault"), path: str = typer.Option(None,
 def query(name: str = typer.Argument("my-vault"), text: str = typer.Argument(""), limit: int = typer.Option(5, "--limit", "-n", help="Number of chunks to return")):
     try:
         result = vault_router.query(text=text, vault_name=name, n_results=limit)
+        if result.sync and result.sync.changed():
+            typer.secho(
+                f"Synced first: {len(result.sync.reindexed)} reindexed, "
+                f"{len(result.sync.indexed)} indexed, {len(result.sync.dropped)} dropped "
+                f"({result.sync.duration_ms} ms)",
+                fg=typer.colors.BRIGHT_BLACK,
+            )
         if not result.results:
             typer.secho("No results found.", fg=typer.colors.YELLOW)
             return

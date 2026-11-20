@@ -16,6 +16,22 @@ class ChunkMatch(BaseModel):
     # key beyond the indexer's own.
     metadata: dict = Field(default_factory=dict)
 
+class SyncReport(BaseModel):
+    """What a query-time sync did to the index, so the caller can see it move.
+
+    Only the files that changed are named: a query on an unchanged vault
+    reports nothing, because nothing was done."""
+    reindexed: list[str] = Field(default_factory=list)
+    indexed: list[str] = Field(default_factory=list)
+    dropped: list[str] = Field(default_factory=list)
+    duration_ms: float
+
+    def changed(self) -> bool:
+        return bool(self.reindexed or self.indexed or self.dropped)
+
 class QueryResult(BaseModel):
     query: str
     results: list[ChunkMatch]
+    # Set only when the vault synced its index before answering, and only if
+    # that sync changed something; None means the query read the index as-is.
+    sync: SyncReport | None = None

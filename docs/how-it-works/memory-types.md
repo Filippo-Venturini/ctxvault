@@ -16,6 +16,8 @@ A query embeds the question with the same model and returns the closest chunks, 
 
 The index can drift from the files: a document edited after indexing, or deleted. `ctxvault docs <vault> --status` says which documents are out of sync and which files were never indexed, and `ctxvault reindex <vault> --stale` brings the index back in line with the folder.
 
+A vault can also keep itself in line, without a watcher: `ctxvault config <vault> --sync-on-query` makes every query bring the index to the files first. The check is a stat per supported file plus one hash of their paths and mtimes, with no vector read and no embedding, so an unchanged vault pays only that; a sync runs only when something moved, and the query result says what it reindexed, indexed or dropped. On a large vault, `--sync-on-query-interval <seconds>` sets the least time between two checks (0, the default, checks every query). Turning it on for a vault that was never indexed makes the first query index everything, which can take minutes; index the vault first if that wait is not acceptable.
+
 ## Skill vaults
 
 A skill vault holds procedures: natural-language instructions with an explicit name and description, the agent's behavioral repertoire. The agent lists the skills a vault offers, by name and description, and reads the one it needs. Nothing is embedded: a procedure is chosen by what it is for, not by similarity.
