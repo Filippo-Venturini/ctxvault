@@ -1,6 +1,7 @@
 from typing import Any
 from ctxvault.models.documents import SemanticDocumentInfo, SkillDocumentInfo, DocumentContent
 from ctxvault.models.episodes import Episode, EpisodeMatch, EpisodeOrder, VaultEntity
+from ctxvault.models.pruning import PruneLogEntry, PrunePolicy
 from ctxvault.models.query_result import ChunkMatch
 from ctxvault.models.vaults import SkillOutput, VaultType
 from pydantic import BaseModel, ConfigDict, Field
@@ -83,6 +84,9 @@ class WriteDocRequest(BaseModel):
 
 class WriteDocResponse(BaseModel):
     file_path: str
+    # What the vault's prune policy archived because of this write: an older
+    # agent-written copy of the same text. Empty unless the policy is on.
+    pruned: list[PruneLogEntry] = Field(default_factory=list)
 
 class WriteSkillRequest(BaseModel):
     vault_name: str
@@ -207,3 +211,34 @@ class ListEntitiesResponse(BaseModel):
     vault_name: str
     total: int
     entities: list[VaultEntity]
+
+class PruneRequest(BaseModel):
+    vault_name: str
+    reasons: list[str] | None = None        # default: every reason the vault type has
+    targets: list[str] | None = None        # paths in the vault; with apply, a person's decision
+    threshold: float | None = Field(default=None, gt=0.0, le=1.0)   # for this call only
+    older_than_days: int | None = Field(default=None, ge=1)         # for this call only
+    apply: bool = False
+
+class PrunePolicyRequest(BaseModel):
+    vault_name: str
+    enabled: bool | None = None
+    retention_days: int | None = None
+    rules: dict[str, dict] | None = None    # {"stale": {"mode": "auto", "older_than_days": 365}}
+
+class PrunePolicyResponse(BaseModel):
+    vault_name: str
+    policy: PrunePolicy
+
+class PruneLogResponse(BaseModel):
+    vault_name: str
+    entries: list[PruneLogEntry]
+
+class RestoreRequest(BaseModel):
+    vault_name: str
+    target: str
+    overwrite: bool = False
+
+class RestoreResponse(BaseModel):
+    vault_name: str
+    entry: PruneLogEntry

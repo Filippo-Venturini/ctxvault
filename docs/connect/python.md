@@ -29,7 +29,17 @@ memory.skills("procedures").read_skill("Deploy Service").instructions
 # The registry, as the CLI sees it
 memory.init("notes", "episodic")
 memory.vaults()
+
+# Pruning a semantic vault: the report, a person's apply, the policy, the log
+notes = memory.semantic("knowledge")
+notes.prune().candidates                                      # what would go, and why; changes nothing
+notes.prune(targets=["old/setup.md"], apply=True)             # archive what you name
+memory.set_prune_policy("knowledge", enabled=True, rules={"stale": {"mode": "auto", "older_than_days": 365}})
+notes.prune_log()                                             # archived, restored, purged
+notes.restore("old/setup.md")
 ```
+
+`write_doc` returns what the vault's prune policy archived because of the write, an older agent-written copy of the same text, usually nothing. The same list is `pruned` in the HTTP and MCP responses.
 
 `init()` and `vaults()` return vault directory paths with `/` separators on all platforms.
 

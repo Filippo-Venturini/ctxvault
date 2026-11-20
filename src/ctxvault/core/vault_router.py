@@ -164,6 +164,12 @@ def set_prune_policy(vault_name: str, enabled: bool | None = None, retention_day
     _set_prune_policy(vault_name=vault_name, prune=policy.to_config())
     return policy
 
+def prune_policy(vault_name: str) -> PrunePolicy:
+    """The vault's policy as stored, or the type's defaults (disabled) when none is."""
+    vault = open_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.PRUNE)
+    return vault.prune_policy()
+
 def prune_log(vault_name: str) -> list[PruneLogEntry]:
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.PRUNE)
@@ -179,10 +185,12 @@ def sync_index(vault_name: str) -> tuple[list[str], list[str], list[str]]:
     vault._require_operation(VaultOperation.REINDEX)
     return vault.sync_index()
 
-def write_doc(vault_name: str, file_path: str, content: str, overwrite: bool = True, agent_metadata: dict | None = None)-> None:
+def write_doc(vault_name: str, file_path: str, content: str, overwrite: bool = True,
+              agent_metadata: dict | None = None)-> list[PruneLogEntry]:
+    """Write and index a document; returns what the write's own prune pass archived."""
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.WRITE_DOC)
-    vault.write_doc(file_path=file_path, content=content, overwrite=overwrite, agent_metadata=agent_metadata)
+    return vault.write_doc(file_path=file_path, content=content, overwrite=overwrite, agent_metadata=agent_metadata)
 
 def write_skill(vault_name: str, skill: SkillInput, overwrite: bool = True)-> str:
     vault = open_vault(vault_name=vault_name)

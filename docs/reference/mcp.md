@@ -45,6 +45,17 @@ Save new information or agent-generated content to a semantic vault for future r
 | `generated_by` | `str` | required |
 | `overwrite` | `bool` | `False` |
 
+The response's `pruned` lists what the vault's prune policy archived because of the write: an older agent-written copy of the same text. Usually it's empty.
+
+### `prune_report`
+
+See what a semantic vault would prune, and why: identical copies of one document (duplicate), passages two documents share (duplicate_partial), and documents not modified in a long time (stale), each with the raw signals behind it. Read-only: nothing changes, and agents cannot apply or configure pruning. Use it to tell the user the vault is accumulating copies or old notes, and let them decide. A candidate with auto_allowed is what the vault's own policy will archive unattended; held ones need a person. reasons limits the report to some of them.
+
+| Parameter | Type | Default |
+|-----------|------|---------|
+| `vault_name` | `str` | required |
+| `reasons` | `list[str]` | `[]` |
+
 ## Skill vaults
 
 ### `list_skills`

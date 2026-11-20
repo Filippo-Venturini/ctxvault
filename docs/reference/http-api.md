@@ -15,6 +15,20 @@ Start the server with `uvicorn ctxvault.api.app:app`, then call it from any lang
 | `/delete` | DELETE | Remove document from a semantic vault |
 | `/reindex` | PUT | Re-index documents in a semantic vault |
 
+`/docs/write` returns `pruned`: what the vault's prune policy archived because of the write, an older agent-written copy of the same text. It's empty unless the policy is on.
+
+### Pruning
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/prune` | POST | Report what a semantic vault would prune, and why. With `apply`, prune it: the named `targets`, or without them only what the policy allows unattended |
+| `/prune/policy` | GET | Read the vault's prune policy, or the defaults (disabled) when none is set |
+| `/prune/policy` | PUT | Enable or disable the policy, set `retention_days` and per-reason `rules`. Fields left out are kept |
+| `/prune/log` | GET | What pruning archived, restored and purged |
+| `/prune/restore` | POST | Put an archived document back and index it again (`overwrite` to replace a file written there since) |
+
+Reading the report, the policy and the log follows the usual access rules. Changing anything (`apply`, `PUT /prune/policy`, `/prune/restore`) is a person's decision, and a request that carries `X-CtxVault-Agent` gets `403`. The MCP server only has the report. A restricted vault always needs the header, so its policy is changed through the CLI or the Python client. A log that does not chain returns `409`, with where the archived files are. See [`prune`](cli.md#prune) for what each part does.
+
 ## Skill vault endpoints
 
 | Endpoint | Method | Description |

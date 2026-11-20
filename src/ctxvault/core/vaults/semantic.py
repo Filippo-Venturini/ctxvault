@@ -339,9 +339,14 @@ class SemanticVault(BaseVault):
         from ctxvault.core import querying
         return querying.get_document_chunks(doc_id=doc_id, config=self.config)
     
-    def write_doc(self, file_path: str, content: str, overwrite: bool = True, agent_metadata: dict | None = None)-> None:
+    def write_doc(self, file_path: str, content: str, overwrite: bool = True,
+                  agent_metadata: dict | None = None)-> list[PruneLogEntry]:
+        """Write the file and index it. Returns what the policy's own pass
+        after the write archived: an older agent-written copy of the same
+        text, when the policy is on and duplicates are in auto. Usually empty."""
         self.write_file(file_path=file_path, content=content, overwrite=overwrite, agent_metadata=agent_metadata)
 
         abs_path = (self.vault_path / file_path).resolve()
         self.index_file(file_path=abs_path, agent_metadata=agent_metadata, new_write=True)
-        self._evaluate_write(abs_path)
+        report = self._evaluate_write(abs_path)
+        return report.applied if report else []
