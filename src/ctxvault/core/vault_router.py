@@ -7,8 +7,9 @@ from ctxvault.core.vaults.skill import SkillVault
 from ctxvault.models.documents import SemanticDocumentInfo, SkillDocumentInfo, DocumentContent, VaultStatus
 from ctxvault.models.episodes import Episode, EpisodeHistory, EpisodeQueryResult, VaultEntity
 from ctxvault.models.query_result import QueryResult
+from ctxvault.models.pruning import PruneLogEntry, PruneMode, PrunePolicy, PruneReport, PruneRule
 from ctxvault.models.vaults import SkillOutput, SkillInput, VaultOperation, VaultType
-from ctxvault.utils.config import create_vault, delete_vault, get_vault_config, get_vaults, set_embedding_model as _set_embedding_model
+from ctxvault.utils.config import create_vault, delete_vault, get_vault_config, get_vaults, set_embedding_model as _set_embedding_model, set_prune_policy as _set_prune_policy
 
 # Explicit, and deliberately not a default: a vault whose type this version does
 # not know must fail loudly. Falling back to semantic would silently open an
@@ -120,15 +121,76 @@ def index_status(vault_name: str) -> VaultStatus:
     vault._require_operation(VaultOperation.REINDEX)
     return vault.status()
 
+def prune(vault_name: str, reasons: list[str] | None = None, targets: list[str] | None = None,
+          threshold: float | None = None, older_than_days: int | None = None,
+          apply: bool = False) -> PruneReport:
+    """What the vault would prune, and why. `threshold` and `older_than_days`
+    override the vault's rules for this call only. With `apply`, named
+    `targets` are pruned as a person's decision; without targets, only what
+    the policy allows unattended."""
+    vault = open_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.PRUNE)
+    policy = vault.prune_policy()
+    if threshold is not None and "duplicate_partial" in policy.rules:
+        policy.rules["duplicate_partial"].threshold = threshold
+    if older_than_days is not None and "stale" in policy.rules:
+        policy.rules["stale"].older_than_days = older_than_days
+    report = vault.prune(reasons=set(reasons) if reasons else None, targets=targets, policy=policy, apply=apply)
+    if apply:
+        vault.purge_expired()
+    return report
+
+def set_prune_policy(vault_name: str, enabled: bool | None = None, retention_days: int | None = None,
+                     rules: dict[str, dict] | None = None) -> PrunePolicy:
+    """Change the stored policy: enable or disable it, how long archived files
+    are kept, and per-reason rules ({"stale": {"mode": "auto", "older_than_days": 90}}).
+    Starts from the type's defaults when the vault has no policy yet."""
+    vault = open_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.PRUNE)
+    policy = vault.prune_policy()
+    if enabled is not None:
+        policy.enabled = enabled
+    if retention_days is not None:
+        policy.retention_days = retention_days
+    for name, change in (rules or {}).items():
+        spec = vault.prune_reasons.get(name)
+        if spec is None:
+            raise ValueError(f"Unknown prune reason '{name}'. Known: {', '.join(vault.prune_reasons)}.")
+        rule = PruneRule.model_validate({**policy.rules[name].model_dump(), **change})
+        if rule.mode == PruneMode.AUTO and not spec.auto_eligible:
+            raise ValueError(f"'{name}' never runs unattended: it is report-only, whatever the config says.")
+        policy.rules[name] = rule
+    policy = PrunePolicy.model_validate(policy.model_dump())
+    _set_prune_policy(vault_name=vault_name, prune=policy.to_config())
+    return policy
+
+def prune_policy(vault_name: str) -> PrunePolicy:
+    """The vault's policy as stored, or the type's defaults (disabled) when none is."""
+    vault = open_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.PRUNE)
+    return vault.prune_policy()
+
+def prune_log(vault_name: str) -> list[PruneLogEntry]:
+    vault = open_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.PRUNE)
+    return vault.prune_log()
+
+def restore(vault_name: str, target: str, overwrite: bool = False) -> PruneLogEntry:
+    vault = open_vault(vault_name=vault_name)
+    vault._require_operation(VaultOperation.PRUNE)
+    return vault.restore(target, overwrite=overwrite)
+
 def sync_index(vault_name: str) -> tuple[list[str], list[str], list[str]]:
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.REINDEX)
     return vault.sync_index()
 
-def write_doc(vault_name: str, file_path: str, content: str, overwrite: bool = True, agent_metadata: dict | None = None)-> None:
+def write_doc(vault_name: str, file_path: str, content: str, overwrite: bool = True,
+              agent_metadata: dict | None = None)-> list[PruneLogEntry]:
+    """Write and index a document; returns what the write's own prune pass archived."""
     vault = open_vault(vault_name=vault_name)
     vault._require_operation(VaultOperation.WRITE_DOC)
-    vault.write_doc(file_path=file_path, content=content, overwrite=overwrite, agent_metadata=agent_metadata)
+    return vault.write_doc(file_path=file_path, content=content, overwrite=overwrite, agent_metadata=agent_metadata)
 
 def write_skill(vault_name: str, skill: SkillInput, overwrite: bool = True)-> str:
     vault = open_vault(vault_name=vault_name)

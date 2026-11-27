@@ -215,3 +215,14 @@ assistant-memory/
 
 # mkdocs build output
 site/
+
+# the viewer's DOM tests (tests/ui)
+node_modules/
+
+# LongMemEval dataset cache (the files are downloaded, never committed)
+.cache/ctxvault/
+benchmarks/longmemeval/.cache/
+
+# Local labels the harness writes next to a run; hypotheses/manifest/scores stay
+benchmarks/longmemeval/results/**/_labels.json
+benchmarks/longmemeval/results/**/_trace.jsonl

@@ -1,13 +1,21 @@
-def index_file(file_path: str, config: dict, agent_metadata: dict | None = None)-> dict:
+def index_file(file_path: str, config: dict, agent_metadata: dict | None = None, *, new_write: bool = False)-> dict:
     from ctxvault.utils.text_extraction import extract_text
-    from ctxvault.core.identifiers import get_doc_id
+    from ctxvault.core.identifiers import get_doc_id, get_text_hash
     from ctxvault.utils.chuncking import chunk_text
     from ctxvault.core import embedding
-    from ctxvault.storage.chroma_store import add_document
+    from ctxvault.storage.chroma_store import add_document, delete_document, get_document_records
     from ctxvault.utils.metadata_builder import build_chunks_metadatas
 
     text, file_type = extract_text(path=file_path)
     doc_id = get_doc_id(path=file_path)
+    if agent_metadata is None and not new_write:
+        # Indexing a file again (index, sync) is not a new write: the agent
+        # metadata its chunks carry is kept, as reindex_file does. The chunks
+        # are dropped before the new ones go in (below), so nothing else would
+        # carry it over. A new write (write_doc) says all there is: metadata
+        # about the old text, a session's dates say, must not describe the new.
+        existing = get_document_records(doc_id=doc_id, config=config)
+        agent_metadata = _extract_agent_metadata(existing.get("metadatas") or [])
 
     # The model pinned to this vault (config["embedding_model"], else the
     # default) decides both the vectors and how long a chunk may be: it is
@@ -19,8 +27,14 @@ def index_file(file_path: str, config: dict, agent_metadata: dict | None = None)
     embeddings = embedding.embed_list(chunks=[c.text for c in chunks], model_name=model_name)
 
     chunk_ids, metadatas = build_chunks_metadatas(doc_id=doc_id, chunks_size=len(chunks), source=file_path, filetype=file_type,
-                                                  agent_metadata=agent_metadata, repeated_words=[c.repeated_words for c in chunks])
+                                                  agent_metadata=agent_metadata, repeated_words=[c.repeated_words for c in chunks],
+                                                  text_hash=get_text_hash(text))
 
+    # Chunk ids are the doc_id plus the chunk's position, so an upsert only
+    # replaces the chunks the new text still has: a document rewritten
+    # shorter would keep the old tail. Its chunks are dropped first, once the
+    # new ones are ready, so a failure above leaves the old index in place.
+    delete_document(doc_id=doc_id, config=config)
     add_document(ids=chunk_ids, embeddings=embeddings, metadatas=metadatas, chunks=[c.text for c in chunks], config=config)
 
 def delete_file(file_path: str, config: dict)-> None:
