@@ -1,5 +1,6 @@
 from ctxvault.api.schemas import *
 from ctxvault.core import vault_router
+from ctxvault.models.pruning import PruneReport
 from ctxvault.core.exceptions import *
 from ctxvault.models.vaults import SkillInput
 from mcp.server.fastmcp import FastMCP
@@ -105,13 +106,13 @@ async def write_doc(vault_name: str, file_path: str, content: str, generated_by:
     try:
         check_access(vault_name, AGENT_ID)
         timestamp = datetime.now(timezone.utc).isoformat()
-        vault_router.write_doc(vault_name=vault_name,
+        pruned = vault_router.write_doc(vault_name=vault_name,
                          file_path=file_path, 
                          content=content, 
                          overwrite=overwrite, 
                          agent_metadata=AgentMetadata(generated_by=generated_by, timestamp=timestamp))
         
-        return WriteDocResponse(file_path=file_path)
+        return WriteDocResponse(file_path=file_path, pruned=pruned)
     except VaultNotFoundError as e:
         raise ValueError(f"Vault '{vault_name}' does not exist.")
     except (VaultNotInitializedError, FileOutsideVaultError, UnsupportedFileTypeError, FileTypeNotPresentError) as e:
@@ -139,6 +140,16 @@ def list_docs(vault_name: str) -> ListDocsResponse:
     except UnsupportedVaultOperationError as e:
         raise ValueError(e)
     
+@mcp.tool(description="See what a semantic vault would prune, and why: identical copies of one document (duplicate), passages two documents share (duplicate_partial), and documents not modified in a long time (stale), each with the raw signals behind it. Read-only: nothing changes, and agents cannot apply or configure pruning. Use it to tell the user the vault is accumulating copies or old notes, and let them decide. A candidate with auto_allowed is what the vault's own policy will archive unattended; held ones need a person. reasons limits the report to some of them.")
+def prune_report(vault_name: str, reasons: list[str] = []) -> PruneReport:
+    try:
+        check_access(vault_name, AGENT_ID)
+        return vault_router.prune(vault_name=vault_name, reasons=reasons or None)
+    except VaultNotFoundError:
+        raise ValueError(f"Vault '{vault_name}' does not exist.")
+    except (UnsupportedVaultOperationError, ValueError) as e:
+        raise ValueError(e)
+
 @mcp.tool(description="Create and store a new skill in a skill vault. Use this to persist procedural knowledge, instructions, or how-to guides that agents can retrieve and execute later. The skill will be indexed by name and description for fast lookup. Use this only with skill vaults.")
 async def write_skill(vault_name: str, skill_name: str, description: str, instructions: str, overwrite: bool = False)-> WriteSkillResponse:
     await ensure_warmup()

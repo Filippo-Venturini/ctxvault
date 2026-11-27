@@ -30,6 +30,7 @@ from ctxvault.core.exceptions import VaultAccessDeniedError, VaultTypeNotValidEr
 from ctxvault.core.vaults.episodic import EpisodicVault
 from ctxvault.core.vaults.semantic import SemanticVault
 from ctxvault.core.vaults.skill import SkillVault
+from ctxvault.models.pruning import PrunePolicy
 from ctxvault.models.vaults import VaultType
 
 
@@ -39,8 +40,8 @@ class Client:
     `vault` returns whatever type the name resolves to; `semantic`, `skills`
     and `episodic` return the one type their caller expects, or fail before
     a method call would. The registry operations (`init`, `purge`, `attach`,
-    `detach`, `make_public`, `vaults`) mirror the CLI commands of the same
-    name and, like them, are not gated by the agent.
+    `detach`, `make_public`, `vaults`) and `set_prune_policy` mirror the CLI
+    commands of the same name and, like them, are not gated by the agent.
     """
 
     def __init__(self, agent: str | None = None):
@@ -101,6 +102,22 @@ class Client:
         0 removes the key, leaving a vault that never set it unchanged."""
         from ctxvault.utils.config import set_sync_on_query_interval
         set_sync_on_query_interval(name, seconds)
+
+    def set_prune_policy(
+        self,
+        name: str,
+        *,
+        enabled: bool | None = None,
+        retention_days: int | None = None,
+        rules: dict[str, dict] | None = None,
+    ) -> PrunePolicy:
+        """Changes a vault's prune policy, as `ctxvault prune --enable/--rule`
+        does: fields left as None keep their stored value. Reading the report,
+        applying it, the log and restore are methods of the vault itself
+        (`prune`, `prune_policy`, `prune_log`, `restore`)."""
+        return vault_router.set_prune_policy(
+            vault_name=name, enabled=enabled, retention_days=retention_days, rules=rules
+        )
 
     # --- opening --------------------------------------------------------------
 

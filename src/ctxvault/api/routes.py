@@ -2,7 +2,8 @@ from ctxvault.api.schemas import *
 from ctxvault.core.exceptions import *
 from ctxvault.models.vaults import SkillInput
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
-from ctxvault.core import vault_router
+from ctxvault.core import prune_log, vault_router
+from ctxvault.models.pruning import PruneReport
 
 app = FastAPI()
 
@@ -157,13 +158,13 @@ async def write_doc(write_request: WriteDocRequest, request: Request)-> WriteDoc
     try:
         check_vault_access(vault_name=write_request.vault_name, request=request)
 
-        vault_router.write_doc(vault_name=write_request.vault_name,
+        pruned = vault_router.write_doc(vault_name=write_request.vault_name,
                          file_path=write_request.file_path, 
                          content=write_request.content, 
                          overwrite=write_request.overwrite, 
                          agent_metadata=write_request.agent_metadata.model_dump() if write_request.agent_metadata else None)
         
-        return WriteDocResponse(file_path=write_request.file_path)
+        return WriteDocResponse(file_path=write_request.file_path, pruned=pruned)
     except VaultNotFoundError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except UnsupportedVaultOperationError as e:
@@ -638,3 +639,107 @@ async def episode_stats(vault_name: str, request: Request)-> EpisodeStatsRespons
         raise HTTPException(status_code=400, detail=str(e))
     except VaultAccessDeniedError as e:
         raise HTTPException(status_code=403, detail=str(e))
+
+# ── pruning ─────────────────────────────────────────────────────────────────
+# Reading what a vault would prune, its policy and its log follows the usual
+# access rules. Changing anything (applying, the policy, a restore) is a
+# person's decision: a request that names an agent is refused, as the MCP
+# server only ever reads.
+
+def refuse_agent(request: Request, action: str) -> None:
+    agent = request.headers.get("X-CtxVault-Agent")
+    if agent:
+        raise VaultAccessDeniedError(f"Agent '{agent}' cannot {action}: pruning is changed only by a person. "
+                                     "Agents can read the report and the log.")
+
+def prune_http_error(e: Exception) -> HTTPException:
+    if isinstance(e, VaultAccessDeniedError):
+        return HTTPException(status_code=403, detail=str(e))
+    if isinstance(e, (FileNotFoundError, DocumentNotFoundError)):
+        return HTTPException(status_code=404, detail=str(e))
+    if isinstance(e, (FileAlreadyExistError, prune_log.PruneLogBroken)):
+        # the vault is in a state the request did not expect: a path taken, a log that does not chain
+        return HTTPException(status_code=409, detail=str(e))
+    if isinstance(e, prune_log.PruneLogBusy):
+        return HTTPException(status_code=503, detail=str(e))
+    if isinstance(e, (VaultNotFoundError, UnsupportedVaultOperationError, MissingAgentNameError,
+                      FileOutsideVaultError, ValueError)):
+        return HTTPException(status_code=400, detail=str(e))
+    return HTTPException(status_code=500, detail=str(e))
+
+@ctxvault_router.post(
+    "/prune",
+    summary="Report what a semantic vault would prune, or prune it",
+    description="Without apply, a report: candidates by reason, each with its raw signals, and nothing changes. "
+                "With apply and targets, the named documents are archived, whoever wrote them. With apply and no "
+                "targets, only what the vault's policy allows unattended. Applying is refused to a request that "
+                "names an agent."
+)
+async def prune(prune_request: PruneRequest, request: Request) -> PruneReport:
+    try:
+        check_vault_access(vault_name=prune_request.vault_name, request=request)
+        if prune_request.apply:
+            refuse_agent(request, "apply pruning")
+        return vault_router.prune(vault_name=prune_request.vault_name, reasons=prune_request.reasons,
+                                  targets=prune_request.targets, threshold=prune_request.threshold,
+                                  older_than_days=prune_request.older_than_days, apply=prune_request.apply)
+    except Exception as e:
+        raise prune_http_error(e)
+
+@ctxvault_router.get(
+    "/prune/policy",
+    summary="Read a vault's prune policy",
+    description="The stored policy, or the vault type's defaults, disabled, when none is set."
+)
+async def get_prune_policy(vault_name: str, request: Request) -> PrunePolicyResponse:
+    try:
+        check_vault_access(vault_name=vault_name, request=request)
+        return PrunePolicyResponse(vault_name=vault_name, policy=vault_router.prune_policy(vault_name=vault_name))
+    except Exception as e:
+        raise prune_http_error(e)
+
+@ctxvault_router.put(
+    "/prune/policy",
+    summary="Change a vault's prune policy",
+    description="Enable or disable it, set how long archived files are kept (at least a day), and set rules per "
+                "reason. Fields left out keep their stored value. Refused to a request that names an agent."
+)
+async def set_prune_policy(policy_request: PrunePolicyRequest, request: Request) -> PrunePolicyResponse:
+    try:
+        check_vault_access(vault_name=policy_request.vault_name, request=request)
+        refuse_agent(request, "change the prune policy")
+        policy = vault_router.set_prune_policy(vault_name=policy_request.vault_name, enabled=policy_request.enabled,
+                                               retention_days=policy_request.retention_days,
+                                               rules=policy_request.rules)
+        return PrunePolicyResponse(vault_name=policy_request.vault_name, policy=policy)
+    except Exception as e:
+        raise prune_http_error(e)
+
+@ctxvault_router.get(
+    "/prune/log",
+    summary="Read what pruning archived, restored and purged",
+    description="Every archive on the vault's prune log, oldest first, each with its state and when it is purged."
+)
+async def get_prune_log(vault_name: str, request: Request) -> PruneLogResponse:
+    try:
+        check_vault_access(vault_name=vault_name, request=request)
+        return PruneLogResponse(vault_name=vault_name, entries=vault_router.prune_log(vault_name=vault_name))
+    except Exception as e:
+        raise prune_http_error(e)
+
+@ctxvault_router.post(
+    "/prune/restore",
+    summary="Restore an archived document",
+    description="Move the last archived document at that path back into the vault and index it again, with the "
+                "agent metadata it had. Refused if the path is taken, unless overwrite. Refused to a request that "
+                "names an agent."
+)
+async def restore(restore_request: RestoreRequest, request: Request) -> RestoreResponse:
+    try:
+        check_vault_access(vault_name=restore_request.vault_name, request=request)
+        refuse_agent(request, "restore archived documents")
+        entry = vault_router.restore(vault_name=restore_request.vault_name, target=restore_request.target,
+                                     overwrite=restore_request.overwrite)
+        return RestoreResponse(vault_name=restore_request.vault_name, entry=entry)
+    except Exception as e:
+        raise prune_http_error(e)

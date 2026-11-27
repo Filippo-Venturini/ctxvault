@@ -105,6 +105,7 @@ def test_semantic_query_without_a_server(mock_vault_config):
 
     assert len(documents.query("test query").results) == 1
 
+
 def test_client_sets_sync_on_query_without_the_cli(mock_vault_config):
     from ctxvault.utils.config import get_vault_config
     memory = Client()
