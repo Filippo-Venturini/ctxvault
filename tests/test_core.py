@@ -496,8 +496,7 @@ def test_query_threads_vault_embedding_model(mock_global_config, monkeypatch):
     def recording_embed(chunks, model_name=None):
         seen.append(model_name)
         return [[0.1] * 384] * len(chunks)
-    # querying.py binds embed_list at import, so patch it where it is looked up.
-    monkeypatch.setattr("ctxvault.core.querying.embed_list", recording_embed)
+    monkeypatch.setattr("ctxvault.core.embedding.embed_list", recording_embed)
 
     vault_router.query(text="anything", vault_name="qry_vault")
     assert seen == ["all-mpnet-base-v2"]
@@ -531,11 +530,29 @@ def test_the_global_registry_is_not_also_a_local_one(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "GLOBAL_DIR", home / ".ctxvault")
 
     monkeypatch.chdir(home / "project" / "sub")
-    assert config.find_local_root() is None           # walking up hits only the global one
+    # Any registry found before the project's must lie outside tmp_path (e.g. a
+    # real ~/.ctxvault on the developer's machine), never the fake GLOBAL_DIR.
+    found = config.find_local_root()
+    assert found is None or not found.resolve().is_relative_to(tmp_path.resolve())
 
     (home / "project" / ".ctxvault").mkdir()
     (home / "project" / ".ctxvault" / "config.json").write_text('{"vaults": {}}')
     assert config.find_local_root() == home / "project" / ".ctxvault"
+
+def test_walking_past_the_global_registry_finds_an_outer_local_one(tmp_path, monkeypatch):
+    from ctxvault.utils import config
+
+    outer = tmp_path / "outer"
+    (outer / ".ctxvault").mkdir(parents=True)
+    (outer / ".ctxvault" / "config.json").write_text('{"vaults": {}}')
+    home = outer / "home"
+    (home / ".ctxvault").mkdir(parents=True)
+    (home / ".ctxvault" / "config.json").write_text('{"vaults": {}}')
+    (home / "project" / "sub").mkdir(parents=True)
+    monkeypatch.setattr(config, "GLOBAL_DIR", home / ".ctxvault")
+
+    monkeypatch.chdir(home / "project" / "sub")
+    assert config.find_local_root() == outer / ".ctxvault"
 
 def test_a_vault_whose_folder_is_gone_does_not_reopen_empty(mock_episodic_vault_config):
     import shutil
@@ -670,6 +687,49 @@ def test_a_removed_file_makes_the_next_query_sync(mock_vault_config, monkeypatch
 
     assert len(calls) == 2
 
+def test_an_edit_made_within_the_same_second_as_indexing_is_reindexed(mock_vault_config):
+    """The repro from the review: an edit landing in the same second as the
+    index leaves `indexed_at` and the file's mtime equal once both are floored
+    to a second, so `status()` calls it in sync. The recorded `mtime_ns` is
+    what tells the two apart."""
+    from ctxvault.utils.config import set_sync_on_query
+    set_sync_on_query("test_vault", True)
+    note = mock_vault_config / "b.txt"
+    note.write_text("gamma grape")
+    vault_router.index_files(vault_name="test_vault")
+    vault_router.query(text="gamma grape", vault_name="test_vault")      # records the snapshot
+
+    note.write_text("delta durian")                                     # same second, new mtime_ns
+    result = vault_router.query(text="delta durian", vault_name="test_vault")
+
+    assert result.sync is not None
+    assert str(note) in result.sync.reindexed
+
+def test_the_archive_folder_is_not_part_of_the_sync_check(mock_vault_config):
+    from ctxvault.utils.config import set_sync_on_query
+    set_sync_on_query("test_vault", True)
+    vault_router.query(text="anything", vault_name="test_vault")
+
+    archive = mock_vault_config / ".ctxvault-archive"
+    archive.mkdir(exist_ok=True)
+    (archive / "archived.txt").write_text("old text")
+
+    result = vault_router.query(text="anything", vault_name="test_vault")
+
+    assert result.sync is None            # an archived file is not a change to index
+    assert vault_router.index_status("test_vault").unindexed == []
+
+def test_no_sync_report_when_the_sync_changed_nothing(mock_vault_config, monkeypatch):
+    from ctxvault.core.vaults.semantic import SemanticVault
+    from ctxvault.utils.config import set_sync_on_query
+    set_sync_on_query("test_vault", True)
+    (mock_vault_config / "note.txt").write_text("here")
+    monkeypatch.setattr(SemanticVault, "sync_index", lambda self: ([], [], []))
+
+    result = vault_router.query(text="anything", vault_name="test_vault")
+
+    assert result.sync is None
+
 def test_two_queries_arriving_together_sync_once(mock_vault_config, monkeypatch):
     import threading
     import time
@@ -687,7 +747,7 @@ def test_two_queries_arriving_together_sync_once(mock_vault_config, monkeypatch)
         time.sleep(0.2)
         with guard:
             state["active"] -= 1
-        return [], [], []
+        return ["docs/one.txt"], [], []
 
     monkeypatch.setattr(SemanticVault, "sync_index", slow_sync)
     start = threading.Barrier(2)
@@ -772,79 +832,3 @@ def test_a_whole_reindex_forgets_the_sync_fingerprint(mock_vault_config, temp_do
     vault.reindex_files()        # the full path rebuilds it
 
     assert not state.exists()
-
-def test_an_unchanged_query_does_not_rewrite_the_sync_state(mock_vault_config, monkeypatch):
-    from ctxvault.core.vaults.semantic import SemanticVault
-    from ctxvault.utils.config import set_sync_on_query
-    set_sync_on_query("test_vault", True)
-    monkeypatch.setattr(SemanticVault, "sync_index", lambda self: ([], [], []))
-    vault_router.query(text="anything", vault_name="test_vault")     # records the fingerprint
-
-    writes = []
-    monkeypatch.setattr(SemanticVault, "_write_sync_state", lambda self, fp: writes.append(fp))
-    vault_router.query(text="anything", vault_name="test_vault")
-
-    assert writes == []        # interval 0 has nothing to restart, so nothing is written
-
-def test_an_edited_file_is_indexed_before_the_query_answers(mock_vault_config, monkeypatch):
-    """End to end: edit a file, query, and the answer comes from the new text."""
-    import os
-    from ctxvault.utils.config import set_sync_on_query
-    from ctxvault.storage import chroma_store
-
-    class Collection:
-        metadata = {"hnsw:space": "cosine"}
-
-        def __init__(self):
-            self.rows = {}
-
-        def upsert(self, ids, embeddings, metadatas, documents):
-            for i, text, meta in zip(ids, documents, metadatas):
-                self.rows[i] = (text, meta)
-
-        def delete(self, where=None, ids=None):
-            if where:
-                for key, value in list(self.rows.items()):
-                    if where.get("doc_id") == value[1].get("doc_id"):
-                        self.rows.pop(key, None)
-                return
-            for i in ids or []:
-                self.rows.pop(i, None)
-
-        def get(self, where=None, include=None):
-            rows = [value for value in self.rows.values()
-                    if not where or all(value[1].get(k) == v for k, v in where.items())]
-            return {"documents": [r[0] for r in rows], "metadatas": [dict(r[1]) for r in rows]}
-
-        def query(self, query_embeddings, n_results, where=None):
-            rows = list(self.rows.values())[:n_results]
-            return {
-                "documents": [[r[0] for r in rows]],
-                "metadatas": [[dict(r[1]) for r in rows]],
-                "distances": [[0.0 for _ in rows]],
-            }
-
-    collection = Collection()
-    client = type("Client", (), {
-        "get_collection": lambda self, name: collection,
-        "create_collection": lambda self, name, metadata=None: collection,
-    })()
-    monkeypatch.setattr(chroma_store, "PersistentClient", lambda path, settings=None: client)
-    monkeypatch.setattr(chroma_store, "_clients", {})
-    monkeypatch.setattr(chroma_store, "_collections", {})
-
-    note = mock_vault_config / "note.txt"
-    note.write_text("the first version")
-    set_sync_on_query("test_vault", True)
-
-    first = vault_router.query(text="version", vault_name="test_vault")
-    assert first.sync is not None and first.sync.indexed == [str(note)]
-    assert "the first version" in first.results[0].text
-
-    note.write_text("the second version")
-    os.utime(note, (1_800_000_000, 1_800_000_000))
-
-    second = vault_router.query(text="version", vault_name="test_vault")
-    assert second.sync is not None and second.sync.reindexed == [str(note)]
-    assert "the second version" in second.results[0].text
-

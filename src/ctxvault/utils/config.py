@@ -219,6 +219,20 @@ def set_embedding_model(vault_name: str, model_name: str) -> None:
     _save_config(data=config, root=save_root)
 
 
+def set_prune_policy(vault_name: str, prune: dict) -> None:
+    """Stores a vault's prune policy under its "prune" key. A vault without
+    the key has pruning disabled, with its type's default rules."""
+    global_config, local_config, local_root = _load_config()
+
+    scope = _get_vault_scope(vault_name, global_config, local_config)
+    if scope is None:
+        raise VaultNotFoundError(f"Vault '{vault_name}' does not exist.")
+
+    config, save_root = _editable_config(scope, local_root)
+    config["vaults"][vault_name]["prune"] = prune
+    _save_config(data=config, root=save_root)
+
+
 def _semantic_entry(vault_name: str) -> tuple[dict, Path, dict]:
     """The vault's entry in the file it is registered in, for a per-vault
     option. The caller saves it."""
@@ -265,7 +279,6 @@ def set_sync_on_query_interval(vault_name: str, seconds: float) -> None:
         entry["sync_on_query_interval"] = seconds
     else:
         entry.pop("sync_on_query_interval", None)
-
     _save_config(data=config, root=save_root)
 
 
