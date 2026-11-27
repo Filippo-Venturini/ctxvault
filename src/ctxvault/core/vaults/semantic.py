@@ -204,8 +204,32 @@ class SemanticVault(BaseVault):
         for file in status.unindexed:
             self.index_file(file_path=Path(file))
             indexed.append(file)
+        reindexed += self._reindex_edits_within_slack(set(reindexed) | set(indexed) | set(dropped))
         self._evaluate_quietly("sync")
         return reindexed, indexed, dropped
+
+    def _reindex_edits_within_slack(self, already: set[str]) -> list[str]:
+        """The first sync of a vault with no file record has only `status()`
+        to go on, and that comparison keeps a one-second slack. An edit that
+        landed inside it would be called in sync and then recorded as synced,
+        so the file would stay stale: compare its mtime to the document's own
+        `indexed_at` without slack this once."""
+        reindexed = []
+        for doc in self.list_documents():
+            source = str(doc.source)
+            if source in already:
+                continue
+            path = Path(doc.source)
+            if not path.is_file():
+                continue
+            indexed_at = _instant(doc.indexed_at)
+            if indexed_at is None:
+                continue
+            modified = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+            if modified > indexed_at:
+                self.reindex_file(file_path=path)
+                reindexed.append(source)
+        return reindexed
 
     def _find_candidates(self, policy: PrunePolicy, reasons: set[str]) -> PruneReport:
         return find_semantic_candidates(vault_name=self.vault_name, config=self.config, policy=policy, reasons=reasons)
