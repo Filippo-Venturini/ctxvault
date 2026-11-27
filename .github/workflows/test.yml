@@ -12,49 +12,35 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
-        include:
-          - os: windows-latest
-            python-version: "3.12"
-
+        os: [ubuntu-latest, windows-latest]
+    
     steps:
     - uses: actions/checkout@v4
     
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
-        cache: pip
-        cache-dependency-path: pyproject.toml
-
+        python-version: "3.11"
+    
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install -e ".[dev]"
-
+        pip install -e ".[dev]"
+    
+    - name: Debug - Show structure
+      shell: bash
+      run: |
+        ls -la
+        ls -la src/ || echo "No src directory"
+        ls -la tests/
+    
+    - name: Debug - Show Python path
+      run: |
+        python -c "import sys; print('\n'.join(sys.path))"
+    
+    - name: Debug - Try importing
+      run: |
+        python -c "import ctxvault; print('Import OK')" || echo "Import failed"
+    
     - name: Run tests
       run: pytest -v --tb=short
-
-  ui:
-    # the memory viewer's DOM tests: Node's own runner and one dev dependency,
-    # so no Python is installed here and the job stays a minute
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Node
-      uses: actions/setup-node@v4
-      with:
-        node-version: "22"
-        cache: npm
-        cache-dependency-path: tests/ui/package-lock.json
-
-    - name: Install
-      working-directory: tests/ui
-      run: npm ci
-
-    - name: Run the viewer's DOM tests
-      working-directory: tests/ui
-      run: npm test

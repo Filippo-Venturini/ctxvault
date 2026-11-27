@@ -260,3 +260,22 @@ class TestWriteSkillEndpoint:
             "overwrite": True
         })
         assert response.status_code == 400
+
+
+def test_query_reports_the_sync_it_ran(mock_vault_config, monkeypatch):
+    from ctxvault.core import vault_router
+    from ctxvault.models.query_result import ChunkMatch, QueryResult, SyncReport
+
+    result = QueryResult(
+        query="test query",
+        results=[ChunkMatch(chunk_id="1", chunk_index=0, text="new text", score=0.0, doc_id="1", source="note.txt")],
+        sync=SyncReport(indexed=["note.txt"], duration_ms=12.5),
+    )
+    monkeypatch.setattr(vault_router, "query", lambda **kwargs: result)
+
+    response = client.post("/ctxvault/query", json={"vault_name": "test_vault", "query": "test query"})
+
+    assert response.status_code == 200
+    assert response.json()["sync"] == {
+        "reindexed": [], "indexed": ["note.txt"], "dropped": [], "duration_ms": 12.5,
+    }

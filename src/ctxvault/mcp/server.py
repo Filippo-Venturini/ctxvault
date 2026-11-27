@@ -91,7 +91,7 @@ async def query(vault_name: str, query: str) -> QueryResponse:
     try:
         check_access(vault_name, AGENT_ID)
         result = vault_router.query(vault_name=vault_name, text=query, filters=None)
-        return QueryResponse(results=result.results)
+        return QueryResponse(results=result.results, sync=result.sync)
     except VaultNotFoundError:
         raise ValueError(f"Vault '{vault_name}' does not exist.")
     except EmptyQueryError:

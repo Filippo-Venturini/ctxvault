@@ -2,7 +2,7 @@ from typing import Any
 from ctxvault.models.documents import SemanticDocumentInfo, SkillDocumentInfo, DocumentContent
 from ctxvault.models.episodes import Episode, EpisodeMatch, EpisodeOrder, VaultEntity
 from ctxvault.models.pruning import PruneLogEntry, PrunePolicy
-from ctxvault.models.query_result import ChunkMatch
+from ctxvault.models.query_result import ChunkMatch, SyncReport
 from ctxvault.models.vaults import SkillOutput, VaultType
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -39,6 +39,9 @@ class QueryRequest(BaseModel):
 
 class QueryResponse(BaseModel):
     results: list[ChunkMatch]
+    # Present only when the vault synced before answering and that sync changed
+    # something; None means the query read the index as it was.
+    sync: SyncReport | None = None
 
 class DeleteResponse(BaseModel):
     deleted_files: list[str]

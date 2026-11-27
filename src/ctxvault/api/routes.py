@@ -43,7 +43,7 @@ async def query(query_request: QueryRequest, request: Request)-> QueryResponse:
         if not result.results:
             raise HTTPException(status_code=404, detail="No results found.")
 
-        return QueryResponse(results=result.results)
+        return QueryResponse(results=result.results, sync=result.sync)
     except EmptyQueryError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except VaultNotFoundError as e:

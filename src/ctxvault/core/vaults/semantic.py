@@ -1,5 +1,9 @@
+import json
+import os
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Lock
 from ctxvault.core import indexer
 import os
 import warnings
@@ -8,7 +12,7 @@ from ctxvault.core.pruning import DUPLICATE, SEMANTIC_REASONS, find_semantic_can
 from ctxvault.core.vaults.base import ARCHIVE_DIR, BaseVault
 from ctxvault.models.pruning import Candidate, PruneLogEntry, PruneMode, PrunePolicy, PruneReport, PruneTrigger
 from ctxvault.models.documents import DocumentStatus, SemanticDocumentInfo, DocumentContent, VaultStatus
-from ctxvault.models.query_result import ChunkMatch, QueryResult
+from ctxvault.models.query_result import ChunkMatch, QueryResult, SyncReport
 from ctxvault.core.exceptions import EmptyQueryError, FileAlreadyExistError, FileOutsideVaultError, UnsupportedFileTypeError
 from ctxvault.models.vaults import VaultOperation
 from ctxvault.storage import chroma_store
@@ -17,6 +21,22 @@ from ctxvault.utils.text_extraction import SUPPORTED_EXT
 
 # a file's mtime and indexed_at come from different clocks' roundings
 _SYNC_SLACK = timedelta(seconds=1)
+
+# What the files looked like when the index last matched them: a hash of
+# path + mtime for every supported file. It sits beside the collection, so the
+# vault's own file scan never sees it.
+_SYNC_STATE_NAME = ".sync_on_query.json"
+
+# One lock per vault folder: two queries arriving together in this process
+# must not reindex the same file twice. Cross-process is not covered, but
+# reindexing a file is idempotent, so a second process at worst repeats work.
+_SYNC_LOCKS: dict[str, Lock] = {}
+_SYNC_LOCKS_GUARD = Lock()
+
+def _sync_lock(vault_path: Path) -> Lock:
+    key = vault_path.resolve().as_posix()
+    with _SYNC_LOCKS_GUARD:
+        return _SYNC_LOCKS.setdefault(key, Lock())
 
 def _instant(value: str | None) -> datetime | None:
     if not value:
@@ -102,6 +122,11 @@ class SemanticVault(BaseVault):
     def _rebuild_collection(self) -> tuple[list[str], list[str]]:
         """Make the collection again in this version's distance space and
         index every file into it, carrying each document's agent metadata."""
+        # Everything indexed is about to be dropped, so the record of what the
+        # index matched must go with it or the next query would trust it.
+        state = self._sync_state_path()
+        if state is not None:
+            state.unlink(missing_ok=True)
         kept = {doc.source: doc.metadata or None for doc in self.list_documents()}
         chroma_store.reset_collection(self.config)
         indexed, skipped = [], []
@@ -139,7 +164,34 @@ class SemanticVault(BaseVault):
     def sync_index(self) -> tuple[list[str], list[str], list[str]]:
         """Bring the index back to the files: reindex the changed documents,
         index the files never indexed, drop the documents whose file is gone.
-        Returns (reindexed, indexed, dropped)."""
+        Returns (reindexed, indexed, dropped).
+
+        When a sync record exists, the files are compared to it by `mtime_ns`
+        rather than through `status()`: a save that lands in the same second
+        the file was indexed moves the nanosecond mtime but not the second
+        one, and `status()` would call that file in sync. A stale answer is
+        what the option promises never to return, so the exact comparison
+        wins here; `status()` keeps its slack because it also has to answer
+        for files indexed by an earlier version."""
+        snapshot = self._files_snapshot()
+        recorded = (self._read_sync_state().get("files") or {})
+        if recorded:
+            reindexed, indexed, dropped = [], [], []
+            for path, mtime in sorted(snapshot.items()):
+                if recorded.get(path) == mtime:
+                    continue
+                if path in recorded:
+                    self.reindex_file(file_path=Path(path))
+                    reindexed.append(path)
+                else:
+                    self.index_file(file_path=Path(path))
+                    indexed.append(path)
+            for path in sorted(set(recorded) - set(snapshot)):
+                indexer.delete_file(file_path=path, config=self.config)
+                dropped.append(path)
+            self._evaluate_quietly("sync")
+            return reindexed, indexed, dropped
+
         status = self.status()
         reindexed, indexed, dropped = [], [], []
         for doc in status.documents:
@@ -152,8 +204,32 @@ class SemanticVault(BaseVault):
         for file in status.unindexed:
             self.index_file(file_path=Path(file))
             indexed.append(file)
+        reindexed += self._reindex_edits_within_slack(set(reindexed) | set(indexed) | set(dropped))
         self._evaluate_quietly("sync")
         return reindexed, indexed, dropped
+
+    def _reindex_edits_within_slack(self, already: set[str]) -> list[str]:
+        """The first sync of a vault with no file record has only `status()`
+        to go on, and that comparison keeps a one-second slack. An edit that
+        landed inside it would be called in sync and then recorded as synced,
+        so the file would stay stale: compare its mtime to the document's own
+        `indexed_at` without slack this once."""
+        reindexed = []
+        for doc in self.list_documents():
+            source = str(doc.source)
+            if source in already:
+                continue
+            path = Path(doc.source)
+            if not path.is_file():
+                continue
+            indexed_at = _instant(doc.indexed_at)
+            if indexed_at is None:
+                continue
+            modified = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+            if modified > indexed_at:
+                self.reindex_file(file_path=path)
+                reindexed.append(source)
+        return reindexed
 
     def _find_candidates(self, policy: PrunePolicy, reasons: set[str]) -> PruneReport:
         return find_semantic_candidates(vault_name=self.vault_name, config=self.config, policy=policy, reasons=reasons)
@@ -290,10 +366,99 @@ class SemanticVault(BaseVault):
         indexer.delete_file(file_path=str(file_path), config=self.config)
         super().delete_file(file_path=file_path)
         
+    def _sync_state_path(self) -> Path | None:
+        return self.db_path / _SYNC_STATE_NAME if self.db_path else None
+
+    def _files_snapshot(self) -> dict[str, int]:
+        """Every supported file's path and `mtime_ns`: one stat per file, and
+        no vector-store read, so it is cheap enough to run per query.
+
+        Keeping the per-file value, not just a hash of them, is what lets a
+        sync reindex the files whose entry moved instead of comparing their
+        mtimes to `indexed_at`, which is stored to the second.
+
+        Deliberately not `iter_files`: that resolves every path to check it is
+        inside the vault, which cost about a millisecond a file here. Walking
+        the tree with `os.walk` keeps the scan to the stats themselves."""
+        root = str(self.vault_path)
+        excluded = [os.path.normcase(str(path)) for path in self._excluded_dirs()]
+        files = {}
+        for directory, dirnames, filenames in os.walk(root):
+            dirnames[:] = [name for name in dirnames
+                           if os.path.normcase(os.path.join(directory, name)) not in excluded]
+            for name in filenames:
+                if os.path.splitext(name)[1].lower() not in SUPPORTED_EXT:
+                    continue
+                path = os.path.join(directory, name)
+                try:
+                    files[path] = os.stat(path).st_mtime_ns
+                except OSError:      # gone between the listing and the stat
+                    continue
+        return files
+
+    def _read_sync_state(self) -> dict:
+        path = self._sync_state_path()
+        if path is None or not path.is_file():
+            return {}
+        try:
+            return json.loads(path.read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def _write_sync_state(self, files: dict[str, int]) -> None:
+        path = self._sync_state_path()
+        if path is None:
+            return
+        try:
+            path.write_text(json.dumps({
+                "files": files,
+                "synced_at": datetime.now(timezone.utc).isoformat(),
+            }))
+        except OSError:
+            pass    # a vault that cannot record it will check the files instead
+
+    def _seconds_since(self, state: dict) -> float:
+        try:
+            return (datetime.now(timezone.utc) - _instant(state.get("synced_at"))).total_seconds()
+        except (TypeError, ValueError):
+            return float("inf")
+
+    def _sync_before_query(self) -> SyncReport | None:
+        """Bring the index to the files before answering, but only when the
+        files moved since the last sync: an unchanged vault pays the snapshot
+        and nothing else, and an interval can spare even that."""
+        lock = _sync_lock(self.vault_path)
+        with lock:
+            state = self._read_sync_state()
+            interval = float(self.config.get("sync_on_query_interval") or 0)
+            if state and interval > 0 and self._seconds_since(state) < interval:
+                return None
+            snapshot = self._files_snapshot()
+            if state.get("files") == snapshot:
+                # restart the interval: the files were checked, nothing was done
+                if interval > 0:
+                    self._write_sync_state(snapshot)
+                return None
+            started = time.monotonic()
+            reindexed, indexed, dropped = self.sync_index()
+            self._write_sync_state(snapshot)
+        report = SyncReport(
+            reindexed=reindexed,
+            indexed=indexed,
+            dropped=dropped,
+            duration_ms=round((time.monotonic() - started) * 1000, 1),
+        )
+        return report if report.changed() else None
+
     def query(self, text: str, filters: dict | None = None, n_results: int = 5) -> QueryResult:
         from ctxvault.core import querying
         if not text.strip():
             raise EmptyQueryError("Query text cannot be empty.")
+
+        # Opt-in: when the vault says so, a query first brings the index in
+        # line with the files, so a stale answer is impossible without a
+        # watcher. Off by default, and then this costs nothing.
+        sync = self._sync_before_query() if self.config.get("sync_on_query") else None
 
         result_dict = querying.query(query_txt=text, config=self.config, n_results=n_results, filters=filters)
 
@@ -324,7 +489,7 @@ class SemanticVault(BaseVault):
             )
             for d, m, dist in valid_triples
         ]
-        return QueryResult(query=text, results=chunks_match)
+        return QueryResult(query=text, results=chunks_match, sync=sync)
 
     def list_documents(self) -> list[SemanticDocumentInfo]:
         from ctxvault.core import querying

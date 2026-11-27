@@ -36,6 +36,27 @@ ctxvault init my-vault --embedding-model all-mpnet-base-v2   # custom embedding 
 
 ---
 
+## `config`
+Set per-vault options. Without a flag it prints what is set.
+
+```bash
+ctxvault config <vault> [--sync-on-query | --no-sync-on-query] [--sync-on-query-interval <seconds>]
+```
+
+**Options:**
+- `--sync-on-query` - Check the vault's files before every query and index what changed. Off by default; only semantic vaults have an index that can drift.
+- `--no-sync-on-query` - Turn the check off.
+- `--sync-on-query-interval <seconds>` - Least time between two checks, for a large vault. `0`, the default, checks every query.
+
+**Example:**
+```bash
+ctxvault config my-vault --sync-on-query
+ctxvault config my-vault --sync-on-query --sync-on-query-interval 30
+ctxvault config my-vault            # prints: sync_on_query: on
+```
+
+---
+
 ## `attach`
 Attach an agent to a vault, granting it access. If the vault is public, attaching
 an agent automatically makes it restricted: only explicitly attached agents will

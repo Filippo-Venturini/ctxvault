@@ -51,3 +51,25 @@ class TestToolSchemas:
         # An agent picks tools by their description: an empty one is a tool it cannot choose.
         for tool in _tools():
             assert (tool.description or "").strip(), f"{tool.name} has no description"
+
+
+def test_query_tool_reports_the_sync_it_ran(monkeypatch):
+    from ctxvault.mcp import server
+    from ctxvault.models.query_result import ChunkMatch, QueryResult, SyncReport
+
+    async def warm():
+        return None
+
+    result = QueryResult(
+        query="anything",
+        results=[ChunkMatch(chunk_id="1", chunk_index=0, text="new text", score=0.0, doc_id="1", source="note.txt")],
+        sync=SyncReport(indexed=["note.txt"], duration_ms=3.0),
+    )
+    monkeypatch.setattr(server, "ensure_warmup", warm)
+    monkeypatch.setattr(server, "check_access", lambda *args: None)
+    monkeypatch.setattr(server.vault_router, "query", lambda **kwargs: result)
+
+    answer = asyncio.run(mcp._tool_manager.get_tool("query").fn("test_vault", "anything"))
+
+    assert answer.sync.indexed == ["note.txt"]
+    assert answer.results[0].text == "new text"
