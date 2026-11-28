@@ -174,7 +174,7 @@ The ✗ in the CtxVault column are real: there is no graph layer and it does not
 
 ## Examples
 
-Seven scenarios, each with full code and setup instructions.
+Eight scenarios, each with full code and setup instructions.
 
 <!-- --8<-- [start:examples] -->
 | # | Example | What it shows |
@@ -186,6 +186,7 @@ Seven scenarios, each with full code and setup instructions.
 | 05 | [**Procedural Memory**](https://github.com/Filippo-Venturini/ctxvault/tree/main/examples/05-procedural-memory-agent/) | One agent, two vault types, semantic and skill, integrated via MCP. Retrieves knowledge for *what* to say and skills for *how* to say it. |
 | 06 | [**Episodic Memory**](https://github.com/Filippo-Venturini/ctxvault/tree/main/examples/06-episodic-memory/) | One account followed across six months. Facts are superseded instead of overwritten, so the briefing uses only what holds today while April is still reconstructable. |
 | 07 | [**Full Memory Topology**](https://github.com/Filippo-Venturini/ctxvault/tree/main/examples/07-full-memory-topology/) | Everything in one place: three agents, six vaults, all three memory types, access rules, a year of facts replayed with their dates. The capstone example, a small bakery, and the dataset behind the [live demo](https://filippo-venturini.github.io/ctxvault/demo.html). |
+| 08 | [**Consolidation**](https://github.com/Filippo-Venturini/ctxvault/tree/main/examples/08-consolidation/) | Conversations turned into episodes by a local model on Ollama, with no extractor written by hand. Replayed with their dates, plus a dry run that writes nothing. |
 <!-- --8<-- [end:examples] -->
 
 ---
