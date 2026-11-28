@@ -6,7 +6,7 @@ local model, with no extractor written by hand. A later conversation changes
 something an earlier one said, and the vault records the change instead of
 overwriting the fact.
 
-    ollama pull llama3.2:3b
+    ollama pull qwen2.5:7b
     python app.py
 
 Needs Ollama running on this machine. Set MODEL to use another model.
@@ -23,7 +23,7 @@ from ctxvault.core.exceptions import VaultNotFoundError
 # directory, and so does the client: this script runs from its own folder
 os.chdir(Path(__file__).parent)
 
-MODEL = os.getenv("MODEL", "llama3.2:3b")
+MODEL = os.getenv("MODEL", "qwen2.5:7b")
 VAULT = "personal-facts"
 
 BOLD, DIM, GREEN, YELLOW, RESET = "\033[1m", "\033[2m", "\033[32m", "\033[33m", "\033[0m"

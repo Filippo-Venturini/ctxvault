@@ -1,8 +1,8 @@
 # 08 · Consolidation
 
 Turn conversations into episodes with a local model. Three short chats on
-different days, a later one changes something an earlier one said, and the
-vault records the change instead of overwriting the fact.
+different days, a later one changes something an earlier one said. When the
+model sees that, the vault records the change instead of overwriting the fact.
 
 Examples 06 and 07 write episodes by hand. This one lets a model read the
 turns and decide what to write, through `ctxvault.consolidation`.
@@ -33,10 +33,10 @@ A fourth conversation (July 5) is only previewed with `dry_run=True`.
 
 ## Setup
 
-You need [Ollama](https://ollama.com) running on this machine and a small model:
+You need [Ollama](https://ollama.com) running on this machine and a model:
 
 ```bash
-ollama pull llama3.2:3b
+ollama pull qwen2.5:7b
 ```
 
 Then:
@@ -50,7 +50,7 @@ python app.py
 To use another model, set `MODEL`:
 
 ```bash
-MODEL=qwen2.5:7b python app.py
+MODEL=llama3.2:3b python app.py
 ```
 
 No API key is involved. The conversations stay on this machine: the model
@@ -63,8 +63,8 @@ class refuses a remote endpoint unless you pass `allow_remote=True`.
 - Small models make mistakes here. A 3B model can miss a claim, pick the
   wrong relation (`new` where `replaces` was right) or give a date that was
   never said. The layer validates what comes back and never lets the model
-  call a verb, but it cannot make a weak extraction good. The output of your
-  run may differ from the one below, and from run to run on another machine.
+  call a verb, but it cannot make a weak extraction good. The output can
+  differ from one model or machine to another.
 - A small model on CPU is slow. `app.py` sets `timeout=600` per call
   because the default of two minutes can be too short.
 - Nothing a run does is destructive. A wrong supersede can be undone with
@@ -82,16 +82,12 @@ relation labels map to verbs.
 
 ## Observed
 
-Run with `llama3.2:1b` on Ollama (Docker, CPU only), prompts `en-2`, ctxvault 0.10.0.
-The 3B model was too slow on this machine (about 0.6 tokens/s) to finish a run.
+The default model, `qwen2.5:7b`, has not been run for this example yet, so no
+output is shown for it.
 
-- Extraction worked: 2 claims per conversation, 0 dropped, no invented dates.
-- Claims stayed first-person ("I moved to Porto last week"), not rewritten as statements about Giulia.
-- Every claim came back as `new`. "I moved to Porto" did not replace "I live in Lisbon", and "I left Brightline" did not close "works at Brightline".
-- As a result nothing was superseded, all 6 episodes stay open, and the history section has no changed fact to show.
-- The dry run behaved as documented: 2 planned operations, 6 episodes before and after.
-
-The output depends on the model. A larger one may relate the claims correctly.
+Caveat from an earlier run with `llama3.2:1b` (CPU only, prompts `en-2`,
+ctxvault 0.10.0): small models can miss relations. It extracted the claims but
+labelled every one `new`, so nothing was superseded.
 
 ---
 
